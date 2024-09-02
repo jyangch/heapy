@@ -281,10 +281,10 @@ class ppTxx(ppSignal):
         if self.sort_res is None:
             self.loop(sigma=sigma)
 
-        self.ncts = self.cts - self.bcts
+        self.ncts = self.cts - self.bcts * self.backscale
         self.net = self.rate - self.bak
 
-        self.re_ncts = self.re_cts - self.re_bcts
+        self.re_ncts = self.re_cts - self.re_bcts * self.backscale
         self.re_net = self.re_ncts / self.re_binsize
 
         start, stop = (0, 0)
@@ -341,7 +341,7 @@ class ppTxx(ppSignal):
         self.nmc = int(nmc)
         self.mc_ncts = [self.ncts]
         for _ in range(self.nmc):
-            ppmc = np.random.poisson(lam=self.cts) - np.random.poisson(lam=self.bcts)
+            ppmc = np.random.poisson(lam=self.cts) - np.random.poisson(lam=self.bcts) * self.backscale
             self.mc_ncts.append(ppmc)
         
 
