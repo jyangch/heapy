@@ -301,8 +301,8 @@ class epXselect(object):
         self.fig = go.Figure()
         src = go.Scatter(x=src_time, 
                          y=src_rate, 
-                         mode='lines+markers', 
-                         line_shape='hvh', 
+                         mode='markers', 
+                         # line_shape='hvh', 
                          name='src', 
                          showlegend=True, 
                          error_y=dict(
@@ -313,8 +313,8 @@ class epXselect(object):
                          marker=dict(symbol='circle', size=3))
         bkg = go.Scatter(x=bkg_time, 
                          y=bkg_rate, 
-                         mode='lines+markers', 
-                         line_shape='hvh', 
+                         mode='markers', 
+                         # line_shape='hvh', 
                          name='bkg', 
                          showlegend=True, 
                          error_y=dict(
@@ -325,8 +325,8 @@ class epXselect(object):
                          marker=dict(symbol='circle', size=3))
         net = go.Scatter(x=src_time, 
                          y=src_rate - bkg_rate, 
-                         mode='lines+markers', 
-                         line_shape='hvh', 
+                         mode='markers', 
+                         # line_shape='hvh', 
                          name='net', 
                          showlegend=True, 
                          error_y=dict(
