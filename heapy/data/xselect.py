@@ -33,7 +33,6 @@ class epXselect(object):
             evtfile = rtv.rtv_res['evt']
             regfile = rtv.rtv_res['reg']
             bkregfile = rtv.rtv_res['bkreg']
-            armregfile = rtv.rtv_res['armreg']
             
         elif isinstance(rtv, dict):
             if 'evt' in rtv:
@@ -303,9 +302,13 @@ class epXselect(object):
         src = go.Scatter(x=src_time, 
                          y=src_rate, 
                          mode='markers', 
-                         # line_shape='hvh', 
                          name='src', 
                          showlegend=True, 
+                         error_x=dict(
+                             type='data',
+                             array=np.ones_like(src_time) * size / 2, 
+                             thickness=1.5,
+                             width=0), 
                          error_y=dict(
                              type='data',
                              array=src_error,
@@ -315,9 +318,13 @@ class epXselect(object):
         bkg = go.Scatter(x=bkg_time, 
                          y=bkg_rate, 
                          mode='markers', 
-                         # line_shape='hvh', 
                          name='bkg', 
                          showlegend=True, 
+                         error_x=dict(
+                             type='data',
+                             array=np.ones_like(src_time) * size / 2, 
+                             thickness=1.5,
+                             width=0), 
                          error_y=dict(
                              type='data',
                              array=bkg_error,
@@ -327,9 +334,13 @@ class epXselect(object):
         net = go.Scatter(x=src_time, 
                          y=src_rate - bkg_rate, 
                          mode='markers', 
-                         # line_shape='hvh', 
-                         name='net', 
+                         name='src-bkg', 
                          showlegend=True, 
+                         error_x=dict(
+                             type='data',
+                             array=np.ones_like(src_time) * size / 2, 
+                             thickness=1.5,
+                             width=0), 
                          error_y=dict(
                              type='data',
                              array=np.sqrt(src_error ** 2 + bkg_error ** 2),
@@ -342,7 +353,7 @@ class epXselect(object):
         self.fig.add_trace(net)
         
         self.fig.update_xaxes(title_text=f'Time since {ep_met_to_utc(self.timezero)} (s)')
-        self.fig.update_yaxes(title_text='Counts per second')
+        self.fig.update_yaxes(title_text=f'Counts per second (binsize={size} s)')
         self.fig.update_layout(template='plotly_white', height=600, width=800)
         
         self.fig.write_html(lc_dir + '/lcfig.html')
