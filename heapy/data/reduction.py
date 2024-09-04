@@ -102,13 +102,13 @@ class gbmTTE(object):
         self._filter.info()
         
         return None
-        
-        
+    
+    
     def filter(self, expr):
         
         self._filter.eval(expr)
-        
-        
+    
+    
     def time_filter(self, t1, t2, utc=None):
         
         if utc is None:
