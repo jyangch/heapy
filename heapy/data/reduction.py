@@ -89,6 +89,20 @@ class gbmTTE(object):
         
         self._filter = Filter(self._event)
         
+    
+    @property
+    def event(self):
+        
+        return self._filter.evt
+    
+    
+    @property
+    def filter_info(self):
+        
+        self._filter.info()
+        
+        return None
+        
         
     def filter(self, expr):
         
@@ -124,6 +138,16 @@ class gbmTTE(object):
     def clear_filter(self):
         
         self._filter.clear()
+        
+        
+    def to_lc(self):
+        
+        pass
+    
+    
+    def to_pha(self):
+        
+        pass
         
         
         
@@ -215,6 +239,20 @@ class gecamEVT(object):
         
         self._filter = Filter(self._event)
         
+        
+    @property
+    def event(self):
+        
+        return self._filter.evt
+    
+    
+    @property
+    def filter_info(self):
+        
+        self._filter.info()
+        
+        return None
+        
     
     def filter(self, expr):
         
@@ -275,6 +313,8 @@ class Filter(object):
         self._evt = evt
         self.evt = self._evt.copy()
         
+        self.exprs = []
+        
     
     @classmethod
     def from_fits(cls, file, idx=None):
@@ -316,14 +356,20 @@ class Filter(object):
             assert tag in self.tags, msg_format(msg)
             
             print(self.evt[tag].info)
+            
+        print('\n'.join(self.exprs))
 
 
     def eval(self, expr):
         
         flt = eval(expr, {}, self.base)
         self.evt = self.evt[flt]
+        
+        self.exprs.append(expr)
     
     
     def clear(self):
         
-        self.evt = self._evt[:]
+        self.evt = self._evt.copy()
+        
+        self.exprs = []

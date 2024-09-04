@@ -354,6 +354,9 @@ class epRetrieve(Retrieve):
         rmf_fm = 'ep*.rmf'
         rmf_file = cls.findfile(link, rmf_fm)
         
+        armreg_fm = 'ep*arm.reg'
+        armreg_file = cls.findfile(link, armreg_fm)
+        
         arf_fm = 'ep*' + srcid + '.arf'
         arf_file = cls.findfile(link, arf_fm)
         
@@ -375,7 +378,7 @@ class epRetrieve(Retrieve):
 
         rtv_res = {'satelite': 'WXT', 'obsname': obsname, 'srcid': srcid, 
                    'evt': evt_file, 'rmf': rmf_file, 'arf': arf_file, 
-                   'reg': reg_file, 'bkreg': bkreg_file}
+                   'armreg': armreg_file, 'reg': reg_file, 'bkreg': bkreg_file}
         
         rtv = cls(rtv_res)
         

@@ -33,6 +33,7 @@ class epXselect(object):
             evtfile = rtv.rtv_res['evt']
             regfile = rtv.rtv_res['reg']
             bkregfile = rtv.rtv_res['bkreg']
+            armregfile = rtv.rtv_res['armreg']
             
         elif isinstance(rtv, dict):
             if 'evt' in rtv:
