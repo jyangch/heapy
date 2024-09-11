@@ -89,7 +89,7 @@ class epXselect(object):
         
         self._regfile = new_regfile
         
-        self._regtxt = self._regfile + '.txt'
+        self._regtxt = self._regfile[:-4] + '.txt'
         
         if not os.path.isfile(self._regtxt):
             msg = 'reg text file is not found.'
@@ -112,7 +112,7 @@ class epXselect(object):
         
         self._bkregfile = new_bkregfile
         
-        self._bkregtxt = self._bkregfile + '.txt'
+        self._bkregtxt = self._bkregfile[:-4] + '.txt'
         
         if not os.path.isfile(self._bkregtxt):
             msg = 'bkreg text file is not found.'
