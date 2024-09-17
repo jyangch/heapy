@@ -3,8 +3,8 @@ from astropy import table
 from astropy.io import fits
 from astropy import units as u
 from .retrieve import gbmRetrieve, gecamRetrieve
-from ..util.time import fermi_utc_to_met, gecam_utc_to_met
 from ..util.data import msg_format, ch_to_energy
+from ..util.time import fermi_utc_to_met, gecam_utc_to_met
 
 
 

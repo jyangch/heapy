@@ -7,6 +7,7 @@ from .data import msg_format
 
 
 def transpose(data):
+    
     if len(data[0]) == 0:
         return data
     trans_data = [[row[col] for row in data] for col in range(len(data[0]))]
@@ -14,6 +15,7 @@ def transpose(data):
 
 
 def fill2D(data, fill_value='--'):
+    
     if type(data[0]) is not list and (type(data[0]) is not np.ndarray):
         msg = 'data should be 2-D list or array'
         warnings.warn(msg_format(msg), UserWarning, stacklevel=2)
@@ -25,6 +27,7 @@ def fill2D(data, fill_value='--'):
 
 
 def pop2D(data, pop_value='--'):
+    
     if type(data[0]) is not list and (type(data[0]) is not np.ndarray):
         msg = 'data should be 2-D list or array'
         warnings.warn(msg_format(msg), UserWarning, stacklevel=2)
@@ -36,6 +39,7 @@ def pop2D(data, pop_value='--'):
 
 
 def savetxt(file, data, fmt=None, trans=False, header=None):
+    
     if data is None:
         data = [[]]
     elif len(data) == 0:
@@ -103,6 +107,7 @@ def savetxt(file, data, fmt=None, trans=False, header=None):
 
 
 def loadtxt(file, fmt=None, trans=False):
+    
     data = []
     f = open(file, 'r')
     for line in f:
@@ -156,12 +161,14 @@ def loadtxt(file, fmt=None, trans=False):
 
 
 def cat(file):
+    
     with open(file) as f_obj:
         for line in f_obj:
             print(line.rstrip())
 
 
 def copy(f1, f2):
+    
     if os.path.isfile(f1):
         sp.call('cp -rf ' + f1 + ' ' + f2, shell=True)
     else:
@@ -172,6 +179,7 @@ def copy(f1, f2):
 
 
 def searchfile(keywords, root):
+    
     filelist = []
     for root, dirs, files in os.walk(root):
         for name in files:
@@ -195,22 +203,28 @@ def searchfile(keywords, root):
         warnings.warn(msg_format(msg), UserWarning, stacklevel=2)
 
 
-def findfile(dir1, feature):
-    if (os.path.exists(dir1)):
-        dirnames = os.listdir(dir1)
+def findfile(dir, feature):
+    
+    if (os.path.exists(dir)):
+        dirnames = os.listdir(dir)
         filelist = []
         fil_number = 0
         fil_result_number = 0
         featurelist = [i for i in re.split('[*]', feature) if i != '']
         for_number = len(featurelist)
         fileresult = [[] for i in range(for_number)]
+        
         for eve in range(for_number):
+            
             if (eve == 0):
+                
                 fe_number = len(featurelist[eve])
+                
                 for sample in dirnames:
-                    if (os.path.isfile(dir1 + sample)):
+                    if (os.path.isfile(dir + sample)):
                         filelist.append(sample)
                         fil_number = fil_number + 1
+                        
                 if (fil_number != 0):
                     for i in filelist:
                         i_number = len(i)
@@ -220,18 +234,24 @@ def findfile(dir1, feature):
                                 fileresult[eve].append(i)
                                 fil_result_number = fil_result_number + 1
                                 break
+                            
                     if (fil_result_number == 0):
-                        msg = 'do not find any file that has the feature with [' + feature + ']'
+                        msg = 'can not find any file with the feature:' + '\n' + feature
                         warnings.warn(msg_format(msg), UserWarning, stacklevel=2)
-                        return []
+                        return None
+                    
                     else:
                         fil_result_number = 0
+                        
                 else:
                     msg = 'there is no file in this dir'
                     warnings.warn(msg_format(msg), UserWarning, stacklevel=2)
-                    return []
+                    return None
+                
             else:
+                
                 fe_number = len(featurelist[eve])
+                
                 for i in fileresult[eve - 1]:
                     i_number = len(i)
                     n = i_number - fe_number + 1
@@ -240,37 +260,35 @@ def findfile(dir1, feature):
                             fileresult[eve].append(i)
                             fil_result_number = fil_result_number + 1
                             break
+                        
                 if (fil_result_number == 0):
-                    msg = 'do not find any file that has the feature with [' + feature + ']'
+                    msg = 'can not find any file with the feature:' + '\n' + feature
                     warnings.warn(msg_format(msg), UserWarning, stacklevel=2)
-                    return []
+                    return None
+                
                 else:
                     fil_result_number = 0
-        return fileresult[for_number - 1]
-    else:
-        msg = 'do not find the dir named [' + dir1 + ']'
-        warnings.warn(msg_format(msg), UserWarning, stacklevel=2)
-        return False
-
-
-def findcheck(file, path):
-    if file is not False:
-        if len(file) > 0:
-            if len(file) > 1:
-                msg = 'may find needless file:\n%s\nwill only keep last one' % '\n'.join(file)
-                warnings.warn(msg_format(msg), UserWarning, stacklevel=2)
-                file = [name for name in file if name[0] != '.']
-            filepath = path + file[-1]
-        else:
-            msg = 'can not find this file'
+                    
+        file = fileresult[for_number - 1]
+        
+        if len(file) > 1:
+            msg = 'may find needless file:' + '\n' \
+                + '%s\n' % '\n'.join(file) \
+                    + 'will only keep the last one'
             warnings.warn(msg_format(msg), UserWarning, stacklevel=2)
-            filepath = None
+            file = [name for name in file if name[0] != '.']
+        filepath = dir + file[-1]
+        
+        return filepath
+    
     else:
-        filepath = None
-    return filepath
+        msg = 'can not find the dir named [' + dir + ']'
+        warnings.warn(msg_format(msg), UserWarning, stacklevel=2)
+        return None
 
 
 def getfilelist(dir1):
+    
     if (os.path.exists(dir1)):
         dirnames = os.listdir(dir1)
         dirlist = []

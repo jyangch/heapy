@@ -184,23 +184,9 @@ class epXselect(object):
         stdout, stderr = process.communicate(input='\n'.join(commands) + '\nexit\n')
 
         return stdout, stderr
-    
-    
-    @staticmethod
-    def _run_xselect_(commands, xselect_script, log_file):
-        
-        with open(xselect_script, 'w') as file:
-            for command in commands:
-                file.write(command + '\n')
-
-        with open(log_file, 'w') as logfile:
-            subprocess.run(['xselect', '@' + xselect_script], 
-                           check=True, 
-                           stdout=logfile, 
-                           stderr=logfile)
 
 
-    def extract_events(self, std=True):
+    def extract_events(self, time_bin, std=True):
         
         evt_dir = os.path.dirname(self.evtfile) + '/events'
         
@@ -216,11 +202,18 @@ class epXselect(object):
         src_evtfile = evt_dir + '/src.evt'
         bkg_evtfile = evt_dir + '/bkg.evt'
         
+        scc_start = self.timezero + time_bin[0]
+        scc_stop = self.timezero + time_bin[1]
+        
         commands = ['xsel', 
                     'read events', 
                     os.path.dirname(self.evtfile), 
                     self.evtfile.split('/')[-1], 
                     'yes', 
+                    'filter time scc', 
+                    f'{scc_start}, {scc_stop}', 
+                    'x', 
+                    'filter pha_cutoff 50 400', 
                     f'filter region {self.regfile}', 
                     'extract events', 
                     f'save events {src_evtfile}', 
@@ -239,7 +232,7 @@ class epXselect(object):
             print(stderr)
             
             
-    def extract_curve(self, bin, size=5, std=True):
+    def extract_curve(self, time_bin, time_binsize=5, pha_bin=[50, 400], std=True):
         
         lc_dir = os.path.dirname(self.evtfile) + '/curve'
         
@@ -255,8 +248,10 @@ class epXselect(object):
         src_lcfile = lc_dir + '/src.lc'
         bkg_lcfile = lc_dir + '/bkg.lc'
         
-        scc_start = self.timezero + bin[0]
-        scc_stop = self.timezero + bin[1]
+        scc_start = self.timezero + time_bin[0]
+        scc_stop = self.timezero + time_bin[1]
+        
+        pha_start, pha_stop = [int(pha) for pha in pha_bin]
         
         commands = ['xsel', 
                     'read events', 
@@ -266,14 +261,14 @@ class epXselect(object):
                     'filter time scc', 
                     f'{scc_start}, {scc_stop}', 
                     'x', 
-                    'filter pha_cutoff 50 400', 
+                    f'filter pha_cutoff {pha_start} {pha_stop}', 
                     f'filter region {self.regfile}', 
-                    f'set binsize {size}', 
+                    f'set binsize {time_binsize}', 
                     'extract curve', 
                     f'save curve {src_lcfile}', 
                     'clear region', 
                     f'filter region {self.bkregfile}', 
-                    f'set binsize {size}', 
+                    f'set binsize {time_binsize}', 
                     'extract curve', 
                     f'save curve {bkg_lcfile}']
         
@@ -297,16 +292,21 @@ class epXselect(object):
         bkg_time = bkg_lc['TIME'] + bkg_timezero - self.timezero
         bkg_rate = bkg_lc['RATE'] * self.regratio
         bkg_error = bkg_lc['ERROR'] * self.regratio
+        bkg_hdu.close()
         
-        self.fig = go.Figure()
+        net_rate = src_rate - bkg_rate
+        net_cts = net_rate * time_binsize
+        net_error = np.sqrt(src_error ** 2 + bkg_error ** 2)
+        
+        fig = go.Figure()
         src = go.Scatter(x=src_time, 
                          y=src_rate, 
                          mode='markers', 
-                         name='src', 
+                         name='src counts rate', 
                          showlegend=True, 
                          error_x=dict(
                              type='data',
-                             array=np.ones_like(src_time) * size / 2, 
+                             array=np.ones_like(src_time) * time_binsize / 2, 
                              thickness=1.5,
                              width=0), 
                          error_y=dict(
@@ -318,11 +318,11 @@ class epXselect(object):
         bkg = go.Scatter(x=bkg_time, 
                          y=bkg_rate, 
                          mode='markers', 
-                         name='bkg', 
+                         name='bkg counts rate', 
                          showlegend=True, 
                          error_x=dict(
                              type='data',
-                             array=np.ones_like(src_time) * size / 2, 
+                             array=np.ones_like(src_time) * time_binsize / 2, 
                              thickness=1.5,
                              width=0), 
                          error_y=dict(
@@ -332,34 +332,53 @@ class epXselect(object):
                              width=0), 
                          marker=dict(symbol='circle', size=3))
         net = go.Scatter(x=src_time, 
-                         y=src_rate - bkg_rate, 
+                         y=net_rate, 
                          mode='markers', 
-                         name='src-bkg', 
+                         name='net counts rate', 
                          showlegend=True, 
                          error_x=dict(
                              type='data',
-                             array=np.ones_like(src_time) * size / 2, 
+                             array=np.ones_like(src_time) * time_binsize / 2, 
                              thickness=1.5,
                              width=0), 
                          error_y=dict(
                              type='data',
-                             array=np.sqrt(src_error ** 2 + bkg_error ** 2),
+                             array=net_error,
                              thickness=1.5,
                              width=0), 
                          marker=dict(symbol='circle', size=3))
         
-        self.fig.add_trace(src)
-        self.fig.add_trace(bkg)
-        self.fig.add_trace(net)
+        fig.add_trace(src)
+        fig.add_trace(bkg)
+        fig.add_trace(net)
         
-        self.fig.update_xaxes(title_text=f'Time since {ep_met_to_utc(self.timezero)} (s)')
-        self.fig.update_yaxes(title_text=f'Counts per second (binsize={size} s)')
-        self.fig.update_layout(template='plotly_white', height=600, width=800)
+        fig.update_xaxes(title_text=f'Time since {ep_met_to_utc(self.timezero)} (s)')
+        fig.update_yaxes(title_text=f'Counts per second (binsize={time_binsize} s)')
+        fig.update_layout(template='plotly_white', height=600, width=800)
+        fig.update_layout(legend=dict(x=1, y=1, xanchor='right', yanchor='bottom'))
         
-        self.fig.write_html(lc_dir + '/lcfig.html')
+        fig.write_html(lc_dir + '/lc.html')
+        
+        net_ccts = np.cumsum(net_cts)
+        
+        fig = go.Figure()
+        net = go.Scatter(x=src_time, 
+                         y=net_ccts, 
+                         mode='lines', 
+                         name='net cumulated counts', 
+                         showlegend=True)
+        
+        fig.add_trace(net)
+        
+        fig.update_xaxes(title_text=f'Time since {ep_met_to_utc(self.timezero)} (s)')
+        fig.update_yaxes(title_text=f'Cumulated counts (binsize={time_binsize} s)')
+        fig.update_layout(template='plotly_white', height=600, width=800)
+        fig.update_layout(legend=dict(x=1, y=1, xanchor='right', yanchor='bottom'))
+        
+        fig.write_html(lc_dir + '/cum_lc.html')
 
 
-    def extract_spectrum(self, bins, std=True):
+    def extract_spectrum(self, time_bins, std=True):
         
         spec_dir = os.path.dirname(self.evtfile) + '/spectrum'
         
@@ -375,10 +394,10 @@ class epXselect(object):
         json.dump(self.timezero, open(spec_dir + '/timezero.json', 'w'), 
                   indent=4, cls=NpEncoder)
         
-        json.dump(bins, open(spec_dir + '/bins.json', 'w'), 
+        json.dump(time_bins, open(spec_dir + '/time_bins.json', 'w'), 
                   indent=4, cls=NpEncoder)
         
-        for i, bin in enumerate(bins):
+        for i, bin in enumerate(time_bins):
         
             scc_start = self.timezero + bin[0]
             scc_stop = self.timezero + bin[1]
