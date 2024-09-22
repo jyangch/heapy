@@ -242,8 +242,10 @@ class PolyBase(object):
                 if not (u <= low or l >= upp):
                     self.re_sig_index.append(i)
         self.re_sig_index = np.unique(self.re_sig_index).astype(int)
+        
+        self.ignore = union(self.re_bad_int + self.re_sig_int)
 
-        self.sort_res = {'sigma': self.sigma, 
+        self.sort_res = {'sigma': self.sigma, 'ignore': self.ignore, 
                          're_bkg': (self.re_bkg_int, self.re_bkg_idx), 
                          're_sig': (self.re_sig_int, self.re_sig_idx, self.re_sig_index),
                          're_bad': (self.re_bad_int, self.re_bad_idx, self.re_bad_index)}
@@ -252,7 +254,7 @@ class PolyBase(object):
     def polyfit(self, deg=None, ignore=None):
         if ignore is None:
             if self.sort_res is None: self.sorting()
-            ignore = union(self.re_bad_int + self.re_sig_int)
+            ignore = self.sort_res['ignore']
 
         ignore_idx = []
         for i, (l, u) in enumerate(zip(self.lbins, self.rbins)):
@@ -267,9 +269,9 @@ class PolyBase(object):
         notice_rbins = np.delete(self.rbins, ignore_idx)
         notice_binsize = notice_rbins - notice_lbins
 
-        poly = Polynomial.set_method('2pass')
-        poly.fit(notice_time, notice_rate, deg=deg, dx=notice_binsize)
-        self.bak, self.bak_se = poly.val(self.time)
+        self.poly = Polynomial.set_method('2pass')
+        self.poly.fit(notice_time, notice_rate, deg=deg, dx=notice_binsize)
+        self.bak, self.bak_se = self.poly.val(self.time)
         self.bak[self.re_bad_index] = 0
         self.bak_se[self.re_bad_index] = 0
 
@@ -279,8 +281,8 @@ class PolyBase(object):
         for t1, t2, n in zip(self.lbins, self.rbins, self.bcts):
             self.bts = np.append(self.bts, np.random.random(size=int(n)) * (t2 - t1) + t1)
 
-        self.poly_res = {'deg': poly.deg,
-                         'fit': poly.ls_res,
+        self.poly_res = {'deg': self.poly.deg,
+                         'fit': self.poly.ls_res,
                          'bts': self.bts, 
                          'bcts': self.bcts, 
                          'bcts_se': self.bcts_se, 
@@ -315,10 +317,6 @@ class PolyBase(object):
         rcParams['font.size'] = 12
         rcParams['pdf.fonttype'] = 42
 
-        print('+-----------------------------------------------+')
-        print(' plotting bbb%s.pdf'%suffix)
-        print('+-----------------------------------------------+\n')
-
         fig, ax = plt.subplots(1, 1, figsize=(8, 5))
         ax.plot(self.time, self.rate, lw=1.0, c='b', label='Light curve')
         ax.plot(self.edges, np.append(self.re_cts/self.re_binsize, [(self.re_cts/self.re_binsize)[-1]]), 
@@ -336,13 +334,9 @@ class PolyBase(object):
         ax.xaxis.set_ticks_position('both')
         ax.yaxis.set_ticks_position('both')
         ax.legend(frameon=False)
-        fig.savefig(savepath + '/bbb%s.pdf'%suffix, bbox_inches='tight', pad_inches=0.1, dpi=300)
+        fig.savefig(savepath + '/bs%s.pdf'%suffix, bbox_inches='tight', pad_inches=0.1, dpi=300)
         if show: plt.show()
         plt.close(fig)
-
-        print('+-----------------------------------------------+')
-        print(' plotting snr%s.pdf'%suffix)
-        print('+-----------------------------------------------+\n')
 
         fig, ax = plt.subplots(1, 1, figsize=(8, 5))
         p1, = ax.plot(self.time, self.rate - self.bak, lw=1.0, c='k', label='Net light curve')
@@ -360,7 +354,7 @@ class PolyBase(object):
         ax1 = ax.twinx()
         p2, = ax1.plot(self.time, self.snr, lw=1.0, c='b', label='SNR', drawstyle='steps-mid')
         p3, = ax1.plot(self.edges, np.append(self.re_snr, [self.re_snr[-1]]), lw=1.0, c='c', 
-                       label='Re-SNR', drawstyle='steps-post')
+                       label='Bayesian block SNR', drawstyle='steps-post')
         p4 = ax1.axhline(self.sigma, lw=1.0, c='grey', ls='--', label='%.1f$\\sigma$' % self.sigma)
         ax1.set_xlim([min(self.time), max(self.time)])
         ax1.set_ylabel('SNR')
@@ -369,10 +363,6 @@ class PolyBase(object):
         fig.savefig(savepath + '/snr%s.pdf'%suffix, bbox_inches='tight', pad_inches=0.1, dpi=300)
         if show: plt.show()
         plt.close(fig)
-
-        print('+-----------------------------------------------+')
-        print(' plotting sort%s.pdf'%suffix)
-        print('+-----------------------------------------------+\n')
 
         fig, ax = plt.subplots(1, 1, figsize=(8, 5))
         colors = []

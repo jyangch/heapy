@@ -3,43 +3,6 @@ import numpy as np
 from .significance import pgsig, ppsig
 
 
-def poisson_binsize(points, time_edge, p):
-    
-    mean_value = float(points) / (time_edge[1] - time_edge[0])
-
-    if mean_value == 0:
-        binsize_p = time_edge[1] - time_edge[0]
-        return binsize_p
-    else:
-        binsize_p = np.log(1 - p) / (-mean_value)
-        if binsize_p > (time_edge[1] - time_edge[0]):
-            binsize_p = time_edge[1] - time_edge[0]
-            return binsize_p
-        elif binsize_p > 1:
-            return np.ceil(binsize_p)
-        elif binsize_p < 1:
-            return binsize_p
-
-
-def ch_to_energy(pi, ch, e1, e2):
-    
-    energy = np.zeros_like(pi)
-    for i, chi in enumerate(ch):
-        chi_idx = np.where(pi == chi)[0]
-        chi_energy = energy_of_ch(len(chi_idx), e1[i], e2[i])
-        energy[chi_idx] = chi_energy
-        
-    return energy
-
-
-def energy_of_ch(n, e1, e2):
-    
-    energy_arr = np.random.random_sample(n)
-    energy = e1 + (e2 - e1) * energy_arr
-    
-    return energy
-
-
 def intersection(A, B):
     
     #A = [[0,2], [5,10], [13,23], [24,25]]

@@ -219,10 +219,6 @@ class pgTxx(PolyBase):
         rcParams['font.size'] = 12
         rcParams['pdf.fonttype'] = 42
 
-        print('+-----------------------------------------------+')
-        print(' plotting txx%s.pdf'%suffix)
-        print('+-----------------------------------------------+\n')
-
         fig = plt.figure(figsize=(7, 6))
         gs = fig.add_gridspec(2, 1, wspace=0, hspace=0)
         ax1 = fig.add_subplot(gs[:1, 0])
@@ -487,10 +483,6 @@ class ppTxx(ppSignal):
         rcParams['text.usetex'] = True
         rcParams['font.size'] = 12
         rcParams['pdf.fonttype'] = 42
-
-        print('+-----------------------------------------------+')
-        print(' plotting txx%s.pdf'%suffix)
-        print('+-----------------------------------------------+\n')
 
         fig = plt.figure(figsize=(7, 6))
         gs = fig.add_gridspec(2, 1, wspace=0, hspace=0)

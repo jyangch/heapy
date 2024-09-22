@@ -54,7 +54,7 @@ class CCF(object):
         # ccfs = np.correlate(y, x, mode='full') / nor
         ccfs = signal.correlate(y, x, mode='full', method='auto') / nor
         return np.array(tau), np.array(ccfs)
-    
+
 
 
 class Lag(CCF):

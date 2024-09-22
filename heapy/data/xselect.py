@@ -8,8 +8,9 @@ from astropy.io import fits
 import plotly.graph_objs as go
 from astropy.table import Table
 from .retrieve import epRetrieve
+from ..util.time import *
 from ..util.data import msg_format, NpEncoder
-from ..util.time import ep_met_to_utc, ep_utc_to_met
+
 
 
 
@@ -186,24 +187,24 @@ class epXselect(object):
         return stdout, stderr
 
 
-    def extract_events(self, time_bin, std=True):
+    def extract_events(self, time_slice, std=True):
         
-        evt_dir = os.path.dirname(self.evtfile) + '/events'
+        evtdir = os.path.dirname(self.evtfile) + '/events'
         
-        if os.path.isdir(evt_dir):
+        if os.path.isdir(evtdir):
             rm = input('events folder exist, remove? > yes[no] ')
             if rm == 'yes' or rm == '':
-                shutil.rmtree(evt_dir)
+                shutil.rmtree(evtdir)
             else:
                 os.exit()
                 
-        os.mkdir(evt_dir)
+        os.mkdir(evtdir)
         
-        src_evtfile = evt_dir + '/src.evt'
-        bkg_evtfile = evt_dir + '/bkg.evt'
+        src_evtfile = evtdir + '/src.evt'
+        bkg_evtfile = evtdir + '/bkg.evt'
         
-        scc_start = self.timezero + time_bin[0]
-        scc_stop = self.timezero + time_bin[1]
+        scc_start = self.timezero + time_slice[0]
+        scc_stop = self.timezero + time_slice[1]
         
         commands = ['xsel', 
                     'read events', 
@@ -227,29 +228,33 @@ class epXselect(object):
         
         stdout, stderr = self._run_xselect(commands)
         
+        self.evtdir = evtdir
+        self.src_evtfile = src_evtfile
+        self.bkg_evtfile = bkg_evtfile
+        
         if std: 
             print(stdout)
             print(stderr)
             
             
-    def extract_curve(self, time_bin, time_binsize=5, pha_bin=[50, 400], std=True):
+    def extract_curve(self, time_slice, time_binsize=5, pha_bin=[50, 400], std=True):
         
-        lc_dir = os.path.dirname(self.evtfile) + '/curve'
+        lcdir = os.path.dirname(self.evtfile) + '/curve'
         
-        if os.path.isdir(lc_dir):
+        if os.path.isdir(lcdir):
             rm = input('curve folder exist, remove? > yes[no] ')
             if rm == 'yes' or rm == '':
-                shutil.rmtree(lc_dir)
+                shutil.rmtree(lcdir)
             else:
                 os.exit()
                 
-        os.mkdir(lc_dir)
+        os.mkdir(lcdir)
         
-        src_lcfile = lc_dir + '/src.lc'
-        bkg_lcfile = lc_dir + '/bkg.lc'
+        src_lcfile = lcdir + '/src.lc'
+        bkg_lcfile = lcdir + '/bkg.lc'
         
-        scc_start = self.timezero + time_bin[0]
-        scc_stop = self.timezero + time_bin[1]
+        scc_start = self.timezero + time_slice[0]
+        scc_stop = self.timezero + time_slice[1]
         
         pha_start, pha_stop = [int(pha) for pha in pha_bin]
         
@@ -274,11 +279,15 @@ class epXselect(object):
         
         stdout, stderr = self._run_xselect(commands)
         
+        self.lcdir = lcdir
+        self.src_lcfile = src_lcfile
+        self.bkg_lcfile = bkg_lcfile
+        
         if std: 
             print(stdout)
             print(stderr)
             
-        src_hdu = fits.open(src_lcfile)
+        src_hdu = fits.open(self.src_lcfile)
         src_timezero = src_hdu['RATE'].header['TIMEZERO']
         src_lc = Table.read(src_hdu['RATE'])
         src_time = src_lc['TIME'] + src_timezero - self.timezero
@@ -286,7 +295,7 @@ class epXselect(object):
         src_error = src_lc['ERROR']
         src_hdu.close()
         
-        bkg_hdu = fits.open(bkg_lcfile)
+        bkg_hdu = fits.open(self.bkg_lcfile)
         bkg_timezero = bkg_hdu['RATE'].header['TIMEZERO']
         bkg_lc = Table.read(bkg_hdu['RATE'])
         bkg_time = bkg_lc['TIME'] + bkg_timezero - self.timezero
@@ -357,7 +366,8 @@ class epXselect(object):
         fig.update_layout(template='plotly_white', height=600, width=800)
         fig.update_layout(legend=dict(x=1, y=1, xanchor='right', yanchor='bottom'))
         
-        fig.write_html(lc_dir + '/lc.html')
+        fig.write_html(lcdir + '/lc.html')
+        json.dump(fig.to_dict(), open(lcdir + '/lc.json', 'w'), indent=4, cls=NpEncoder)
         
         net_ccts = np.cumsum(net_cts)
         
@@ -375,10 +385,11 @@ class epXselect(object):
         fig.update_layout(template='plotly_white', height=600, width=800)
         fig.update_layout(legend=dict(x=1, y=1, xanchor='right', yanchor='bottom'))
         
-        fig.write_html(lc_dir + '/cum_lc.html')
+        fig.write_html(lcdir + '/cum_lc.html')
+        json.dump(fig.to_dict(), open(lcdir + '/cum_lc.json', 'w'), indent=4, cls=NpEncoder)
 
 
-    def extract_spectrum(self, time_bins, std=True):
+    def extract_spectrum(self, time_slices, std=True):
         
         spec_dir = os.path.dirname(self.evtfile) + '/spectrum'
         
@@ -391,16 +402,14 @@ class epXselect(object):
                 
         os.mkdir(spec_dir)
             
-        json.dump(self.timezero, open(spec_dir + '/timezero.json', 'w'), 
-                  indent=4, cls=NpEncoder)
+        json.dump(self.timezero, open(spec_dir + '/timezero.json', 'w'), indent=4, cls=NpEncoder)
         
-        json.dump(time_bins, open(spec_dir + '/time_bins.json', 'w'), 
-                  indent=4, cls=NpEncoder)
+        json.dump(time_slices, open(spec_dir + '/time_slices.json', 'w'), indent=4, cls=NpEncoder)
         
-        for i, bin in enumerate(time_bins):
+        for i, slice in enumerate(time_slices):
         
-            scc_start = self.timezero + bin[0]
-            scc_stop = self.timezero + bin[1]
+            scc_start = self.timezero + slice[0]
+            scc_stop = self.timezero + slice[1]
             
             src_specfile = spec_dir + '/int%02d' % i + '.src'
             bkg_specfile = spec_dir + '/int%02d' % i + '.bkg'
@@ -426,3 +435,36 @@ class epXselect(object):
             if std: 
                 print(stdout)
                 print(stderr)
+
+
+    @property
+    def src_evt(self):
+        
+        try:
+            src_hdu = fits.open(self.src_evtfile)
+            
+        except:
+            raise AttributeError('please extract events first')
+        
+        else:
+            src_data = src_hdu['EVENTS'].data
+            src_evt = src_data['TIME'] - self.timezero
+        
+            return src_evt
+        
+        
+    @property
+    def bkg_evt(self):
+        
+        try:
+            bkg_hdu = fits.open(self.bkg_evtfile)
+            
+        except:
+            raise AttributeError('please extract events first')
+        
+        else:
+            bkg_data = bkg_hdu['EVENTS'].data
+            bkg_evt = bkg_data['TIME'] - self.timezero
+        
+            return bkg_evt
+        
