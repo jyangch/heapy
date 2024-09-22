@@ -238,6 +238,7 @@ class Event(Reduction):
         brate, brate_err = Event._polybase_background(self.lc_ts, bins, exps)
         
         nrate = rate - brate
+        ncts = nrate * exps
         nrate_err = np.sqrt(rate_err ** 2 + brate_err ** 2)
         
         fig = go.Figure()
@@ -286,7 +287,25 @@ class Event(Reduction):
         
         fig.write_html(savepath + '/lc.html')
         json.dump(fig.to_dict(), open(savepath + '/lc.json', 'w'), indent=4, cls=NpEncoder)
-
+        
+        nccts = np.cumsum(ncts)
+        
+        fig = go.Figure()
+        net = go.Scatter(x=time, 
+                         y=nccts, 
+                         mode='lines', 
+                         name='net cumulated counts', 
+                         showlegend=True)
+        
+        fig.add_trace(net)
+        
+        fig.update_xaxes(title_text=f'Time since {self.timezero_utc} (s)')
+        fig.update_yaxes(title_text=f'Cumulated counts (binsize={time_binsize} s)')
+        fig.update_layout(template='plotly_white', height=600, width=800)
+        fig.update_layout(legend=dict(x=1, y=1, xanchor='right', yanchor='bottom'))
+        
+        fig.write_html(savepath + '/cum_lc.html')
+        json.dump(fig.to_dict(), open(savepath + '/cum_lc.json', 'w'), indent=4, cls=NpEncoder)
 
 
     def _extract_src_phaii(self, time_slices):
@@ -415,8 +434,10 @@ class Event(Reduction):
                 
     def extract_spectrum(self, time_slices, savepath='./spectrum'):
         
-        self.extract_src_phaii(time_slices, savepath=savepath)
+        if not os.path.exists(savepath):
+            os.makedirs(savepath)
         
+        self.extract_src_phaii(time_slices, savepath=savepath)
         self.extract_bkg_phaii(time_slices, savepath=savepath)
 
 

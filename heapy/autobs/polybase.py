@@ -308,7 +308,7 @@ class PolyBase(object):
         json.dump(self.poly_res, open(savepath + '/poly_res%s.json'%suffix, 'w'), indent=4, cls=NpEncoder)
 
 
-    def savefig(self, savepath, show=False, suffix=''):
+    def savefig(self, savepath, suffix=''):
         if not os.path.exists(savepath):
             os.makedirs(savepath)
 
@@ -335,7 +335,6 @@ class PolyBase(object):
         ax.yaxis.set_ticks_position('both')
         ax.legend(frameon=False)
         fig.savefig(savepath + '/bs%s.pdf'%suffix, bbox_inches='tight', pad_inches=0.1, dpi=300)
-        if show: plt.show()
         plt.close(fig)
 
         fig, ax = plt.subplots(1, 1, figsize=(8, 5))
@@ -361,7 +360,6 @@ class PolyBase(object):
 
         plt.legend(handles=[p1, p2, p3, p4], frameon=False)
         fig.savefig(savepath + '/snr%s.pdf'%suffix, bbox_inches='tight', pad_inches=0.1, dpi=300)
-        if show: plt.show()
         plt.close(fig)
 
         fig, ax = plt.subplots(1, 1, figsize=(8, 5))
@@ -384,5 +382,4 @@ class PolyBase(object):
         ax.xaxis.set_ticks_position('both')
         ax.yaxis.set_ticks_position('both')
         fig.savefig(savepath + '/sort%s.pdf'%suffix, bbox_inches='tight', pad_inches=0.1, dpi=300)
-        if show: plt.show()
         plt.close(fig)

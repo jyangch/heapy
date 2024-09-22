@@ -13,7 +13,6 @@ from ..util.data import msg_format, NpEncoder
 
 
 
-
 class epXselect(object):
     
     def __init__(self, 
@@ -187,21 +186,22 @@ class epXselect(object):
         return stdout, stderr
 
 
-    def extract_events(self, time_slice, std=True):
+    def extract_events(self, time_slice, std=True, savepath=None):
         
-        evtdir = os.path.dirname(self.evtfile) + '/events'
+        if savepath is None:
+            savepath = os.path.dirname(self.evtfile) + '/events'
         
-        if os.path.isdir(evtdir):
-            rm = input('events folder exist, remove? > yes[no] ')
+        if os.path.isdir(savepath):
+            rm = input('savepath exist, remove? > yes[no] ')
             if rm == 'yes' or rm == '':
-                shutil.rmtree(evtdir)
+                shutil.rmtree(savepath)
             else:
                 os.exit()
                 
-        os.mkdir(evtdir)
+        os.mkdir(savepath)
         
-        src_evtfile = evtdir + '/src.evt'
-        bkg_evtfile = evtdir + '/bkg.evt'
+        src_evtfile = savepath + '/src.evt'
+        bkg_evtfile = savepath + '/bkg.evt'
         
         scc_start = self.timezero + time_slice[0]
         scc_stop = self.timezero + time_slice[1]
@@ -228,7 +228,6 @@ class epXselect(object):
         
         stdout, stderr = self._run_xselect(commands)
         
-        self.evtdir = evtdir
         self.src_evtfile = src_evtfile
         self.bkg_evtfile = bkg_evtfile
         
@@ -237,21 +236,22 @@ class epXselect(object):
             print(stderr)
             
             
-    def extract_curve(self, time_slice, time_binsize=5, pha_bin=[50, 400], std=True):
+    def extract_curve(self, time_slice, time_binsize=5, pha_bin=[50, 400], std=True, savepath=None):
         
-        lcdir = os.path.dirname(self.evtfile) + '/curve'
+        if savepath is None:
+            savepath = os.path.dirname(self.evtfile) + '/curve'
         
-        if os.path.isdir(lcdir):
-            rm = input('curve folder exist, remove? > yes[no] ')
+        if os.path.isdir(savepath):
+            rm = input('savepath exist, remove? > yes[no] ')
             if rm == 'yes' or rm == '':
-                shutil.rmtree(lcdir)
+                shutil.rmtree(savepath)
             else:
                 os.exit()
                 
-        os.mkdir(lcdir)
+        os.mkdir(savepath)
         
-        src_lcfile = lcdir + '/src.lc'
-        bkg_lcfile = lcdir + '/bkg.lc'
+        src_lcfile = savepath + '/src.lc'
+        bkg_lcfile = savepath + '/bkg.lc'
         
         scc_start = self.timezero + time_slice[0]
         scc_stop = self.timezero + time_slice[1]
@@ -279,7 +279,6 @@ class epXselect(object):
         
         stdout, stderr = self._run_xselect(commands)
         
-        self.lcdir = lcdir
         self.src_lcfile = src_lcfile
         self.bkg_lcfile = bkg_lcfile
         
@@ -360,15 +359,15 @@ class epXselect(object):
         fig.add_trace(src)
         fig.add_trace(bkg)
         fig.add_trace(net)
-        
+
         fig.update_xaxes(title_text=f'Time since {ep_met_to_utc(self.timezero)} (s)')
         fig.update_yaxes(title_text=f'Counts per second (binsize={time_binsize} s)')
         fig.update_layout(template='plotly_white', height=600, width=800)
         fig.update_layout(legend=dict(x=1, y=1, xanchor='right', yanchor='bottom'))
-        
-        fig.write_html(lcdir + '/lc.html')
-        json.dump(fig.to_dict(), open(lcdir + '/lc.json', 'w'), indent=4, cls=NpEncoder)
-        
+
+        fig.write_html(savepath + '/lc.html')
+        json.dump(fig.to_dict(), open(savepath + '/lc.json', 'w'), indent=4, cls=NpEncoder)
+
         net_ccts = np.cumsum(net_cts)
         
         fig = go.Figure()
@@ -385,34 +384,42 @@ class epXselect(object):
         fig.update_layout(template='plotly_white', height=600, width=800)
         fig.update_layout(legend=dict(x=1, y=1, xanchor='right', yanchor='bottom'))
         
-        fig.write_html(lcdir + '/cum_lc.html')
-        json.dump(fig.to_dict(), open(lcdir + '/cum_lc.json', 'w'), indent=4, cls=NpEncoder)
+        fig.write_html(savepath + '/cum_lc.html')
+        json.dump(fig.to_dict(), open(savepath + '/cum_lc.json', 'w'), indent=4, cls=NpEncoder)
 
 
-    def extract_spectrum(self, time_slices, std=True):
+    def extract_spectrum(self, time_slices, std=True, savepath=None):
         
-        spec_dir = os.path.dirname(self.evtfile) + '/spectrum'
+        if savepath is None:
+            savepath = os.path.dirname(self.evtfile) + '/spectrum'
         
-        if os.path.isdir(spec_dir):
-            rm = input('spectrum folder exist, remove? > yes[no] ')
+        if os.path.isdir(savepath):
+            rm = input('savepath exist, remove? > yes[no] ')
             if rm == 'yes' or rm == '':
-                shutil.rmtree(spec_dir)
+                shutil.rmtree(savepath)
             else:
                 os.exit()
                 
-        os.mkdir(spec_dir)
+        os.mkdir(savepath)
             
-        json.dump(self.timezero, open(spec_dir + '/timezero.json', 'w'), indent=4, cls=NpEncoder)
+        json.dump(self.timezero, open(savepath + '/timezero.json', 'w'), indent=4, cls=NpEncoder)
         
-        json.dump(time_slices, open(spec_dir + '/time_slices.json', 'w'), indent=4, cls=NpEncoder)
+        json.dump(time_slices, open(savepath + '/time_slices.json', 'w'), indent=4, cls=NpEncoder)
         
-        for i, slice in enumerate(time_slices):
+        lslices = np.array(time_slices)[:, 0]
+        rslices = np.array(time_slices)[:, 1]
         
-            scc_start = self.timezero + slice[0]
-            scc_stop = self.timezero + slice[1]
+        for l, r in zip(lslices, rslices):
+            scc_start = self.timezero + l
+            scc_stop = self.timezero + r
             
-            src_specfile = spec_dir + '/int%02d' % i + '.src'
-            bkg_specfile = spec_dir + '/int%02d' % i + '.bkg'
+            new_l = '{:+f}'.format(l).replace('-', 'm').replace('.', 'd').replace('+', 'p')
+            new_r = '{:+f}'.format(r).replace('-', 'm').replace('.', 'd').replace('+', 'p')
+            
+            file_name = '-'.join(new_l, new_r)
+            
+            src_specfile = savepath + f'/{file_name}.src'
+            bkg_specfile = savepath + f'/{file_name}.bkg'
         
             commands = ['xsel', 
                         'read events', 
@@ -438,7 +445,7 @@ class epXselect(object):
 
 
     @property
-    def src_evt(self):
+    def src_ts(self):
         
         try:
             src_hdu = fits.open(self.src_evtfile)
@@ -454,7 +461,7 @@ class epXselect(object):
         
         
     @property
-    def bkg_evt(self):
+    def bkg_ts(self):
         
         try:
             bkg_hdu = fits.open(self.bkg_evtfile)
