@@ -213,7 +213,7 @@ class ppSignal(object):
         self.sorting(sigma)
 
 
-    def savedata(self, savepath, suffix=''):
+    def save(self, savepath, suffix=''):
         if not os.path.exists(savepath):
             os.makedirs(savepath)
 
@@ -221,11 +221,6 @@ class ppSignal(object):
         json.dump(self.block_res, open(savepath + '/block_res%s.json'%suffix, 'w'), indent=4, cls=NpEncoder)
         json.dump(self.snr_res, open(savepath + '/snr_res%s.json'%suffix, 'w'), indent=4, cls=NpEncoder)
         json.dump(self.sort_res, open(savepath + '/sort_res%s.json'%suffix, 'w'), indent=4, cls=NpEncoder)
-
-
-    def savefig(self, savepath, suffix=''):
-        if not os.path.exists(savepath):
-            os.makedirs(savepath)
 
         rcParams['font.family'] = 'serif'
         rcParams['font.sans-serif'] = 'Georgia'

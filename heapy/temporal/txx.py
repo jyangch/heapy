@@ -173,7 +173,7 @@ class pgTxx(PolyBase):
         print('+-----------------------------------------------+')
         _ = list(map(print, [' %-12d%-12.3f%-12.3f%-12.3f' % (i+1, t, t_err[0], t_err[1]) 
                              for i, (t, t_err) in enumerate(zip(self.txx, self.txx_err))]))
-        print('+-----------------------------------------------+\n')
+        print('+-----------------------------------------------+')
 
 
     @staticmethod
@@ -201,17 +201,12 @@ class pgTxx(PolyBase):
         return txx, txx1, txx2
 
 
-    def savedata(self, savepath, suffix=''):
+    def save(self, savepath, suffix=''):
         if not os.path.exists(savepath):
             os.makedirs(savepath)
 
         json.dump(self.pulse_res, open(savepath + '/pulse_res%s.json'%suffix, 'w'), indent=4, cls=NpEncoder)
         json.dump(self.txx_res, open(savepath + '/txx_res%s.json'%suffix, 'w'), indent=4, cls=NpEncoder)
-
-
-    def savefig(self, savepath, show=False, suffix=''):
-        if not os.path.exists(savepath):
-            os.makedirs(savepath)
 
         rcParams['font.family'] = 'serif'
         rcParams['font.sans-serif'] = 'Georgia'
@@ -260,7 +255,6 @@ class pgTxx(PolyBase):
         ax2.xaxis.set_ticks_position('both')
         ax2.yaxis.set_ticks_position('both')
         fig.savefig(savepath + '/txx%s.pdf'%suffix, bbox_inches='tight', pad_inches=0.1, dpi=300)
-        if show: plt.show()
         plt.close(fig)
 
 
@@ -438,7 +432,7 @@ class ppTxx(ppSignal):
         print('+-----------------------------------------------+')
         _ = list(map(print, [' %-12d%-12.3f%-12.3f%-12.3f' % (i+1, t, t_err[0], t_err[1]) 
                              for i, (t, t_err) in enumerate(zip(self.txx, self.txx_err))]))
-        print('+-----------------------------------------------+\n')
+        print('+-----------------------------------------------+')
 
 
     @staticmethod
@@ -466,17 +460,12 @@ class ppTxx(ppSignal):
         return txx, txx1, txx2
     
     
-    def savedata(self, savepath, suffix=''):
+    def save(self, savepath, suffix=''):
         if not os.path.exists(savepath):
             os.makedirs(savepath)
 
         json.dump(self.pulse_res, open(savepath + '/pulse_res%s.json'%suffix, 'w'), indent=4, cls=NpEncoder)
         json.dump(self.txx_res, open(savepath + '/txx_res%s.json'%suffix, 'w'), indent=4, cls=NpEncoder)
-
-
-    def savefig(self, savepath, show=False, suffix=''):
-        if not os.path.exists(savepath):
-            os.makedirs(savepath)
 
         rcParams['font.family'] = 'serif'
         rcParams['font.sans-serif'] = 'Georgia'
@@ -525,5 +514,4 @@ class ppTxx(ppSignal):
         ax2.xaxis.set_ticks_position('both')
         ax2.yaxis.set_ticks_position('both')
         fig.savefig(savepath + '/txx%s.pdf'%suffix, bbox_inches='tight', pad_inches=0.1, dpi=300)
-        if show: plt.show()
         plt.close(fig)

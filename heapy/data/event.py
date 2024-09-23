@@ -5,6 +5,7 @@ from astropy.io import fits
 from astropy.time import Time
 import plotly.graph_objs as go
 from .reduction import Reduction
+from ..temporal.txx import pgTxx
 from ..util.data import NpEncoder
 from ..autobs.polybase import PolyBase
 
@@ -152,6 +153,46 @@ class Event(Reduction):
     
     
     @property
+    def lc_binsize(self):
+        
+        try:
+            self._lc_binsize
+        except AttributeError:
+            return self.lc_interval / 300
+        else:
+            if self._lc_binsize is not None:
+                return self._lc_binsize
+            else:
+                return self.lc_interval / 300
+            
+            
+    @lc_binsize.setter
+    def lc_binsize(self, new_lc_binsize):
+        
+        self._lc_binsize = new_lc_binsize
+        
+        
+    @property
+    def spec_binsize(self):
+        
+        try:
+            self._spec_binsize
+        except AttributeError:
+            return self.spec_interval / 200
+        else:
+            if self._spec_binsize is not None:
+                return self._spec_binsize
+            else:
+                return self.spec_interval / 200
+            
+            
+    @spec_binsize.setter
+    def spec_binsize(self, new_spec_binsize):
+        
+        self._spec_binsize = new_spec_binsize
+    
+    
+    @property
     def lc_ts(self):
         
         idx = (self.ts >= self.lc_t1t2[0]) & (self.ts <= self.lc_t1t2[1])
@@ -203,13 +244,13 @@ class Event(Reduction):
                 return binsize
     
     
-    def _exposure(self, time_bins):
+    def exposure(self, bin_list):
         
         ts = self._ts
         dtime = self._dtime
         
-        lbins = np.array(time_bins)[:, 0]
-        rbins = np.array(time_bins)[:, 1]
+        lbins = np.array(bin_list)[:, 0]
+        rbins = np.array(bin_list)[:, 1]
         binsize = rbins - lbins
         
         dead_time = np.empty_like(binsize)
@@ -217,64 +258,99 @@ class Event(Reduction):
             dead_time[i] = 1e-6 * np.sum(dtime[(ts >= l) & (ts < r)])
 
         return binsize - dead_time
-
-
-    @staticmethod
-    def _polybase_background(ts, bins, exps, sigma=3, deg=None, t_user=None):
-        
-        bs = PolyBase(ts, bins, exps)
-        bs.loop(sigma=sigma, deg=deg)
-        
-        time = (bins[:-1] + bins[1:]) / 2
-        if t_user is None: t_user = time
-        
-        return bs.poly.val(t_user)
     
     
-    def extract_curve(self, time_binsize, savepath='./curve'):
+    @property
+    def lc_bins(self):
+        
+        return np.arange(self.lc_t1t2[0], self.lc_t1t2[1] + 1e-5, self.lc_binsize)
+    
+    
+    @property
+    def lc_bin_list(self):
+        
+        lbins, rbins = self.lc_bins[:-1], self.lc_bins[1:]
+        
+        return np.vstack((lbins, rbins)).T
+    
+    
+    @property
+    def lc_exps(self):
+        
+        return self.exposure(self.lc_bin_list)
+    
+    
+    @property
+    def lc_time(self):
+        
+        return np.mean(self.lc_bin_list, axis=1)
+    
+    
+    @property
+    def lc_cts(self):
+        
+        return np.histogram(self.lc_ts, bins=self.lc_bins)[0]
+    
+    
+    @property
+    def lc_cts_err(self):
+        
+        return np.sqrt(self.lc_cts)
+    
+    
+    @property
+    def lc_rate(self):
+        
+        return self.lc_cts / self.lc_exps
+    
+    
+    @property
+    def lc_rate_err(self):
+        
+        return self.lc_cts_err / self.lc_exps
+    
+    
+    @property
+    def lc_bs(self):
+        
+        lc_bs = PolyBase(self.lc_ts, self.lc_bins, self.lc_exps)
+        lc_bs.loop(sigma=3, deg=None)
+        
+        return lc_bs
+    
+    
+    def extract_curve(self, savepath='./curve'):
         
         if not os.path.exists(savepath):
             os.makedirs(savepath)
+            
+        self.lc_bs.save(savepath=savepath + '/polybase')
         
-        bins = np.arange(self.lc_t1t2[0], self.lc_t1t2[1] + 1e-5, time_binsize)
-        lbins, rbins = bins[:-1], bins[1:]
-        bins_list = np.vstack((lbins, rbins)).T
+        lc_brate, lc_brate_err = self.lc_bs.poly.val(self.lc_time)
         
-        time = (lbins + rbins) / 2
-        
-        cts, _ = np.histogram(self.lc_ts, bins=bins)
-        cts_err = np.sqrt(cts)
-        
-        exps = self._exposure(bins_list)
-        
-        rate = cts / exps
-        rate_err = cts_err / exps
-        
-        brate, brate_err = Event._polybase_background(self.lc_ts, bins, exps)
-        
-        nrate = rate - brate
-        ncts = nrate * exps
+        lc_nrate = self.lc_rate - lc_brate
+        lc_ncts = lc_nrate * self.lc_exps
         
         fig = go.Figure()
-        src = go.Scatter(x=time, 
-                         y=rate, 
+        src = go.Scatter(x=self.lc_time, 
+                         y=self.lc_rate, 
                          mode='lines+markers', 
                          name='source lightcurve', 
                          showlegend=True, 
                          error_y=dict(
                              type='data',
-                             array=rate_err,
+                             array=self.lc_rate_err,
                              thickness=1.5,
                              width=0), 
                          marker=dict(symbol='cross-thin', size=0))
-        bkg = go.Scatter(x=time, 
-                         y=brate, 
+        bkg = go.Scatter(x=self.lc_time, 
+                         y=lc_brate, 
                          mode='lines+markers', 
                          name='background lightcurve', 
                          showlegend=True, 
                          error_y=dict(
                              type='data',
-                             array=brate_err,
+                             array=lc_brate_err,
                              thickness=1.5,
                              width=0), 
                          marker=dict(symbol='cross-thin', size=0))
@@ -283,7 +359,7 @@ class Event(Reduction):
         fig.add_trace(bkg)
         
         fig.update_xaxes(title_text=f'Time since {self.timezero_utc} (s)')
-        fig.update_yaxes(title_text=f'Counts per second (binsize={time_binsize} s)')
+        fig.update_yaxes(title_text=f'Counts per second (binsize={self.lc_binsize} s)')
         fig.update_layout(template='plotly_white', height=600, width=800)
         fig.update_layout(legend=dict(x=1, y=1, xanchor='right', yanchor='bottom'))
         
@@ -291,11 +367,11 @@ class Event(Reduction):
         fig.write_html(savepath + '/lc.html')
         json.dump(fig.to_dict(), open(savepath + '/lc.json', 'w'), indent=4, cls=NpEncoder)
         
-        nccts = np.cumsum(ncts)
+        lc_nccts = np.cumsum(lc_ncts)
         
         fig = go.Figure()
-        net = go.Scatter(x=time, 
-                         y=nccts, 
+        net = go.Scatter(x=self.lc_time, 
+                         y=lc_nccts, 
                          mode='lines', 
                          name='net cumulated counts', 
                          showlegend=True)
@@ -303,23 +379,33 @@ class Event(Reduction):
         fig.add_trace(net)
         
         fig.update_xaxes(title_text=f'Time since {self.timezero_utc} (s)')
-        fig.update_yaxes(title_text=f'Cumulated counts (binsize={time_binsize} s)')
+        fig.update_yaxes(title_text=f'Cumulated counts (binsize={self.lc_binsize} s)')
         fig.update_layout(template='plotly_white', height=600, width=800)
         fig.update_layout(legend=dict(x=1, y=1, xanchor='right', yanchor='bottom'))
         
         fig.write_html(savepath + '/cum_lc.html')
         json.dump(fig.to_dict(), open(savepath + '/cum_lc.json', 'w'), indent=4, cls=NpEncoder)
-
-
-    def _extract_src_phaii(self, time_slices):
         
-        num_slices = len(time_slices)
+        
+    def calculate_txx(self, savepath='./duration'):
+        
+        if not os.path.exists(savepath):
+            os.makedirs(savepath)
+        
+        txx = pgTxx(self.lc_ts, self.lc_bins, self.lc_exps)
+        txx.accumcts(self, xx=0.9, mp=True)
+        txx.save(savepath=savepath)
+
+
+    def _extract_src_phaii(self, spec_slices):
+        
+        num_slices = len(spec_slices)
         num_channels = len(self.channel)
         
         phaii = np.empty([num_slices, num_channels])
         
-        lslices = np.array(time_slices)[:, 0]
-        rslices = np.array(time_slices)[:, 1]
+        lslices = np.array(spec_slices)[:, 0]
+        rslices = np.array(spec_slices)[:, 1]
         
         pha_bins = np.arange(np.min(self.channel), np.max(self.channel) + 2, 1)
         
@@ -331,17 +417,17 @@ class Event(Reduction):
         return phaii
     
     
-    def extract_src_phaii(self, time_slices, savepath='./spectrum'):
+    def extract_src_phaii(self, spec_slices, savepath='./spectrum'):
             
-        phaii = self._extract_src_phaii(time_slices)
+        phaii = self._extract_src_phaii(spec_slices)
         
         if not os.path.exists(savepath):
             os.makedirs(savepath)
                 
-        exps = self._exposure(time_slices)
+        exps = self.exposure(spec_slices)
             
-        lslices = np.array(time_slices)[:, 0]
-        rslices = np.array(time_slices)[:, 1]
+        lslices = np.array(spec_slices)[:, 0]
+        rslices = np.array(spec_slices)[:, 1]
     
         for i, (l, r) in enumerate(zip(lslices, rslices)):
             new_l = '{:+.2f}'.format(l).replace('-', 'm').replace('.', 'd').replace('+', 'p')
@@ -356,18 +442,18 @@ class Event(Reduction):
             pha_hdu.writeto(savepath + f'/{file_name}')
                 
                 
-    def _extract_bkg_phaii(self, time_slices):
+    def _extract_bkg_phaii(self, spec_slices):
         
-        num_slices = len(time_slices)
+        num_slices = len(spec_slices)
         num_channels = len(self.channel)
         
         phaii = np.empty([num_slices, num_channels])
         phaii_err = np.empty([num_slices, num_channels])
         
-        lslices = np.array(time_slices)[:, 0]
-        rslices = np.array(time_slices)[:, 1]
+        lslices = np.array(spec_slices)[:, 0]
+        rslices = np.array(spec_slices)[:, 1]
         
-        bins = np.linspace(self.spec_t1t2[0], self.spec_t1t2[1], 200)
+        bins = np.arange(self.spec_t1t2[0], self.spec_t1t2[1]+1e-5, self.spec_binsize)
         
         interp_low = self.spec_t1t2[0] + self.spec_interval / 8
         interp_upp = self.spec_t1t2[1] - self.spec_interval / 8
@@ -442,17 +528,17 @@ class Event(Reduction):
         return phaii, phaii_err
                 
                 
-    def extract_bkg_phaii(self, time_slices, savepath='./spectrum'):
+    def extract_bkg_phaii(self, spec_slices, savepath='./spectrum'):
         
-        phaii, phaii_err = self._extract_bkg_phaii(time_slices)
+        phaii, phaii_err = self._extract_bkg_phaii(spec_slices)
         
         if not os.path.exists(savepath):
             os.makedirs(savepath)
             
-        exps = self._exposure(time_slices)
+        exps = self.exposure(spec_slices)
             
-        lslices = np.array(time_slices)[:, 0]
-        rslices = np.array(time_slices)[:, 1]
+        lslices = np.array(spec_slices)[:, 0]
+        rslices = np.array(spec_slices)[:, 1]
     
         for i, (l, r) in enumerate(zip(lslices, rslices)):
             new_l = '{:+.2f}'.format(l).replace('-', 'm').replace('.', 'd').replace('+', 'p')
@@ -467,13 +553,13 @@ class Event(Reduction):
             pha_hdu.writeto(savepath + f'/{file_name}')
                 
                 
-    def extract_spectrum(self, time_slices, savepath='./spectrum'):
+    def extract_spectrum(self, spec_slices, savepath='./spectrum'):
         
         if not os.path.exists(savepath):
             os.makedirs(savepath)
         
-        self.extract_src_phaii(time_slices, savepath=savepath)
-        self.extract_bkg_phaii(time_slices, savepath=savepath)
+        self.extract_src_phaii(spec_slices, savepath=savepath)
+        self.extract_bkg_phaii(spec_slices, savepath=savepath)
 
 
     def _to_pha_fits(self, pha, pha_err, exp, file_name):

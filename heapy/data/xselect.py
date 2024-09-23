@@ -6,10 +6,11 @@ import subprocess
 import numpy as np
 from astropy.io import fits
 import plotly.graph_objs as go
-from astropy.table import Table
 from .retrieve import epRetrieve
-from ..util.time import *
+from ..temporal.txx import ppTxx
+from ..autobs.ppsignal import ppSignal
 from ..util.data import msg_format, NpEncoder
+from ..util.time import ep_met_to_utc, ep_utc_to_met
 
 
 
@@ -162,27 +163,244 @@ class epXselect(object):
         stdout, stderr = process.communicate(input='\n'.join(commands) + '\nexit\n')
 
         return stdout, stderr
-
-
-    def extract_events(self, time_slice, std=True, savepath=None):
+    
+    
+    @property
+    def src_ts(self):
+        
+        try:
+            src_hdu = fits.open(self.src_evtfile)
+            
+        except AttributeError:
+            raise AttributeError('please extract events first')
+        
+        else:
+            src_data = src_hdu['EVENTS'].data
+            src_evt = src_data['TIME'] - self.timezero
+        
+            return src_evt
+        
+        
+    @property
+    def bkg_ts(self):
+        
+        try:
+            bkg_hdu = fits.open(self.bkg_evtfile)
+            
+        except AttributeError:
+            raise AttributeError('please extract events first')
+        
+        else:
+            bkg_data = bkg_hdu['EVENTS'].data
+            bkg_evt = bkg_data['TIME'] - self.timezero
+        
+            return bkg_evt
+        
+        
+    @property
+    def lc_p1p2(self):
+        
+        try:
+            self._lc_p1p2
+        except AttributeError:
+            return [50, 400]
+        else:
+            if self._lc_p1p2 is not None:
+                return self._lc_p1p2
+            else:
+                return [50, 400]
+        
+        
+    @lc_p1p2.setter
+    def lc_p1p2(self, new_lc_p1p2):
+        
+        if isinstance(new_lc_p1p2, (list, type(None))):
+            self._lc_p1p2 = new_lc_p1p2
+        else:
+            raise ValueError('not expected lc_t1t2 type')
+        
+        
+    @property
+    def lc_t1t2(self):
+        
+        try:
+            self._lc_t1t2
+        except AttributeError:
+            return [np.min(self.src_ts), np.max(self.src_ts)]
+        else:
+            if self._lc_t1t2 is not None:
+                return self._lc_t1t2
+            else:
+                return [np.min(self.src_ts), np.max(self.src_ts)]
+        
+        
+    @lc_t1t2.setter
+    def lc_t1t2(self, new_lc_t1t2):
+        
+        if isinstance(new_lc_t1t2, (list, type(None))):
+            self._lc_t1t2 = new_lc_t1t2
+        else:
+            raise ValueError('not expected lc_t1t2 type')
+    
+    
+    @property
+    def lc_interval(self):
+        
+        return self.lc_t1t2[1] - self.lc_t1t2[0]
+    
+    
+    @property
+    def lc_binsize(self):
+        
+        try:
+            self._lc_binsize
+        except AttributeError:
+            return self.lc_interval / 300
+        else:
+            if self._lc_binsize is not None:
+                return self._lc_binsize
+            else:
+                return self.lc_interval / 300
+            
+            
+    @lc_binsize.setter
+    def lc_binsize(self, new_lc_binsize):
+        
+        self._lc_binsize = new_lc_binsize
+        
+        
+    @property
+    def lc_bins(self):
+        
+        return np.arange(self.lc_t1t2[0], self.lc_t1t2[1] + 1e-5, self.lc_binsize)
+    
+    
+    @property
+    def lc_bin_list(self):
+        
+        lbins, rbins = self.lc_bins[:-1], self.lc_bins[1:]
+        
+        return np.vstack((lbins, rbins)).T
+    
+    
+    @property
+    def lc_time(self):
+        
+        return np.mean(self.lc_bin_list, axis=1)
+    
+    
+    @property
+    def lc_time_err(self):
+        
+        lbins, rbins = self.lc_bins[:-1], self.lc_bins[1:]
+        
+        return (rbins - lbins) / 2
+    
+    
+    @property
+    def src_cts(self):
+        
+        return np.histogram(self.src_ts, bins=self.lc_bins)[0]
+    
+    
+    @property
+    def src_cts_err(self):
+        
+        return np.sqrt(self.src_cts)
+    
+    
+    @property
+    def src_rate(self):
+        
+        return self.src_cts / self.lc_binsize
+    
+    
+    @property
+    def src_rate_err(self):
+        
+        return self.src_cts_err / self.lc_binsize
+    
+    
+    @property
+    def bkg_cts(self):
+        
+        return np.histogram(self.bkg_ts, bins=self.lc_bins)[0]
+    
+    
+    @property
+    def bkg_cts_err(self):
+        
+        return np.sqrt(self.bkg_cts)
+        
+        
+    @property
+    def bkg_rate(self):
+        
+        return self.bkg_cts / self.lc_binsize * self.regratio
+    
+    
+    @property
+    def bkg_rate_err(self):
+        
+        return self.bkg_cts_err / self.lc_binsize * self.regratio
+    
+    
+    @property
+    def net_rate(self):
+        
+        return self.src_rate - self.bkg_rate
+    
+    
+    @property
+    def net_rate_err(self):
+        
+        return np.sqrt(self.src_rate_err ** 2 + self.bkg_rate_err ** 2)
+    
+    
+    @property
+    def net_cts(self):
+        
+        return self.net_rate * self.lc_binsize
+    
+    
+    @property
+    def net_cts_err(self):
+        
+        return self.net_rate_err * self.lc_binsize
+    
+    
+    @property
+    def net_ccts(self):
+        
+        return np.cumsum(self.net_cts)
+    
+    
+    @property
+    def lc_ps(self):
+        
+        lc_ps = ppSignal(self.src_ts, self.bkg_ts, self.lc_bins, backscale=self.regratio)
+        lc_ps.loop(sigma=3)
+        
+        return lc_ps
+            
+            
+    def extract_curve(self, std=False, savepath=None):
         
         if savepath is None:
-            savepath = os.path.dirname(self.evtfile) + '/events'
+            savepath = os.path.dirname(self.evtfile) + '/curve'
         
         if os.path.isdir(savepath):
-            rm = input('savepath exist, remove? > yes[no] ')
-            if rm == 'yes' or rm == '':
-                shutil.rmtree(savepath)
-            else:
-                os.exit()
+            shutil.rmtree(savepath)
                 
         os.mkdir(savepath)
         
+        scc_start = self.timezero + self.lc_t1t2[0]
+        scc_stop = self.timezero + self.lc_t1t2[1]
+        
+        pha_start, pha_stop = [int(pha) for pha in self.lc_p1p2]
+        
         src_evtfile = savepath + '/src.evt'
         bkg_evtfile = savepath + '/bkg.evt'
-        
-        scc_start = self.timezero + time_slice[0]
-        scc_stop = self.timezero + time_slice[1]
         
         commands = ['xsel', 
                     'read events', 
@@ -192,7 +410,7 @@ class epXselect(object):
                     'filter time scc', 
                     f'{scc_start}, {scc_stop}', 
                     'x', 
-                    'filter pha_cutoff 50 400', 
+                    f'filter pha_cutoff {pha_start} {pha_stop}', 
                     f'filter region {self.regfile}', 
                     'extract events', 
                     f'save events {src_evtfile}', 
@@ -212,124 +430,55 @@ class epXselect(object):
         if std: 
             print(stdout)
             print(stderr)
-            
-            
-    def extract_curve(self, time_slice, time_binsize=5, pha_bin=[50, 400], std=True, savepath=None):
         
-        if savepath is None:
-            savepath = os.path.dirname(self.evtfile) + '/curve'
-        
-        if os.path.isdir(savepath):
-            rm = input('savepath exist, remove? > yes[no] ')
-            if rm == 'yes' or rm == '':
-                shutil.rmtree(savepath)
-            else:
-                os.exit()
-                
-        os.mkdir(savepath)
-        
-        src_lcfile = savepath + '/src.lc'
-        bkg_lcfile = savepath + '/bkg.lc'
-        
-        scc_start = self.timezero + time_slice[0]
-        scc_stop = self.timezero + time_slice[1]
-        
-        pha_start, pha_stop = [int(pha) for pha in pha_bin]
-        
-        commands = ['xsel', 
-                    'read events', 
-                    os.path.dirname(self.evtfile), 
-                    self.evtfile.split('/')[-1], 
-                    'yes', 
-                    'filter time scc', 
-                    f'{scc_start}, {scc_stop}', 
-                    'x', 
-                    f'filter pha_cutoff {pha_start} {pha_stop}', 
-                    f'filter region {self.regfile}', 
-                    f'set binsize {time_binsize}', 
-                    'extract curve', 
-                    f'save curve {src_lcfile}', 
-                    'clear region', 
-                    f'filter region {self.bkregfile}', 
-                    f'set binsize {time_binsize}', 
-                    'extract curve', 
-                    f'save curve {bkg_lcfile}']
-        
-        stdout, stderr = self._run_xselect(commands)
-        
-        self.src_lcfile = src_lcfile
-        self.bkg_lcfile = bkg_lcfile
-        
-        if std: 
-            print(stdout)
-            print(stderr)
-            
-        src_hdu = fits.open(self.src_lcfile)
-        src_timezero = src_hdu['RATE'].header['TIMEZERO']
-        src_lc = Table.read(src_hdu['RATE'])
-        src_time = src_lc['TIME'] + src_timezero - self.timezero
-        src_rate = src_lc['RATE']
-        src_error = src_lc['ERROR']
-        src_hdu.close()
-        
-        bkg_hdu = fits.open(self.bkg_lcfile)
-        bkg_timezero = bkg_hdu['RATE'].header['TIMEZERO']
-        bkg_lc = Table.read(bkg_hdu['RATE'])
-        bkg_time = bkg_lc['TIME'] + bkg_timezero - self.timezero
-        bkg_rate = bkg_lc['RATE'] * self.regratio
-        bkg_error = bkg_lc['ERROR'] * self.regratio
-        bkg_hdu.close()
-        
-        net_rate = src_rate - bkg_rate
-        net_cts = net_rate * time_binsize
-        net_error = np.sqrt(src_error ** 2 + bkg_error ** 2)
+        self.lc_ps.save(savepath=savepath + '/ppsignal')
         
         fig = go.Figure()
-        src = go.Scatter(x=src_time, 
-                         y=src_rate, 
+        src = go.Scatter(x=self.lc_time, 
+                         y=self.src_rate, 
                          mode='markers', 
                          name='src counts rate', 
                          showlegend=True, 
                          error_x=dict(
                              type='data',
-                             array=np.ones_like(src_time) * time_binsize / 2, 
+                             array=self.lc_time_err, 
                              thickness=1.5,
                              width=0), 
                          error_y=dict(
                              type='data',
-                             array=src_error,
+                             array=self.src_rate_err,
                              thickness=1.5,
                              width=0), 
                          marker=dict(symbol='circle', size=3))
-        bkg = go.Scatter(x=bkg_time, 
-                         y=bkg_rate, 
+        bkg = go.Scatter(x=self.lc_time, 
+                         y=self.bkg_rate, 
                          mode='markers', 
                          name='bkg counts rate', 
                          showlegend=True, 
                          error_x=dict(
                              type='data',
-                             array=np.ones_like(src_time) * time_binsize / 2, 
+                             array=self.lc_time_err, 
                              thickness=1.5,
                              width=0), 
                          error_y=dict(
                              type='data',
-                             array=bkg_error,
+                             array=self.bkg_rate_err,
                              thickness=1.5,
                              width=0), 
                          marker=dict(symbol='circle', size=3))
-        net = go.Scatter(x=src_time, 
-                         y=net_rate, 
+        net = go.Scatter(x=self.lc_time, 
+                         y=self.net_rate, 
                          mode='markers', 
                          name='net counts rate', 
                          showlegend=True, 
                          error_x=dict(
                              type='data',
-                             array=np.ones_like(src_time) * time_binsize / 2, 
+                             array=self.lc_time_err, 
                              thickness=1.5,
                              width=0), 
                          error_y=dict(
                              type='data',
-                             array=net_error,
+                             array=self.net_rate_err,
                              thickness=1.5,
                              width=0), 
                          marker=dict(symbol='circle', size=3))
@@ -339,19 +488,17 @@ class epXselect(object):
         fig.add_trace(net)
 
         fig.update_xaxes(title_text=f'Time since {ep_met_to_utc(self.timezero)} (s)')
-        fig.update_yaxes(title_text=f'Counts per second (binsize={time_binsize} s)')
+        fig.update_yaxes(title_text=f'Counts per second (binsize={self.lc_binsize} s)')
         fig.update_layout(template='plotly_white', height=600, width=800)
         fig.update_layout(legend=dict(x=1, y=1, xanchor='right', yanchor='bottom'))
 
         fig.show()
         fig.write_html(savepath + '/lc.html')
         json.dump(fig.to_dict(), open(savepath + '/lc.json', 'w'), indent=4, cls=NpEncoder)
-
-        net_ccts = np.cumsum(net_cts)
         
         fig = go.Figure()
-        net = go.Scatter(x=src_time, 
-                         y=net_ccts, 
+        net = go.Scatter(x=self.lc_time, 
+                         y=self.net_ccts, 
                          mode='lines', 
                          name='net cumulated counts', 
                          showlegend=True)
@@ -359,34 +506,46 @@ class epXselect(object):
         fig.add_trace(net)
         
         fig.update_xaxes(title_text=f'Time since {ep_met_to_utc(self.timezero)} (s)')
-        fig.update_yaxes(title_text=f'Cumulated counts (binsize={time_binsize} s)')
+        fig.update_yaxes(title_text=f'Cumulated counts (binsize={self.lc_binsize} s)')
         fig.update_layout(template='plotly_white', height=600, width=800)
         fig.update_layout(legend=dict(x=1, y=1, xanchor='right', yanchor='bottom'))
         
         fig.write_html(savepath + '/cum_lc.html')
         json.dump(fig.to_dict(), open(savepath + '/cum_lc.json', 'w'), indent=4, cls=NpEncoder)
+        
+        
+    def calculate_txx(self, savepath=None):
+        
+        if savepath is None:
+            savepath = os.path.dirname(self.evtfile) + '/curve/duration'
+        
+        if os.path.isdir(savepath):
+            shutil.rmtree(savepath)
+                
+        os.mkdir(savepath)
+        
+        txx = ppTxx(self.src_ts, self.bkg_ts, self.lc_bins, self.regratio)
+        txx.mc_simulation(1000)
+        txx.accumcts(self, xx=0.9, mp=True)
+        txx.save(savepath=savepath)
 
 
-    def extract_spectrum(self, time_slices, std=True, savepath=None):
+    def extract_spectrum(self, spec_slices, std=False, savepath=None):
         
         if savepath is None:
             savepath = os.path.dirname(self.evtfile) + '/spectrum'
         
         if os.path.isdir(savepath):
-            rm = input('savepath exist, remove? > yes[no] ')
-            if rm == 'yes' or rm == '':
-                shutil.rmtree(savepath)
-            else:
-                os.exit()
+            shutil.rmtree(savepath)
                 
         os.mkdir(savepath)
             
         json.dump(self.timezero, open(savepath + '/timezero.json', 'w'), indent=4, cls=NpEncoder)
         
-        json.dump(time_slices, open(savepath + '/time_slices.json', 'w'), indent=4, cls=NpEncoder)
+        json.dump(spec_slices, open(savepath + '/spec_slices.json', 'w'), indent=4, cls=NpEncoder)
         
-        lslices = np.array(time_slices)[:, 0]
-        rslices = np.array(time_slices)[:, 1]
+        lslices = np.array(spec_slices)[:, 0]
+        rslices = np.array(spec_slices)[:, 1]
         
         for l, r in zip(lslices, rslices):
             scc_start = self.timezero + l
@@ -421,36 +580,3 @@ class epXselect(object):
             if std: 
                 print(stdout)
                 print(stderr)
-
-
-    @property
-    def src_ts(self):
-        
-        try:
-            src_hdu = fits.open(self.src_evtfile)
-            
-        except:
-            raise AttributeError('please extract events first')
-        
-        else:
-            src_data = src_hdu['EVENTS'].data
-            src_evt = src_data['TIME'] - self.timezero
-        
-            return src_evt
-        
-        
-    @property
-    def bkg_ts(self):
-        
-        try:
-            bkg_hdu = fits.open(self.bkg_evtfile)
-            
-        except:
-            raise AttributeError('please extract events first')
-        
-        else:
-            bkg_data = bkg_hdu['EVENTS'].data
-            bkg_evt = bkg_data['TIME'] - self.timezero
-        
-            return bkg_evt
-        
