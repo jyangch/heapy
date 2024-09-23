@@ -170,23 +170,15 @@ class gbmTTE(Reduction):
 
 
     @classmethod
-    def from_rtv(cls, rtv, det):
+    def from_utc(cls, utc, det):
         
         dets = ['n0','n1','n2','n3','n4','n5','n6','n7','n8','n9','na','nb','b0','b1']
         msg = 'invalid detector: %s' % det
         assert det in dets, msg_format(msg)
+        
+        rtv = gbmRetrieve.from_utc(utc=utc, t1=-200, t2=500)
 
-        if isinstance(rtv, gbmRetrieve):
-            ttefile = rtv.rtv_res['tte'][det]
-        elif isinstance(rtv, dict):
-            if 'tte' in rtv:
-                ttefile = rtv['tte'][det]
-            else:
-                msg = 'tte is not a key of rvt'
-                raise ValueError(msg_format(msg))
-        else:
-            msg = 'rvt is not the expected format'
-            raise ValueError(msg_format(msg))
+        ttefile = rtv.rtv_res['tte'][det]
             
         msg = 'no retrieved tte file'
         assert ttefile != [], msg_format(msg)
@@ -267,19 +259,11 @@ class gecamEVT(Reduction):
 
 
     @classmethod
-    def from_rtv(cls, rtv, det, gain_type):
+    def from_utc(cls, utc, det, gain_type):
+        
+        rtv = gecamRetrieve.from_utc(utc=utc, t1=-200, t2=500)
 
-        if isinstance(rtv, gecamRetrieve):
-            evtfile = rtv.rtv_res['grd_evt']
-        elif isinstance(rtv, dict):
-            if 'tte' in rtv:
-                evtfile = rtv['grd_evt']
-            else:
-                msg = 'grd_evt is not a key of rvt'
-                raise ValueError(msg_format(msg))
-        else:
-            msg = 'rvt is not the expected format'
-            raise ValueError(msg_format(msg))
+        evtfile = rtv.rtv_res['grd_evt']
             
         msg = 'no retrieved evt file'
         assert evtfile != [], msg_format(msg)

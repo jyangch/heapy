@@ -27,35 +27,13 @@ class epXselect(object):
 
 
     @classmethod
-    def from_rtv(cls, rtv):
+    def from_wxtobs(cls, obsname, srcid):
+        
+        rtv = epRetrieve.from_wxtobs(obsname, srcid)
 
-        if isinstance(rtv, epRetrieve):
-            evtfile = rtv.rtv_res['evt']
-            regfile = rtv.rtv_res['reg']
-            bkregfile = rtv.rtv_res['bkreg']
-            
-        elif isinstance(rtv, dict):
-            if 'evt' in rtv:
-                evtfile = rtv['evt']
-            else:
-                msg = 'evt is not a key of rvt'
-                raise ValueError(msg_format(msg))
-            
-            if 'reg' in rtv:
-                regfile = rtv['reg']
-            else:
-                msg = 'reg is not a key of rvt'
-                raise ValueError(msg_format(msg))
-            
-            if 'bkreg' in rtv:
-                bkregfile = rtv['bkreg']
-            else:
-                msg = 'bkreg is not a key of rvt'
-                raise ValueError(msg_format(msg))
-            
-        else:
-            msg = 'rvt is not the expected format'
-            raise ValueError(msg_format(msg))
+        evtfile = rtv.rtv_res['evt']
+        regfile = rtv.rtv_res['reg']
+        bkregfile = rtv.rtv_res['bkreg']
         
         return cls(evtfile, regfile, bkregfile)
     
