@@ -161,7 +161,7 @@ class gbmRetrieve(Retrieve):
     def from_utc(cls, utc, t1, t2, datapath=None):
         
         if datapath is None:
-            datapath = '/data-share/SSS_SHARE/DATA/SHAO_DOWN/data'
+            datapath = '/Users/jyang/Documents/research_works/FermiGBM'
 
         if isinstance(utc, Time) == False:
             utc = Time(utc, format='isot', scale='utc')
