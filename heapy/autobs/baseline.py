@@ -18,12 +18,13 @@ class Baseline(object):
     @classmethod
     def set_method(cls, method='drpls'):
         if method == 'drpls':
-            print(
-'''
-+-----------------+-----------+
-| baseline method |   drpls   |
-+-----------------+-----------+
-''')
+            pass
+#             print(
+# '''
+# +-----------------+-----------+
+# | baseline method |   drpls   |
+# +-----------------+-----------+
+# ''')
         else:
             raise ValueError('invalid method')
         

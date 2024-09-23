@@ -343,6 +343,7 @@ class epXselect(object):
         fig.update_layout(template='plotly_white', height=600, width=800)
         fig.update_layout(legend=dict(x=1, y=1, xanchor='right', yanchor='bottom'))
 
+        fig.show()
         fig.write_html(savepath + '/lc.html')
         json.dump(fig.to_dict(), open(savepath + '/lc.json', 'w'), indent=4, cls=NpEncoder)
 
@@ -391,10 +392,10 @@ class epXselect(object):
             scc_start = self.timezero + l
             scc_stop = self.timezero + r
             
-            new_l = '{:+f}'.format(l).replace('-', 'm').replace('.', 'd').replace('+', 'p')
-            new_r = '{:+f}'.format(r).replace('-', 'm').replace('.', 'd').replace('+', 'p')
+            new_l = '{:+.2f}'.format(l).replace('-', 'm').replace('.', 'd').replace('+', 'p')
+            new_r = '{:+.2f}'.format(r).replace('-', 'm').replace('.', 'd').replace('+', 'p')
             
-            file_name = '-'.join(new_l, new_r)
+            file_name = '-'.join([new_l, new_r])
             
             src_specfile = savepath + f'/{file_name}.src'
             bkg_specfile = savepath + f'/{file_name}.bkg'

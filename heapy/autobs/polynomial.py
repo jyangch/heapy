@@ -12,12 +12,13 @@ class Polynomial(object):
     @classmethod
     def set_method(cls, method='2pass'):
         if method == '2pass':
-            print(
-'''
-+-----------------+-----------+
-| polyfit method  |   2pass   |
-+-----------------+-----------+
-''')
+            pass
+#             print(
+# '''
+# +-----------------+-----------+
+# | polyfit method  |   2pass   |
+# +-----------------+-----------+
+# ''')
         else:
             raise ValueError('invalid method')
         

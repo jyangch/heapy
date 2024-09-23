@@ -272,8 +272,8 @@ class PolyBase(object):
         self.poly = Polynomial.set_method('2pass')
         self.poly.fit(notice_time, notice_rate, deg=deg, dx=notice_binsize)
         self.bak, self.bak_se = self.poly.val(self.time)
-        self.bak[self.re_bad_index] = 0
-        self.bak_se[self.re_bad_index] = 0
+        # self.bak[self.re_bad_index] = 0
+        # self.bak_se[self.re_bad_index] = 0
 
         self.bcts = self.bak * self.exp
         self.bcts_se = self.bak_se * self.exp

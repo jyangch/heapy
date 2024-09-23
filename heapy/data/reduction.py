@@ -1,8 +1,10 @@
+import warnings
 import numpy as np
 from astropy import table
 from astropy.io import fits
 from astropy import units as u
-from .event import Event
+from astropy.units import UnitsWarning
+warnings.simplefilter('ignore', UnitsWarning)
 from .retrieve import gbmRetrieve, gecamRetrieve
 from ..util.data import msg_format
 from ..util.time import fermi_met_to_utc, gecam_met_to_utc
@@ -137,28 +139,9 @@ class Reduction(object):
     @property
     def to_event(self):
         
+        from .event import Event
+        
         return Event(self)
-
-
-    def __add__(self, other):
-        
-        if not isinstance(other, Reduction):
-            raise ValueError('"other" argument should be Reduction type')
-        
-        merge_event = table.vstack([self.event, other.event])
-        merge_event.sort('TIME')
-        
-        cls = Reduction(file=None)
-        cls._event = merge_event
-        cls._timezero = self.timezero
-        cls._filter = Filter(cls._event)
-    
-        return cls
-
-
-    def __radd__(self, other):
-        
-        return self.__add__(other)
 
 
 

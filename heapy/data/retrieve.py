@@ -177,7 +177,7 @@ class gbmRetrieve(Retrieve):
 
         start = '%d-%02d-%02d %02d' % (year_start, month_start, day_start, hour_start)+':00:00'
         stop = '%d-%02d-%02d %02d' % (year_stop, month_stop, day_stop, hour_stop) + ':00:00'
-        dates_perH = pd.date_range(start, stop, freq='H')
+        dates_perH = pd.date_range(start, stop, freq='h')
         dates_perD = pd.date_range(start[:10], stop[:10], freq='D')
 
         if len(dates_perH) > 2:
@@ -190,7 +190,7 @@ class gbmRetrieve(Retrieve):
         cspec_pha_dict = {det:[] for det in dets}
         ctime_pha_dict = {det:[] for det in dets}
 
-        for date in enumerate(dates_perH):
+        for date in dates_perH:
             year = '%d' % date.year
             month = '%.2d' % date.month
             day = '%.2d' % date.day
@@ -203,7 +203,7 @@ class gbmRetrieve(Retrieve):
                 tte_file = cls.findfile(link, tte_fm)
                 tte_dict[det].append(tte_file)
 
-        for date in enumerate(dates_perD):
+        for date in dates_perD:
             year = '%d' % date.year
             month = '%.2d' % date.month
             day = '%.2d' % date.day
@@ -288,7 +288,7 @@ class gecamRetrieve(Retrieve):
 
         start = '%d-%02d-%02d %02d' % (year_start, month_start, day_start, hour_start)+':00:00'
         stop = '%d-%02d-%02d %02d' % (year_stop, month_stop, day_stop, hour_stop) + ':00:00'
-        dates_perH = pd.date_range(start, stop, freq='H')
+        dates_perH = pd.date_range(start, stop, freq='h')
 
         if len(dates_perH) > 2:
             msg = 'the time range is too long'
@@ -299,7 +299,7 @@ class gecamRetrieve(Retrieve):
         grd_btime_list = []
         posatt_list = []
 
-        for date in enumerate(dates_perH):
+        for date in dates_perH:
             year = '%d' % date.year
             month = '%.2d' % date.month
             day = '%.2d' % date.day

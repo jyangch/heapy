@@ -32,6 +32,12 @@ class Event(Reduction):
         self._reduction = new_reduction
         self.__dict__.update(new_reduction.__dict__)
         
+    
+    @property
+    def timezero_utc(self):
+        
+        return self._reduction.timezero_utc
+        
         
     @property
     def _ts(self):
@@ -90,10 +96,15 @@ class Event(Reduction):
     @property
     def lc_t1t2(self):
         
-        if self._lc_t1t2 is not None:
-            return self._lc_t1t2
-        else:
+        try:
+            self._lc_t1t2
+        except AttributeError:
             return [np.min(self.ts), np.max(self.ts)]
+        else:
+            if self._lc_t1t2 is not None:
+                return self._lc_t1t2
+            else:
+                return [np.min(self.ts), np.max(self.ts)]
         
         
     @lc_t1t2.setter
@@ -103,17 +114,22 @@ class Event(Reduction):
             self._lc_t1t2 = new_lc_t1t2
         else:
             raise ValueError('not expected lc_t1t2 type')
-        
-        
+
+
     @property
     def spec_t1t2(self):
         
-        if self._spec_t1t2 is not None:
-            return self._spec_t1t2
-        else:
+        try:
+            self._spec_t1t2
+        except AttributeError:
             return [np.min(self.ts), np.max(self.ts)]
-        
-        
+        else:
+            if self._spec_t1t2 is not None:
+                return self._spec_t1t2
+            else:
+                return [np.min(self.ts), np.max(self.ts)]
+
+
     @spec_t1t2.setter
     def spec_t1t2(self, new_spec_t1t2):
         
@@ -225,7 +241,6 @@ class Event(Reduction):
         bins_list = np.vstack((lbins, rbins)).T
         
         time = (lbins + rbins) / 2
-        time_err = (rbins - lbins) / 2
         
         cts, _ = np.histogram(self.lc_ts, bins=bins)
         cts_err = np.sqrt(cts)
@@ -239,7 +254,6 @@ class Event(Reduction):
         
         nrate = rate - brate
         ncts = nrate * exps
-        nrate_err = np.sqrt(rate_err ** 2 + brate_err ** 2)
         
         fig = go.Figure()
         src = go.Scatter(x=time, 
@@ -252,7 +266,7 @@ class Event(Reduction):
                              array=rate_err,
                              thickness=1.5,
                              width=0), 
-                         marker=dict(symbol='circle', size=0))
+                         marker=dict(symbol='cross-thin', size=0))
         bkg = go.Scatter(x=time, 
                          y=brate, 
                          mode='lines+markers', 
@@ -263,28 +277,17 @@ class Event(Reduction):
                              array=brate_err,
                              thickness=1.5,
                              width=0), 
-                         marker=dict(symbol='circle', size=0))
-        net = go.Scatter(x=time, 
-                         y=nrate, 
-                         mode='lines+markers', 
-                         name='net lightcurve', 
-                         showlegend=True, 
-                         error_y=dict(
-                             type='data',
-                             array=nrate_err,
-                             thickness=1.5,
-                             width=0), 
-                         marker=dict(symbol='circle', size=0))
+                         marker=dict(symbol='cross-thin', size=0))
         
         fig.add_trace(src)
         fig.add_trace(bkg)
-        fig.add_trace(net)
         
         fig.update_xaxes(title_text=f'Time since {self.timezero_utc} (s)')
         fig.update_yaxes(title_text=f'Counts per second (binsize={time_binsize} s)')
         fig.update_layout(template='plotly_white', height=600, width=800)
         fig.update_layout(legend=dict(x=1, y=1, xanchor='right', yanchor='bottom'))
         
+        fig.show()
         fig.write_html(savepath + '/lc.html')
         json.dump(fig.to_dict(), open(savepath + '/lc.json', 'w'), indent=4, cls=NpEncoder)
         
@@ -318,7 +321,7 @@ class Event(Reduction):
         lslices = np.array(time_slices)[:, 0]
         rslices = np.array(time_slices)[:, 1]
         
-        pha_bins = np.arange(np.min(self.channel), np.max(self.channel) + 1, 1)
+        pha_bins = np.arange(np.min(self.channel), np.max(self.channel) + 2, 1)
         
         for i, (l, r) in enumerate(zip(lslices, rslices)):
             pii = self.spec_pha[(self.spec_ts >= l) & (self.spec_ts < r)]
@@ -341,10 +344,10 @@ class Event(Reduction):
         rslices = np.array(time_slices)[:, 1]
     
         for i, (l, r) in enumerate(zip(lslices, rslices)):
-            new_l = '{:+f}'.format(l).replace('-', 'm').replace('.', 'd').replace('+', 'p')
-            new_r = '{:+f}'.format(r).replace('-', 'm').replace('.', 'd').replace('+', 'p')
+            new_l = '{:+.2f}'.format(l).replace('-', 'm').replace('.', 'd').replace('+', 'p')
+            new_r = '{:+.2f}'.format(r).replace('-', 'm').replace('.', 'd').replace('+', 'p')
             
-            file_name = '-'.join(new_l, new_r) + '.src'
+            file_name = '-'.join([new_l, new_r]) + '.src'
             
             pha_hdu = self._to_pha_fits(phaii[i], np.sqrt(phaii[i]), exps[i], file_name)
 
@@ -375,11 +378,13 @@ class Event(Reduction):
         bs.loop(sigma=3, deg=None)
         
         ignore = bs.ignore
-        brate, brate_err = bs.poly.val(interp_time)
+        brate, _ = bs.poly.val(interp_time)
+        
+        brate_sum = np.zeros_like(brate)
         
         max_binsize = int(self.spec_interval / 10 * 10) / 10
         
-        for i, ch in enumerate(range(self.channel)):
+        for i, ch in enumerate(self.channel):
             index = (self.spec_pha == ch)
             ts_i = self.spec_ts[index]
             
@@ -394,7 +399,9 @@ class Event(Reduction):
             bs_i = PolyBase(ts_i, bins_i)
             bs_i.polyfit(deg=None, ignore=ignore)
             
-            brate_i, brate_err_i = bs_i.poly.val(interp_time)
+            brate_i, _ = bs_i.poly.val(interp_time)
+            
+            brate_sum = brate_sum + brate_i
             
             for j, (l, r) in enumerate(zip(lslices, rslices)):
                 
@@ -403,6 +410,34 @@ class Event(Reduction):
                 
                 phaii[j, i] = np.trapz(brate_j, bins_j)
                 phaii_err[j, i] = np.trapz(brate_err_j, bins_j)
+                
+        fig = go.Figure()
+        src = go.Scatter(x=bs.time, 
+                         y=bs.rate, 
+                         mode='lines', 
+                         name='total lightcurve', 
+                         showlegend=True)
+        tot = go.Scatter(x=interp_time, 
+                         y=brate, 
+                         mode='lines', 
+                         name='total background', 
+                         showlegend=True)
+        sum = go.Scatter(x=interp_time, 
+                         y=brate_sum, 
+                         mode='lines', 
+                         name='summing background', 
+                         showlegend=True)
+        
+        fig.add_trace(src)
+        fig.add_trace(tot)
+        fig.add_trace(sum)
+        
+        fig.update_xaxes(title_text=f'Time since {self.timezero_utc} (s)')
+        fig.update_yaxes(title_text=f'Counts per second')
+        fig.update_layout(template='plotly_white', height=600, width=800)
+        fig.update_layout(legend=dict(x=1, y=1, xanchor='right', yanchor='bottom'))
+        
+        fig.show()
                 
         return phaii, phaii_err
                 
@@ -420,10 +455,10 @@ class Event(Reduction):
         rslices = np.array(time_slices)[:, 1]
     
         for i, (l, r) in enumerate(zip(lslices, rslices)):
-            new_l = '{:+f}'.format(l).replace('-', 'm').replace('.', 'd').replace('+', 'p')
-            new_r = '{:+f}'.format(r).replace('-', 'm').replace('.', 'd').replace('+', 'p')
+            new_l = '{:+.2f}'.format(l).replace('-', 'm').replace('.', 'd').replace('+', 'p')
+            new_r = '{:+.2f}'.format(r).replace('-', 'm').replace('.', 'd').replace('+', 'p')
             
-            file_name = '-'.join(new_l, new_r) + '.bkg'
+            file_name = '-'.join([new_l, new_r]) + '.bkg'
             
             pha_hdu = self._to_pha_fits(phaii[i], phaii_err[i], exps[i], file_name)
             
