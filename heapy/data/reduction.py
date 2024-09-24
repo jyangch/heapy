@@ -101,8 +101,20 @@ class Reduction(object):
         else:
             msg = 'not expected type for timezero'
             raise ValueError(msg_format(msg))
-    
-    
+
+
+    def time_slice(self, t1, t2):
+        
+        met_t1 = self.timezero + t1
+        met_t2 = self.timezero + t2
+        
+        met_ts = self._event['TIME']
+        flt = (met_ts >= met_t1) & (met_ts <= met_t2)
+        self._event = self._event[flt]
+        
+        self.time_filter(t1, t2)
+
+
     @property
     def filter_info(self):
         
@@ -357,12 +369,12 @@ class gecamEVT(Reduction):
 
 class Filter(object):
     
-    def __init__(self, evt):
+    def __init__(self, event):
         
         msg = 'evt is not the type of astropy.tabel.Table'
-        assert isinstance(evt, table.Table), msg_format(msg)
+        assert isinstance(event, table.Table), msg_format(msg)
         
-        self._evt = evt
+        self._evt = event
         self.evt = self._evt.copy()
         
         self.exprs = []

@@ -324,9 +324,10 @@ class Event(Reduction):
         if not os.path.exists(savepath):
             os.makedirs(savepath)
             
-        self.lc_bs.save(savepath=savepath + '/polybase')
+        lc_bs = self.lc_bs
+        lc_bs.save(savepath=savepath + '/polybase')
         
-        lc_brate, lc_brate_err = self.lc_bs.poly.val(self.lc_time)
+        lc_brate, lc_brate_err = lc_bs.poly.val(self.lc_time)
         
         lc_nrate = self.lc_rate - lc_brate
         lc_ncts = lc_nrate * self.lc_exps
@@ -387,13 +388,13 @@ class Event(Reduction):
         json.dump(fig.to_dict(), open(savepath + '/cum_lc.json', 'w'), indent=4, cls=NpEncoder)
         
         
-    def calculate_txx(self, savepath='./duration'):
+    def calculate_txx(self, xx=0.9, savepath='./duration'):
         
         if not os.path.exists(savepath):
             os.makedirs(savepath)
         
         txx = pgTxx(self.lc_ts, self.lc_bins, self.lc_exps)
-        txx.accumcts(self, xx=0.9, mp=True)
+        txx.accumcts(xx=xx, mp=True)
         txx.save(savepath=savepath)
 
 
@@ -578,7 +579,7 @@ class Event(Reduction):
         spectrum_hdu.header['TTYPE1'] = ('CHANNEL', 'label for field 1')
         spectrum_hdu.header['TFORM1'] = ('I', 'data format of field: 2-byte INTEGER')
         spectrum_hdu.header['TTYPE2'] = ('COUNTS', 'label for field 2')
-        spectrum_hdu.header['TFORM2'] = ('J', 'data format of field: 4-byte INTEGER')
+        spectrum_hdu.header['TFORM2'] = ('E', 'data format of field: 32-bit SINGLE FLOAT')
         spectrum_hdu.header['TUNIT2'] = ('count', 'physical unit of field')
         spectrum_hdu.header['TTYPE3'] = ('STAT_ERR', 'label for field 3')
         spectrum_hdu.header['TFORM3'] = ('E', 'data format of field: 32-bit SINGLE FLOAT')

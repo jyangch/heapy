@@ -526,7 +526,7 @@ class epXselect(object):
         
         txx = ppTxx(self.src_ts, self.bkg_ts, self.lc_bins, self.regratio)
         txx.mc_simulation(1000)
-        txx.accumcts(self, xx=0.9, mp=True)
+        txx.accumcts(xx=0.9, mp=True)
         txx.save(savepath=savepath)
 
 
