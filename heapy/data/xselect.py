@@ -172,13 +172,13 @@ class epXselect(object):
             src_hdu = fits.open(self.src_evtfile)
             
         except AttributeError:
-            raise AttributeError('please extract events first')
+            raise AttributeError('no src event file')
         
         else:
             src_data = src_hdu['EVENTS'].data
-            src_evt = src_data['TIME'] - self.timezero
+            src_ts = src_data['TIME'] - self.timezero
         
-            return src_evt
+            return src_ts
         
         
     @property
@@ -188,13 +188,13 @@ class epXselect(object):
             bkg_hdu = fits.open(self.bkg_evtfile)
             
         except AttributeError:
-            raise AttributeError('please extract events first')
+            raise AttributeError('no bkg event file')
         
         else:
             bkg_data = bkg_hdu['EVENTS'].data
-            bkg_evt = bkg_data['TIME'] - self.timezero
+            bkg_ts = bkg_data['TIME'] - self.timezero
         
-            return bkg_evt
+            return bkg_ts
         
         
     @property
@@ -384,7 +384,9 @@ class epXselect(object):
         return lc_ps
             
             
-    def extract_curve(self, std=False, savepath=None):
+    def extract_curve(self, std=False, savepath=None, show=False):
+        
+        savepath = os.path.abspath(savepath)
         
         if savepath is None:
             savepath = os.path.dirname(self.evtfile) + '/curve'
@@ -492,7 +494,7 @@ class epXselect(object):
         fig.update_layout(template='plotly_white', height=600, width=800)
         fig.update_layout(legend=dict(x=1, y=1, xanchor='right', yanchor='bottom'))
 
-        fig.show()
+        if show: fig.show()
         fig.write_html(savepath + '/lc.html')
         json.dump(fig.to_dict(), open(savepath + '/lc.json', 'w'), indent=4, cls=NpEncoder)
         
@@ -514,7 +516,9 @@ class epXselect(object):
         json.dump(fig.to_dict(), open(savepath + '/cum_lc.json', 'w'), indent=4, cls=NpEncoder)
         
         
-    def calculate_txx(self, savepath=None):
+    def calculate_txx(self, xx=0.9, savepath=None):
+        
+        savepath = os.path.abspath(savepath)
         
         if savepath is None:
             savepath = os.path.dirname(self.evtfile) + '/curve/duration'
@@ -525,8 +529,7 @@ class epXselect(object):
         os.mkdir(savepath)
         
         txx = ppTxx(self.src_ts, self.bkg_ts, self.lc_bins, self.regratio)
-        txx.mc_simulation(1000)
-        txx.accumcts(xx=0.9, mp=True)
+        txx.accumcts(xx=xx, mp=True)
         txx.save(savepath=savepath)
 
 

@@ -285,29 +285,37 @@ class Event(Reduction):
         
         return np.mean(self.lc_bin_list, axis=1)
     
+
+    @property
+    def lc_time_err(self):
+        
+        lbins, rbins = self.lc_bins[:-1], self.lc_bins[1:]
+        
+        return (rbins - lbins) / 2
+    
     
     @property
-    def lc_cts(self):
+    def src_cts(self):
         
         return np.histogram(self.lc_ts, bins=self.lc_bins)[0]
     
     
     @property
-    def lc_cts_err(self):
+    def src_cts_err(self):
         
-        return np.sqrt(self.lc_cts)
+        return np.sqrt(self.src_cts)
     
     
     @property
-    def lc_rate(self):
+    def src_rate(self):
         
-        return self.lc_cts / self.lc_exps
+        return self.src_cts / self.lc_exps
     
     
     @property
-    def lc_rate_err(self):
+    def src_rate_err(self):
         
-        return self.lc_cts_err / self.lc_exps
+        return self.src_cts_err / self.lc_exps
     
     
     @property
@@ -319,7 +327,61 @@ class Event(Reduction):
         return lc_bs
     
     
-    def extract_curve(self, savepath='./curve'):
+    @property
+    def bkg_rate(self):
+        
+        return self.lc_bs.poly.val(self.lc_time)[0]
+    
+    
+    @property
+    def bkg_rate_err(self):
+        
+        return self.lc_bs.poly.val(self.lc_time)[1]
+    
+    
+    @property
+    def bkg_cts(self):
+        
+        return self.bkg_rate * self.lc_exps
+    
+    
+    @property
+    def bkg_cts_err(self):
+        
+        return self.bkg_rate_err * self.lc_exps
+    
+    
+    @property
+    def net_rate(self):
+        
+        return self.src_rate - self.bkg_rate
+    
+    
+    @property
+    def net_rate_err(self):
+        
+        return np.sqrt(self.src_rate_err ** 2 + self.bkg_rate_err ** 2)
+    
+    
+    @property
+    def net_cts(self):
+        
+        return self.net_rate * self.lc_exps
+    
+    
+    @property
+    def net_cts_err(self):
+        
+        return self.net_rate_err * self.lc_exps
+    
+
+    @property
+    def net_ccts(self):
+        
+        return np.cumsum(self.net_cts)
+    
+    
+    def extract_curve(self, savepath='./curve', show=False):
         
         if not os.path.exists(savepath):
             os.makedirs(savepath)
@@ -327,31 +389,31 @@ class Event(Reduction):
         lc_bs = self.lc_bs
         lc_bs.save(savepath=savepath + '/polybase')
         
-        lc_brate, lc_brate_err = lc_bs.poly.val(self.lc_time)
+        bkg_rate, bkg_rate_err = lc_bs.poly.val(self.lc_time)
         
-        lc_nrate = self.lc_rate - lc_brate
-        lc_ncts = lc_nrate * self.lc_exps
+        net_rate = self.src_rate - bkg_rate
+        net_cts = net_rate * self.lc_exps
         
         fig = go.Figure()
         src = go.Scatter(x=self.lc_time, 
-                         y=self.lc_rate, 
+                         y=self.src_rate, 
                          mode='lines+markers', 
                          name='source lightcurve', 
                          showlegend=True, 
                          error_y=dict(
                              type='data',
-                             array=self.lc_rate_err,
+                             array=self.src_rate_err,
                              thickness=1.5,
                              width=0), 
                          marker=dict(symbol='cross-thin', size=0))
         bkg = go.Scatter(x=self.lc_time, 
-                         y=lc_brate, 
+                         y=bkg_rate, 
                          mode='lines+markers', 
                          name='background lightcurve', 
                          showlegend=True, 
                          error_y=dict(
                              type='data',
-                             array=lc_brate_err,
+                             array=bkg_rate_err,
                              thickness=1.5,
                              width=0), 
                          marker=dict(symbol='cross-thin', size=0))
@@ -364,15 +426,15 @@ class Event(Reduction):
         fig.update_layout(template='plotly_white', height=600, width=800)
         fig.update_layout(legend=dict(x=1, y=1, xanchor='right', yanchor='bottom'))
         
-        fig.show()
+        if show: fig.show()
         fig.write_html(savepath + '/lc.html')
         json.dump(fig.to_dict(), open(savepath + '/lc.json', 'w'), indent=4, cls=NpEncoder)
         
-        lc_nccts = np.cumsum(lc_ncts)
+        net_ccts = np.cumsum(net_cts)
         
         fig = go.Figure()
         net = go.Scatter(x=self.lc_time, 
-                         y=lc_nccts, 
+                         y=net_ccts, 
                          mode='lines', 
                          name='net cumulated counts', 
                          showlegend=True)
@@ -443,7 +505,7 @@ class Event(Reduction):
             pha_hdu.writeto(savepath + f'/{file_name}')
                 
                 
-    def _extract_bkg_phaii(self, spec_slices):
+    def _extract_bkg_phaii(self, spec_slices, show=False):
         
         num_slices = len(spec_slices)
         num_channels = len(self.channel)
@@ -524,14 +586,14 @@ class Event(Reduction):
         fig.update_layout(template='plotly_white', height=600, width=800)
         fig.update_layout(legend=dict(x=1, y=1, xanchor='right', yanchor='bottom'))
         
-        fig.show()
+        if show: fig.show()
                 
         return phaii, phaii_err
                 
                 
-    def extract_bkg_phaii(self, spec_slices, savepath='./spectrum'):
+    def extract_bkg_phaii(self, spec_slices, savepath='./spectrum', show=False):
         
-        phaii, phaii_err = self._extract_bkg_phaii(spec_slices)
+        phaii, phaii_err = self._extract_bkg_phaii(spec_slices, show=show)
         
         if not os.path.exists(savepath):
             os.makedirs(savepath)
@@ -554,13 +616,13 @@ class Event(Reduction):
             pha_hdu.writeto(savepath + f'/{file_name}')
                 
                 
-    def extract_spectrum(self, spec_slices, savepath='./spectrum'):
+    def extract_spectrum(self, spec_slices, savepath='./spectrum', show=False):
         
         if not os.path.exists(savepath):
             os.makedirs(savepath)
         
         self.extract_src_phaii(spec_slices, savepath=savepath)
-        self.extract_bkg_phaii(spec_slices, savepath=savepath)
+        self.extract_bkg_phaii(spec_slices, savepath=savepath, show=show)
 
 
     def _to_pha_fits(self, pha, pha_err, exp, file_name):
@@ -572,7 +634,7 @@ class Event(Reduction):
         primary_hdu = fits.PrimaryHDU(header=hdr)
 
         channel_field = fits.Column(name='CHANNEL', array=self.channel, format='I')
-        counts_field = fits.Column(name='COUNTS', array=pha, format='J', unit='count')
+        counts_field = fits.Column(name='COUNTS', array=pha, format='E', unit='count')
         stat_err_field = fits.Column(name='STAT_ERR', array=pha_err, format='E', unit='count')
         spectrum_hdu = fits.BinTableHDU.from_columns([channel_field, counts_field, stat_err_field])
 

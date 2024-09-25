@@ -337,6 +337,8 @@ class ppTxx(ppSignal):
 
     def accumcts(self, xx=0.9, mp=True, tbkg=None):
         if self.pulse_res is None: self.findpulse(mp=mp)
+        
+        self.mc_simulation(1000)
 
         self.xx = xx
 

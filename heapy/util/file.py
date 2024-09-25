@@ -176,6 +176,15 @@ def copy(f1, f2):
         warnings.warn(msg_format(msg), UserWarning, stacklevel=2)
         f2_name = f2.split('/')[-1]
         sp.call('touch ' + os.path.dirname(f2) + '/%s_Not_Found.txt'%f2_name, shell=True)
+        
+        
+def remove(f):
+    
+    if os.path.isfile(f):
+        sp.call('rm -f ' + f, shell=True)
+    else:
+        msg = 'FILE NOT FOUND: ' + f
+        warnings.warn(msg_format(msg), UserWarning, stacklevel=2)
 
 
 def searchfile(keywords, root):

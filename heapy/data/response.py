@@ -2,8 +2,8 @@ import os
 import numpy as np
 from gbm_drm_gen.drmgen_tte import DRMGenTTE
 from .retrieve import gbmRetrieve
-from ..util.file import copy
 from ..util.data import msg_format
+from ..util.file import copy, remove
 from ..util.time import fermi_utc_to_met
 
 
@@ -41,10 +41,10 @@ class gbmResponse(object):
         msg = 'no retrieved poshist file'
         assert poshist_file != [], msg_format(msg)
         
-        return cls(utc, det, cspec_file, poshist_file)
+        return cls(utc, det, cspec_file[0], poshist_file[0])
     
     
-    def extract_response(self, ra, dec, time_slices, savepath='./spectrum'):
+    def extract_response(self, ra, dec, spec_slices, savepath='./spectrum'):
         
         if not os.path.exists(savepath):
             os.makedirs(savepath)
@@ -54,14 +54,14 @@ class gbmResponse(object):
         
         met = fermi_utc_to_met(self.utc)
         
-        lslices = np.array(time_slices)[:, 0]
-        rslices = np.array(time_slices)[:, 1]
+        lslices = np.array(spec_slices)[:, 0]
+        rslices = np.array(spec_slices)[:, 1]
     
         for _, (l, r) in enumerate(zip(lslices, rslices)):
-            new_l = '{:+f}'.format(l).replace('-', 'm').replace('.', 'd').replace('+', 'p')
-            new_r = '{:+f}'.format(r).replace('-', 'm').replace('.', 'd').replace('+', 'p')
+            new_l = '{:+.2f}'.format(l).replace('-', 'm').replace('.', 'd').replace('+', 'p')
+            new_r = '{:+.2f}'.format(r).replace('-', 'm').replace('.', 'd').replace('+', 'p')
             
-            file_name = '-'.join(new_l, new_r)
+            file_name = '-'.join([new_l, new_r])
         
             drm = DRMGenTTE(
                 det_name=self.det, 
@@ -77,6 +77,8 @@ class gbmResponse(object):
                 dec=dec, 
                 filename=file_name, 
                 overwrite=True)
+            
             copy(f'{file_name}_{self.det}.rsp', f'{file_name}.rsp')
+            remove(f'{file_name}_{self.det}.rsp')
             
         os.chdir(cwd)
