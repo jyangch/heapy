@@ -1,0 +1,47 @@
+{
+    "p01": {
+        "expr": "tbabs*pl",
+        "label": "tbabs.$n_H$",
+        "param": {
+            "val": 1.0887885200532434,
+            "min": 0.0001,
+            "max": 10,
+            "comment": null,
+            "scale": "linear",
+            "unit": 1,
+            "frozen": false
+        },
+        "frozen": false,
+        "mates": []
+    },
+    "p02": {
+        "expr": "tbabs*pl",
+        "label": "pl.$\\alpha$",
+        "param": {
+            "val": -2.023286780026168,
+            "min": -8,
+            "max": 5,
+            "comment": null,
+            "scale": "linear",
+            "unit": 1,
+            "frozen": false
+        },
+        "frozen": false,
+        "mates": []
+    },
+    "p03": {
+        "expr": "tbabs*pl",
+        "label": "pl.log$A$",
+        "param": {
+            "val": -3.86558226239931,
+            "min": -10,
+            "max": 8,
+            "comment": null,
+            "scale": "linear",
+            "unit": 1,
+            "frozen": false
+        },
+        "frozen": false,
+        "mates": []
+    }
+}

@@ -1,0 +1,3 @@
+tbabs.$n_H$    
+pl.$\alpha$    
+pl.log$A$      

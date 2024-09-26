@@ -1,0 +1,107 @@
+{
+    "p01": {
+        "expr": "tbabs*pl",
+        "label": "tbabs.$n_H$",
+        "param": {
+            "val": 1.0887885200532434,
+            "min": 0.0001,
+            "max": 10,
+            "comment": null,
+            "scale": "linear",
+            "unit": 1,
+            "frozen": false
+        },
+        "frozen": false,
+        "mates": []
+    },
+    "p02": {
+        "expr": "tbabs*pl",
+        "label": "pl.$\\alpha$",
+        "param": {
+            "val": -2.023286780026168,
+            "min": -8,
+            "max": 5,
+            "comment": null,
+            "scale": "linear",
+            "unit": 1,
+            "frozen": false
+        },
+        "frozen": false,
+        "mates": []
+    },
+    "p03": {
+        "expr": "tbabs*pl",
+        "label": "pl.log$A$",
+        "param": {
+            "val": -3.86558226239931,
+            "min": -10,
+            "max": 8,
+            "comment": null,
+            "scale": "linear",
+            "unit": 1,
+            "frozen": false
+        },
+        "frozen": false,
+        "mates": []
+    },
+    "p04": {
+        "expr": "wxt",
+        "label": "rf@wxt",
+        "param": {
+            "val": 1,
+            "min": null,
+            "max": null,
+            "comment": null,
+            "scale": "linear",
+            "unit": 1,
+            "frozen": true
+        },
+        "frozen": true,
+        "mates": []
+    },
+    "p05": {
+        "expr": "wxt",
+        "label": "sf@wxt",
+        "param": {
+            "val": 1,
+            "min": null,
+            "max": null,
+            "comment": null,
+            "scale": "linear",
+            "unit": 1,
+            "frozen": true
+        },
+        "frozen": true,
+        "mates": []
+    },
+    "p06": {
+        "expr": "wxt",
+        "label": "bf@wxt",
+        "param": {
+            "val": 1,
+            "min": null,
+            "max": null,
+            "comment": null,
+            "scale": "linear",
+            "unit": 1,
+            "frozen": true
+        },
+        "frozen": true,
+        "mates": []
+    },
+    "p07": {
+        "expr": "wxt",
+        "label": "bvf@wxt",
+        "param": {
+            "val": 0,
+            "min": null,
+            "max": null,
+            "comment": null,
+            "scale": "linear",
+            "unit": 1,
+            "frozen": true
+        },
+        "frozen": true,
+        "mates": []
+    }
+}

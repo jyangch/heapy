@@ -1,0 +1,31 @@
+{
+    "tbabs*pl": {
+        "tbabs.$n_H$": {
+            "val": 1.0887885200532434,
+            "min": 0.0001,
+            "max": 10,
+            "comment": null,
+            "scale": "linear",
+            "unit": 1,
+            "frozen": false
+        },
+        "pl.$\\alpha$": {
+            "val": -2.023286780026168,
+            "min": -8,
+            "max": 5,
+            "comment": null,
+            "scale": "linear",
+            "unit": 1,
+            "frozen": false
+        },
+        "pl.log$A$": {
+            "val": -3.86558226239931,
+            "min": -10,
+            "max": 8,
+            "comment": null,
+            "scale": "linear",
+            "unit": 1,
+            "frozen": false
+        }
+    }
+}

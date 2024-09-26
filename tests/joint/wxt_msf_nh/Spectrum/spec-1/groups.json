@@ -1,0 +1,58 @@
+{
+    "wxt": {
+        "src": "../wxt/spectrum/p0d00-p160d00.src",
+        "bkg": "../wxt/spectrum/p0d00-p160d00.bkg",
+        "rmf": "../wxt/ep.rmf",
+        "arf": "../wxt/ep.arf",
+        "specT": null,
+        "quality": null,
+        "group": {
+            "min_evt": 5
+        },
+        "notice": [
+            0.5,
+            4
+        ],
+        "rsp_ii": null,
+        "src_ii": null,
+        "bkg_ii": null,
+        "rsp_factor": {
+            "val": 1,
+            "min": null,
+            "max": null,
+            "comment": null,
+            "scale": "linear",
+            "unit": 1,
+            "frozen": true
+        },
+        "sexp_factor": {
+            "val": 1,
+            "min": null,
+            "max": null,
+            "comment": null,
+            "scale": "linear",
+            "unit": 1,
+            "frozen": true
+        },
+        "bexp_factor": {
+            "val": 1,
+            "min": null,
+            "max": null,
+            "comment": null,
+            "scale": "linear",
+            "unit": 1,
+            "frozen": true
+        },
+        "bvar_factor": {
+            "val": 0,
+            "min": null,
+            "max": null,
+            "comment": null,
+            "scale": "linear",
+            "unit": 1,
+            "frozen": true
+        },
+        "weight": 1,
+        "stat": "cstat"
+    }
+}

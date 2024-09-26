@@ -1,0 +1,38 @@
+{
+    "rf@wxt": {
+        "val": 1,
+        "min": null,
+        "max": null,
+        "comment": null,
+        "scale": "linear",
+        "unit": 1,
+        "frozen": true
+    },
+    "sf@wxt": {
+        "val": 1,
+        "min": null,
+        "max": null,
+        "comment": null,
+        "scale": "linear",
+        "unit": 1,
+        "frozen": true
+    },
+    "bf@wxt": {
+        "val": 1,
+        "min": null,
+        "max": null,
+        "comment": null,
+        "scale": "linear",
+        "unit": 1,
+        "frozen": true
+    },
+    "bvf@wxt": {
+        "val": 0,
+        "min": null,
+        "max": null,
+        "comment": null,
+        "scale": "linear",
+        "unit": 1,
+        "frozen": true
+    }
+}
