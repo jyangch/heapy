@@ -1,56 +1,74 @@
 import os
 import ftplib
-import urllib.error
 import urllib.parse
-import urllib.request
 from tqdm import tqdm
 
 
-def ftp_download(ftp_url, 
-                 save_path, 
+def gbm_download(ftp_url, 
+                 savepath, 
                  filenames=None, 
                  namefilter=None):
 
     tokens = urllib.parse.urlparse(ftp_url)
-    serverAddress = tokens.netloc
-    directory = tokens.path
+    server_address = tokens.netloc
+    server_path = tokens.path
 
-    if filenames == None:
+    ftp = ftplib.FTP_TLS(server_address, timeout=60)
 
-        ftp = ftplib.FTP(serverAddress, "anonymous", "", "", timeout=60)
+    try:
+        ftp.login()
+        ftp.prot_p()
 
+    except:
         try:
-            ftp.login()
-
+            ftp.cwd("/")
         except:
-            try:
-                ftp.cwd("/")
-            except:
-                raise
+            raise
 
-        ftp.cwd(directory)
-
-        filenames = []
-        ftp.retrlines("NLST", filenames.append)
-
-        ftp.close()
-
-    downloaded_files = []
-
-    for i, filename in enumerate(tqdm(filenames)):
-
+    ftp.cwd(server_path)
+    
+    server_files = ftp.nlst()
+    
+    if filenames is None:
+        filenames = server_files
+        
+    ftp_info = {
+        'downloaded': [], 
+        'notfound': [], 
+        'existed': [], 
+        'filter': []
+        }
+    
+    pbar = tqdm(filenames)
+    
+    for filename in pbar:
+        
+        pbar.set_description(f'downloading {filename}')
+        
         if namefilter != None and filename.find(namefilter) < 0:
+            
+            ftp_info['filter'].append(filename)
             continue
-
+        
         else:
-            local_filename = os.path.join(save_path, filename)
+            
+            local_filename = os.path.join(savepath, filename)
+            
+            if filename not in server_files:
+                
+                ftp_info['notfound'].append(filename)
+                
+            elif os.path.isfile(local_filename):
+                
+                ftp_info['existed'].append(local_filename)
+                
+            else:
 
-            urllib.request.urlretrieve(
-                "ftp://%s/%s/%s" % (serverAddress, directory, filename),
-                local_filename)
+                with open(local_filename, 'wb') as f_obj:
+                    ftp.retrbinary('RETR ' + filename, f_obj.write)
+                    
+                ftp_info['downloaded'].append(local_filename)
 
-            urllib.request.urlcleanup()
+    ftp.close()
 
-            downloaded_files.append(local_filename)
-
-    return downloaded_files
+    return ftp_info
