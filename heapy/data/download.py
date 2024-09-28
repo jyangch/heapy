@@ -4,7 +4,7 @@ import urllib.parse
 from tqdm import tqdm
 
 
-def gbm_download(ftp_url, 
+def ftp_download(ftp_url, 
                  savepath, 
                  filenames=None, 
                  namefilter=None):
