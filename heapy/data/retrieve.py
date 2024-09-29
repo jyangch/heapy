@@ -507,8 +507,6 @@ class FileFinder:
                 
                 downloaded_files_in_local = []
                 
-                print(matching_ftp_files)
-                
                 pbar = tqdm(matching_ftp_files)
                 
                 for ftp_file_to_download in pbar:
@@ -533,7 +531,8 @@ class FileFinder:
             warnings.warn(f"Directory '{self.local_dir}' does not exist.", UserWarning)
             return []
 
-        return [f for f in os.listdir(self.local_dir) if os.path.isfile(os.path.join(self.local_dir, f))]
+        return [os.path.join(self.local_dir, f) for f in os.listdir(self.local_dir) 
+                if os.path.isfile(os.path.join(self.local_dir, f))]
 
 
     def _get_files_from_ftp(self):
