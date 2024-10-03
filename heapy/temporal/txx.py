@@ -81,7 +81,7 @@ class pgTxx(PolyBase):
         self.pulse_res = {'pstart': self.pstart, 'pstop': self.pstop}
 
     
-    def accumcts(self, xx=0.9, mp=True, tbkg=None):
+    def accumcts(self, xx=0.9, mp=True, pstart=None, pstop=None, tbkg=None):
         if self.pulse_res is None: self.findpulse(mp=mp)
 
         self.xx = xx
@@ -90,6 +90,12 @@ class pgTxx(PolyBase):
             msg = 'there is no pulse'
             warnings.warn(msg_format(msg), UserWarning, stacklevel=2)
             return False
+        
+        if pstart is not None:
+            self.pstart[0] = pstart
+            
+        if pstop is not None:
+            self.pstop[-1] = pstop
 
         if tbkg is None:
             tbkg = np.inf
