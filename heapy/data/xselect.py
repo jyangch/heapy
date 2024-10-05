@@ -42,7 +42,7 @@ class epXselect(object):
     @property
     def evtfile(self):
         
-        return self._evtfile
+        return os.path.abspath(self._evtfile)
     
     
     @evtfile.setter
@@ -60,7 +60,7 @@ class epXselect(object):
     @property
     def regfile(self):
         
-        return self._regfile
+        return os.path.abspath(self._regfile)
     
     
     @regfile.setter
@@ -83,7 +83,7 @@ class epXselect(object):
     @property
     def bkregfile(self):
         
-        return self._bkregfile
+        return os.path.abspath(self._bkregfile)
     
     
     @bkregfile.setter
@@ -384,12 +384,9 @@ class epXselect(object):
         return lc_ps
             
             
-    def extract_curve(self, std=False, savepath=None, show=False):
-        
+    def extract_curve(self, std=False, savepath='./curve', show=False):
+            
         savepath = os.path.abspath(savepath)
-        
-        if savepath is None:
-            savepath = os.path.dirname(self.evtfile) + '/curve'
         
         if os.path.isdir(savepath):
             shutil.rmtree(savepath)
@@ -516,12 +513,9 @@ class epXselect(object):
         json.dump(fig.to_dict(), open(savepath + '/cum_lc.json', 'w'), indent=4, cls=NpEncoder)
         
         
-    def calculate_txx(self, xx=0.9, savepath=None):
-        
+    def calculate_txx(self, sigma=3, mp=True, xx=0.9, pstart=None, pstop=None, savepath='./curve/duration'):
+            
         savepath = os.path.abspath(savepath)
-        
-        if savepath is None:
-            savepath = os.path.dirname(self.evtfile) + '/curve/duration'
         
         if os.path.isdir(savepath):
             shutil.rmtree(savepath)
@@ -529,14 +523,14 @@ class epXselect(object):
         os.mkdir(savepath)
         
         txx = ppTxx(self.src_ts, self.bkg_ts, self.lc_bins, self.regratio)
-        txx.accumcts(xx=xx, mp=True)
+        txx.findpulse(sigma=sigma, mp=mp)
+        txx.accumcts(xx=xx, pstart=pstart, pstop=pstop)
         txx.save(savepath=savepath)
 
 
-    def extract_spectrum(self, spec_slices, std=False, savepath=None):
-        
-        if savepath is None:
-            savepath = os.path.dirname(self.evtfile) + '/spectrum'
+    def extract_spectrum(self, spec_slices, std=False, savepath='./spectrum'):
+            
+        savepath = os.path.abspath(savepath)
         
         if os.path.isdir(savepath):
             shutil.rmtree(savepath)

@@ -334,14 +334,14 @@ class epRetrieve(Retrieve):
         reg_file = ff.find(reg_feature)
         reg = reg_file[-1] if reg_file else None
         
-        if reg_file is None:
+        if reg is None:
             
-            reg_file = bkreg_file[:-6] + '.reg'
+            reg = bkreg[:-6] + '.reg'
             
-            with open(bkreg_file, 'r') as f_obj:
+            with open(bkreg, 'r') as f_obj:
                 items = f_obj.readlines()[0].split()
                 
-            with open(reg_file, 'w') as f_obj:
+            with open(reg, 'w') as f_obj:
                 f_obj.write('circle ' + items[1] + ' 67)')
 
         rtv_res = {'satelite': 'WXT', 'obsname': obsname, 'srcid': srcid, 

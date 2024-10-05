@@ -450,7 +450,7 @@ class Event(Reduction):
         json.dump(fig.to_dict(), open(savepath + '/cum_lc.json', 'w'), indent=4, cls=NpEncoder)
         
         
-    def calculate_txx(self, sigma=3, mp=True, xx=0.9, pstart=None, pstop=None, savepath='./duration'):
+    def calculate_txx(self, sigma=3, mp=True, xx=0.9, pstart=None, pstop=None, savepath='./curve/duration'):
         
         if not os.path.exists(savepath):
             os.makedirs(savepath)

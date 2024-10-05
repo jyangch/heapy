@@ -174,12 +174,12 @@ class pgTxx(PolyBase):
                         'csf1_err': self.csf1_err, 'csf2_err': self.csf2_err, 'bins': self.bins, 
                         'cts': self.cts, 'bcts': self.bcts, 'ccts': self.ccts}
         
-        print('\n+-----------------------------------------------+')
-        print(' %-12s%-12s%-12s%-12s' % ('ith pulse', 'Txx (s)', 'Txx- (s)', 'Txx+ (s)'))
+        print('\n+------------------------------------------------+')
+        print(' %-5s%-10s%-8s%-8s%-8s%-8s' % ('id#', 'Txx', 'Txx-', 'Txx+', 'Txx1', 'Txx2'))
         print('+-----------------------------------------------+')
-        _ = list(map(print, [' %-12d%-12.3f%-12.3f%-12.3f' % (i+1, t, t_err[0], t_err[1]) 
-                             for i, (t, t_err) in enumerate(zip(self.txx, self.txx_err))]))
-        print('+-----------------------------------------------+')
+        _ = list(map(print, [' %-5d%-10.3f%-8.3f%-8.3f%-8.3f%-8.3f' % (i+1, t, t_err[0], t_err[1], t1, t2) 
+                             for i, (t, t_err, t1, t2) in enumerate(zip(self.txx, self.txx_err, self.txx1, self.txx2))]))
+        print('+------------------------------------------------+')
 
 
     @staticmethod
@@ -339,9 +339,9 @@ class ppTxx(ppSignal):
         for _ in range(self.nmc):
             ppmc = np.random.poisson(lam=self.cts) - np.random.poisson(lam=self.bcts) * self.backscale
             self.mc_ncts.append(ppmc)
-        
-
-    def accumcts(self, xx=0.9, mp=True, tbkg=None):
+            
+            
+    def accumcts(self, xx=0.9, mp=True, pstart=None, pstop=None, tbkg=None):
         if self.pulse_res is None: self.findpulse(mp=mp)
         
         self.mc_simulation(1000)
@@ -352,6 +352,12 @@ class ppTxx(ppSignal):
             msg = 'there is no pulse'
             warnings.warn(msg_format(msg), UserWarning, stacklevel=2)
             return False
+        
+        if pstart is not None:
+            self.pstart[0] = pstart
+            
+        if pstop is not None:
+            self.pstop[-1] = pstop
 
         if tbkg is None:
             tbkg = np.inf
@@ -435,12 +441,13 @@ class ppTxx(ppSignal):
                         'txx_err': self.txx_err, 'csf': self.csf, 'csf1': self.csf1, 'csf2': self.csf2, 
                         'bins': self.bins, 'cts': self.cts, 'bcts': self.bcts, 'ccts': self.ccts}
         
-        print('\n+-----------------------------------------------+')
-        print(' %-12s%-12s%-12s%-12s' % ('ith pulse', 'Txx (s)', 'Txx- (s)', 'Txx+ (s)'))
+        
+        print('\n+------------------------------------------------+')
+        print(' %-5s%-10s%-8s%-8s%-8s%-8s' % ('id#', 'Txx', 'Txx-', 'Txx+', 'Txx1', 'Txx2'))
         print('+-----------------------------------------------+')
-        _ = list(map(print, [' %-12d%-12.3f%-12.3f%-12.3f' % (i+1, t, t_err[0], t_err[1]) 
-                             for i, (t, t_err) in enumerate(zip(self.txx, self.txx_err))]))
-        print('+-----------------------------------------------+')
+        _ = list(map(print, [' %-5d%-10.3f%-8.3f%-8.3f%-8.3f%-8.3f' % (i+1, t, t_err[0], t_err[1], t1, t2) 
+                             for i, (t, t_err, t1, t2) in enumerate(zip(self.txx, self.txx_err, self.txx1, self.txx2))]))
+        print('+------------------------------------------------+')
 
 
     @staticmethod
