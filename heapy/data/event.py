@@ -450,14 +450,15 @@ class Event(Reduction):
         json.dump(fig.to_dict(), open(savepath + '/cum_lc.json', 'w'), indent=4, cls=NpEncoder)
         
         
-    def calculate_txx(self, sigma=3, mp=True, xx=0.9, pstart=None, pstop=None, tbkg=None, savepath='./curve/duration'):
+    def calculate_txx(self, sigma=3, mp=True, xx=0.9, pstart=None, pstop=None, 
+                      lbkg=None, rbkg=None, savepath='./curve/duration'):
         
         if not os.path.exists(savepath):
             os.makedirs(savepath)
         
         txx = pgTxx(self.lc_ts, self.lc_bins, self.lc_exps)
         txx.findpulse(sigma=sigma, mp=mp)
-        txx.accumcts(xx=xx, pstart=pstart, pstop=pstop, tbkg=tbkg)
+        txx.accumcts(xx=xx, pstart=pstart, pstop=pstop, lbkg=lbkg, rbkg=rbkg)
         txx.save(savepath=savepath)
 
 

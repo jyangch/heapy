@@ -81,7 +81,7 @@ class pgTxx(PolyBase):
         self.pulse_res = {'pstart': self.pstart, 'pstop': self.pstop}
 
     
-    def accumcts(self, xx=0.9, mp=True, pstart=None, pstop=None, tbkg=None):
+    def accumcts(self, xx=0.9, mp=True, pstart=None, pstop=None, lbkg=None, rbkg=None):
         if self.pulse_res is None: self.findpulse(mp=mp)
 
         self.xx = xx
@@ -97,12 +97,15 @@ class pgTxx(PolyBase):
         if pstop is not None:
             self.pstop[-1] = pstop
 
-        if tbkg is None:
-            tbkg = np.inf
+        if lbkg is None:
+            lbkg = np.inf
+            
+        if rbkg is None:
+            rbkg = np.inf
 
-        tmin_ = self.pstart[0] - tbkg
+        tmin_ = self.pstart[0] - lbkg
         tmin = max(tmin_, self.time[0])
-        tmax_ = self.pstop[-1] + tbkg
+        tmax_ = self.pstop[-1] + rbkg
         tmax = min(tmax_, self.time[-1])
         tindex = np.where((self.time >= tmin) & (self.time <= tmax))[0]
 
@@ -136,8 +139,10 @@ class pgTxx(PolyBase):
         for pi, (l, r) in enumerate(zip(np.append(tmin, self.pstop[:-1]), np.append(self.pstart[1:], tmax))):
             nn = (1 - xx) / 2
             dd = dcsf[pi] * nn
+            
             csf1_i = self.csf[pi] + dd
             csf2_i = self.csf[pi + 1] - dd
+
             self.csf1.append(csf1_i)
             self.csf2.append(csf2_i)
 
@@ -341,7 +346,7 @@ class ppTxx(ppSignal):
             self.mc_ncts.append(ppmc)
             
             
-    def accumcts(self, xx=0.9, mp=True, pstart=None, pstop=None, tbkg=None):
+    def accumcts(self, xx=0.9, mp=True, pstart=None, pstop=None, lbkg=None, rbkg=None):
         if self.pulse_res is None: self.findpulse(mp=mp)
         
         self.mc_simulation(1000)
@@ -359,12 +364,15 @@ class ppTxx(ppSignal):
         if pstop is not None:
             self.pstop[-1] = pstop
 
-        if tbkg is None:
-            tbkg = np.inf
+        if lbkg is None:
+            lbkg = np.inf
+            
+        if rbkg is None:
+            rbkg = np.inf
 
-        tmin_ = self.pstart[0] - tbkg
+        tmin_ = self.pstart[0] - lbkg
         tmin = max(tmin_, self.time[0])
-        tmax_ = self.pstop[-1] + tbkg
+        tmax_ = self.pstop[-1] + rbkg
         tmax = min(tmax_, self.time[-1])
         tindex = np.where((self.time >= tmin) & (self.time <= tmax))[0]
         
@@ -386,19 +394,24 @@ class ppTxx(ppSignal):
                 interp_time = self.time[tindex]
                 interp_ccts = ccts[tindex]
                 
-            csf, csf1, csf2 = [], [], []
+            csf, csf_err, csf1, csf2 = [], [], [], []
             txx, txx1, txx2 = [], [], []
 
             for l, r in zip(np.append(tmin, self.pstop), np.append(self.pstart, tmax)):
                 csf_i = np.mean(interp_ccts[np.where((interp_time >= l) & (interp_time <= r))])
+                csf_err_i = np.std(interp_ccts[np.where((interp_time >= l) & (interp_time <= r))])
                 csf.append(csf_i)
+                csf_err.append(csf_err_i)
+                
             dcsf = np.array(csf[1:]) - np.array(csf[:-1])
 
             for pi, (l, r) in enumerate(zip(np.append(tmin, self.pstop[:-1]), np.append(self.pstart[1:], tmax))):
                 nn = (1 - xx) / 2
                 dd = dcsf[pi] * nn
+
                 csf1_i = csf[pi] + dd
                 csf2_i = csf[pi + 1] - dd
+                    
                 csf1.append(csf1_i)
                 csf2.append(csf2_i)
 
@@ -427,7 +440,11 @@ class ppTxx(ppSignal):
         self.txx2 = mc_txx2[0]
 
         self.txx_err = []
+        self.txx1_err = []
+        self.txx2_err = []
         mc_txx = np.array(mc_txx)
+        mc_txx1 = np.array(mc_txx1)
+        mc_txx2 = np.array(mc_txx2)
         for pi in range(len(self.pstart)):
             mask = sigma_clip(mc_txx[1:, pi], sigma=5, maxiters=5, stdfunc=mad_std).mask
             not_mask = list(map(operator.not_, mask))
@@ -436,10 +453,27 @@ class ppTxx(ppSignal):
             txx_lo, txx_hi = np.percentile(mc_txx_filter, [16, 84])
             txx_err = np.diff([txx_lo, mc_txx[0, pi], txx_hi])
             self.txx_err.append([txx_err[0], txx_err[1]])
+            
+            mask = sigma_clip(mc_txx1[1:, pi], sigma=5, maxiters=5, stdfunc=mad_std).mask
+            not_mask = list(map(operator.not_, mask))
+            mc_txx1_filter = np.array(mc_txx1[1:, pi])[not_mask]
+
+            txx1_lo, txx1_hi = np.percentile(mc_txx1_filter, [16, 84])
+            txx1_err = np.diff([txx1_lo, mc_txx1[0, pi], txx1_hi])
+            self.txx1_err.append([txx1_err[0], txx1_err[1]])
+            
+            mask = sigma_clip(mc_txx2[1:, pi], sigma=5, maxiters=5, stdfunc=mad_std).mask
+            not_mask = list(map(operator.not_, mask))
+            mc_txx2_filter = np.array(mc_txx2[1:, pi])[not_mask]
+
+            txx2_lo, txx2_hi = np.percentile(mc_txx2_filter, [16, 84])
+            txx2_err = np.diff([txx2_lo, mc_txx2[0, pi], txx2_hi])
+            self.txx2_err.append([txx2_err[0], txx2_err[1]])
 
         self.txx_res = {'xx': self.xx, 'txx':self.txx, 'txx1': self.txx1, 'txx2': self.txx2, 
-                        'txx_err': self.txx_err, 'csf': self.csf, 'csf1': self.csf1, 'csf2': self.csf2, 
-                        'bins': self.bins, 'cts': self.cts, 'bcts': self.bcts, 'ccts': self.ccts}
+                        'txx_err': self.txx_err, 'txx1_err': self.txx1_err, 'txx2_err': self.txx2_err, 
+                        'csf': self.csf, 'csf1': self.csf1, 'csf2': self.csf2, 'bins': self.bins, 
+                        'cts': self.cts, 'bcts': self.bcts, 'ccts': self.ccts}
         
         
         print('\n+------------------------------------------------+')
