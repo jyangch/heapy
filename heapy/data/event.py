@@ -322,7 +322,7 @@ class Event(Reduction):
     def lc_bs(self):
         
         lc_bs = PolyBase(self.lc_ts, self.lc_bins, self.lc_exps)
-        lc_bs.loop(sigma=3, deg=None)
+        lc_bs.loop(sigma=1, deg=None)
         
         return lc_bs
     
@@ -450,7 +450,7 @@ class Event(Reduction):
         json.dump(fig.to_dict(), open(savepath + '/cum_lc.json', 'w'), indent=4, cls=NpEncoder)
         
         
-    def calculate_txx(self, sigma=3, mp=True, xx=0.9, pstart=None, pstop=None, 
+    def calculate_txx(self, sigma=1, mp=True, xx=0.9, pstart=None, pstop=None, 
                       lbkg=None, rbkg=None, savepath='./curve/duration'):
         
         if not os.path.exists(savepath):
@@ -526,7 +526,7 @@ class Event(Reduction):
         interp_time = np.linspace(interp_range[0], interp_range[-1], 100)
         
         bs = PolyBase(self.spec_ts, bins)
-        bs.loop(sigma=3, deg=None)
+        bs.loop(sigma=1, deg=None)
         
         ignore = bs.ignore
         brate, _ = bs.poly.val(interp_time)

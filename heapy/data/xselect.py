@@ -19,12 +19,22 @@ class epXselect(object):
     def __init__(self, 
                  evtfile=None, 
                  regfile=None, 
-                 bkregfile=None
+                 bkregfile=None, 
+                 armregfile=None, 
+                 arm=False
                  ):
         
-        self.evtfile = evtfile
-        self.regfile = regfile
-        self.bkregfile = bkregfile
+        self._evtfile = evtfile
+        self._regfile = regfile
+        self._bkregfile = bkregfile
+        self._armregfile = armregfile
+        self._arm = arm
+        
+        hdu = fits.open(self._evtfile)
+        self._timezero = hdu['EVENTS'].header['TSTART']
+        hdu.close()
+        
+        self._update_backscale()
 
 
     @classmethod
@@ -35,8 +45,9 @@ class epXselect(object):
         evtfile = rtv.rtv_res['evt']
         regfile = rtv.rtv_res['reg']
         bkregfile = rtv.rtv_res['bkreg']
+        armregfile = rtv.rtv_res['armreg']
         
-        return cls(evtfile, regfile, bkregfile)
+        return cls(evtfile, regfile, bkregfile, armregfile)
     
     
     @property
@@ -51,10 +62,10 @@ class epXselect(object):
         self._evtfile = new_evtfile
         
         hdu = fits.open(self._evtfile)
-        tstart = hdu['EVENTS'].header['TSTART']
+        self._timezero = hdu['EVENTS'].header['TSTART']
         hdu.close()
         
-        self._timezero = tstart
+        self._update_backscale()
         
         
     @property
@@ -68,16 +79,7 @@ class epXselect(object):
         
         self._regfile = new_regfile
         
-        self._regtxt = self._regfile[:-4] + '.txt'
-        
-        if not os.path.isfile(self._regtxt):
-            msg = 'reg text file is not found.'
-            warnings.warn(msg_format(msg), UserWarning, stacklevel=2)
-            
-        else:
-            with open(self._regtxt) as f_obj:
-                lines = f_obj.readlines()
-            self.regarea = float(lines[7].split()[3])
+        self._update_backscale()
         
         
     @property
@@ -91,44 +93,78 @@ class epXselect(object):
         
         self._bkregfile = new_bkregfile
         
-        self._bkregtxt = self._bkregfile[:-4] + '.txt'
-        
-        if not os.path.isfile(self._bkregtxt):
-            msg = 'bkreg text file is not found.'
-            warnings.warn(msg_format(msg), UserWarning, stacklevel=2)
+        self._update_backscale()
             
+            
+    @property
+    def armregfile(self):
+        
+        return os.path.abspath(self._armregfile)
+    
+    
+    @armregfile.setter
+    def armregfile(self, new_armregfile):
+        
+        self._armregfile = new_armregfile
+        
+        self._update_backscale()
+        
+        
+    @property
+    def arm(self):
+        
+        return self._arm
+    
+    
+    @arm.setter
+    def arm(self, new_arm):
+        
+        self._arm = new_arm
+        
+        self._update_backscale()
+
+
+    def _update_backscale(self):
+            
+        savepath = os.path.dirname(self.evtfile) + '/spectrum'
+        
+        if os.path.isdir(savepath):
+            shutil.rmtree(savepath)
+                
+        os.mkdir(savepath)
+            
+        src_specfile = savepath + f'/total.src'
+        bkg_specfile = savepath + f'/total.bkg'
+        
+        if self.arm and self.armregfile:
+            bkregfile = f'"{self.bkregfile} {self.armregfile}"'
         else:
-            with open(self._bkregtxt) as f_obj:
-                lines = f_obj.readlines()
-            
-            self.bkregarea = float(lines[7].split()[3])
+            bkregfile = f'"{self.bkregfile}"'
         
-        
-    @property
-    def reginfo(self):
-        
-        os.system(f'cat {self._regtxt}')
-        
-        return None
+        commands = ['xsel', 
+                    'read events', 
+                    os.path.dirname(self.evtfile), 
+                    self.evtfile.split('/')[-1], 
+                    'yes', 
+                    f'filter region {self.regfile}', 
+                    'extract spectrum', 
+                    f'save spectrum {src_specfile}', 
+                    'clear region', 
+                    f'filter region {bkregfile}', 
+                    'extract spectrum', 
+                    f'save spectrum {bkg_specfile}']
     
-    
-    @property
-    def bkreginfo(self):
+        _, _ = self._run_xselect(commands)
         
-        os.system(f'cat {self._bkregtxt}')
+        src_hdu = fits.open(src_specfile)
+        self.src_backscale = src_hdu['SPECTRUM'].header['BACKSCAL']
+        src_hdu.close()
         
-        return None
-    
-    
-    @property
-    def regratio(self):
+        bkg_hdu = fits.open(bkg_specfile)
+        self.bkg_backscale = bkg_hdu['SPECTRUM'].header['BACKSCAL']
+        bkg_hdu.close()
         
-        try:
-            return self.regarea / self.bkregarea
-        except:
-            msg = 'no region area information, back to default ratio 1/12'
-            warnings.warn(msg_format(msg), UserWarning, stacklevel=2)
-            return 1 / 12
+        self.backscale = self.src_backscale / self.bkg_backscale
 
 
     @property
@@ -336,13 +372,13 @@ class epXselect(object):
     @property
     def bkg_rate(self):
         
-        return self.bkg_cts / self.lc_binsize * self.regratio
+        return self.bkg_cts / self.lc_binsize * self.backscale
     
     
     @property
     def bkg_rate_err(self):
         
-        return self.bkg_cts_err / self.lc_binsize * self.regratio
+        return self.bkg_cts_err / self.lc_binsize * self.backscale
     
     
     @property
@@ -378,7 +414,7 @@ class epXselect(object):
     @property
     def lc_ps(self):
         
-        lc_ps = ppSignal(self.src_ts, self.bkg_ts, self.lc_bins, backscale=self.regratio)
+        lc_ps = ppSignal(self.src_ts, self.bkg_ts, self.lc_bins, backscale=self.backscale)
         lc_ps.loop(sigma=3)
         
         return lc_ps
@@ -401,6 +437,11 @@ class epXselect(object):
         src_evtfile = savepath + '/src.evt'
         bkg_evtfile = savepath + '/bkg.evt'
         
+        if self.arm and self.armregfile:
+            bkregfile = f'"{self.bkregfile} {self.armregfile}"'
+        else:
+            bkregfile = f'"{self.bkregfile}"'
+        
         commands = ['xsel', 
                     'read events', 
                     os.path.dirname(self.evtfile), 
@@ -416,7 +457,7 @@ class epXselect(object):
                     'no', 
                     'clear events', 
                     'clear region', 
-                    f'filter region {self.bkregfile}', 
+                    f'filter region {bkregfile}', 
                     'extract events', 
                     f'save events {bkg_evtfile}', 
                     'no']
@@ -523,7 +564,7 @@ class epXselect(object):
                 
         os.mkdir(savepath)
         
-        txx = ppTxx(self.src_ts, self.bkg_ts, self.lc_bins, self.regratio)
+        txx = ppTxx(self.src_ts, self.bkg_ts, self.lc_bins, self.backscale)
         txx.findpulse(sigma=sigma, mp=mp)
         txx.accumcts(xx=xx, pstart=pstart, pstop=pstop, lbkg=lbkg, rbkg=rbkg)
         txx.save(savepath=savepath)
@@ -544,6 +585,11 @@ class epXselect(object):
         
         lslices = np.array(spec_slices)[:, 0]
         rslices = np.array(spec_slices)[:, 1]
+        
+        if self.arm and self.armregfile:
+            bkregfile = f'"{self.bkregfile} {self.armregfile}"'
+        else:
+            bkregfile = f'"{self.bkregfile}"'
         
         for l, r in zip(lslices, rslices):
             scc_start = self.timezero + l
@@ -569,7 +615,7 @@ class epXselect(object):
                         'extract spectrum', 
                         f'save spectrum {src_specfile}', 
                         'clear region', 
-                        f'filter region {self.bkregfile}', 
+                        f'filter region {bkregfile}', 
                         'extract spectrum', 
                         f'save spectrum {bkg_specfile}']
         
