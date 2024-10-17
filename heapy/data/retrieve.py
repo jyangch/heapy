@@ -437,7 +437,7 @@ class epRetrieve(Retrieve):
 
 
 
-class FileFinder:
+class FileFinder(object):
     
     def __init__(self, local_dir, ftp_url=None):
 
