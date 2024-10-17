@@ -136,6 +136,9 @@ class epXselect(object):
         src_specfile = savepath + f'/total.src'
         bkg_specfile = savepath + f'/total.bkg'
         
+        scc_start = self.timezero + 0
+        scc_stop = self.timezero + 200
+        
         if self.arm and self.armregfile:
             bkregfile = f'"{self.bkregfile} {self.armregfile}"'
         else:
@@ -146,6 +149,9 @@ class epXselect(object):
                     os.path.dirname(self.evtfile), 
                     self.evtfile.split('/')[-1], 
                     'yes', 
+                    'filter time scc', 
+                    f'{scc_start}, {scc_stop}', 
+                    'x', 
                     f'filter region {self.regfile}', 
                     'extract spectrum', 
                     f'save spectrum {src_specfile}', 

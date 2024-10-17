@@ -162,7 +162,7 @@ class ppSignal(object):
             if snr_i > sigma:
                 self.re_sig_idx.append(i)
                 self.re_sig_int.append([self.edges[i], self.edges[i+1]])
-            elif -sigma <= snr_i <= sigma:
+            elif -5 < snr_i <= sigma:
                 self.re_bkg_idx.append(i)
                 self.re_bkg_int.append([self.edges[i], self.edges[i+1]])
             else:
@@ -173,7 +173,7 @@ class ppSignal(object):
             if snr_i > sigma:
                 self.sig_idx.append(i)
                 self.sig_int.append([self.lbins[i], self.rbins[i]])
-            elif -sigma <= snr_i <= sigma:
+            elif -5 < snr_i <= sigma:
                 self.bkg_idx.append(i)
                 self.bkg_int.append([self.lbins[i], self.rbins[i]])
             else:

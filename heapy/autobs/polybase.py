@@ -41,9 +41,9 @@ class PolyBase(object):
         self.time = (self.lbins + self.rbins) / 2
         self.rate = self.cts / self.exp
 
-        self.ini_res = {'ts': self.ts, 'time': self.time,
-                         'cts': self.cts, 'rate': self.rate, 
-                         'exp': self.exp, 'bins': self.bins}
+        self.ini_res = {'time': self.time, 'cts': self.cts, 
+                        'rate': self.rate, 'exp': self.exp, 
+                        'bins': self.bins}
 
         # basefit method
         self.base_res = None
@@ -110,7 +110,7 @@ class PolyBase(object):
             self.bts = np.append(self.bts, np.random.random(size=int(n)) * (t2 - t1) + t1)
 
         # plus zero for copy
-        self.base_res = {'bts': self.bts + 0, 'bcts': self.bcts + 0, 'bak': self.bak + 0}
+        self.base_res = {'bcts': self.bcts + 0, 'bak': self.bak + 0}
     
 
     def bblock(self, p0=0.05):
@@ -203,7 +203,7 @@ class PolyBase(object):
             if snr_i > sigma:
                 self.re_sig_idx.append(i)
                 self.re_sig_int.append([self.edges[i], self.edges[i+1]])
-            elif -sigma <= snr_i <= sigma:
+            elif -5 < snr_i <= sigma:
                 self.re_bkg_idx.append(i)
                 self.re_bkg_int.append([self.edges[i], self.edges[i+1]])
             else:
@@ -214,7 +214,7 @@ class PolyBase(object):
             if snr_i > sigma:
                 self.sig_idx.append(i)
                 self.sig_int.append([self.lbins[i], self.rbins[i]])
-            elif -sigma <= snr_i <= sigma:
+            elif -5 < snr_i <= sigma:
                 self.bkg_idx.append(i)
                 self.bkg_int.append([self.lbins[i], self.rbins[i]])
             else:
@@ -283,7 +283,6 @@ class PolyBase(object):
 
         self.poly_res = {'deg': self.poly.deg,
                          'fit': self.poly.ls_res,
-                         'bts': self.bts, 
                          'bcts': self.bcts, 
                          'bcts_se': self.bcts_se, 
                          'bak': self.bak, 

@@ -64,7 +64,7 @@ def gecam_utc_to_met(utc, format='isot'):
 def ep_utc_to_met(utc, format='isot'):
 
     ref_utc = Time('2020-01-01T00:00:00.000', format='isot', scale='utc')
-    now_utc = Time(utc, format='isot', scale='utc')
+    now_utc = Time(utc, format=format, scale='utc')
     met = (now_utc - ref_utc).sec
 
     return met
@@ -73,6 +73,24 @@ def ep_utc_to_met(utc, format='isot'):
 def ep_met_to_utc(met):
 
     ref_utc = Time('2020-01-01T00:00:00.000', format='isot', scale='utc')
+    dt = TimeDelta(met, format='sec')
+    now_utc = (ref_utc + dt).value
+
+    return now_utc
+
+
+def leia_utc_to_met(utc, format='isot'):
+
+    ref_utc = Time('2021-01-01T00:00:00.000', format='isot', scale='utc')
+    now_utc = Time(utc, format=format, scale='utc')
+    met = (now_utc - ref_utc).sec
+
+    return met
+
+
+def leia_met_to_utc(met):
+
+    ref_utc = Time('2021-01-01T00:00:00.000', format='isot', scale='utc')
     dt = TimeDelta(met, format='sec')
     now_utc = (ref_utc + dt).value
 

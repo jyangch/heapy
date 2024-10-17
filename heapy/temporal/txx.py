@@ -110,18 +110,15 @@ class pgTxx(PolyBase):
         tindex = np.where((self.time >= tmin) & (self.time <= tmax))[0]
 
         self.ccts = np.cumsum(self.ncts)
-        # smooth_ccts = get_smooth(time, ccts, w=None, d=None, lmbd=1)
 
         idx = np.argsort(self.pstop - self.pstart)[0]
-        if len(np.where((self.time >= self.pstart[idx]) & (self.time <= self.pstop[idx]))[0]) < 300:
-            interp_dt = (self.pstop[idx] - self.pstart[idx]) / 300
+        if len(np.where((self.time >= self.pstart[idx]) & (self.time <= self.pstop[idx]))[0]) < 1000:
+            interp_dt = (self.pstop[idx] - self.pstart[idx]) / 1000
             interp_time = np.arange(tmin, tmax - 1e-5, interp_dt)
-            #interp = interp1d(time, smooth_ccts, kind='quadratic')
             interp = interp1d(self.time, self.ccts, kind='quadratic')
             interp_ccts = interp(interp_time)
         else:
             interp_time = self.time[tindex]
-            #interp_ccts = smooth_ccts[tindex]
             interp_ccts = self.ccts[tindex]
 
         self.csf, self.csf1, self.csf2 = [], [], []
@@ -385,8 +382,8 @@ class ppTxx(ppSignal):
             ccts = np.cumsum(ncts)
 
             idx = np.argsort(self.pstop - self.pstart)[0]
-            if len(np.where((self.time >= self.pstart[idx]) & (self.time <= self.pstop[idx]))[0]) < 300:
-                interp_dt = (self.pstop[idx] - self.pstart[idx]) / 300
+            if len(np.where((self.time >= self.pstart[idx]) & (self.time <= self.pstop[idx]))[0]) < 1000:
+                interp_dt = (self.pstop[idx] - self.pstart[idx]) / 1000
                 interp_time = np.arange(tmin, tmax - 1e-5, interp_dt)
                 interp = interp1d(self.time, ccts, kind='quadratic')
                 interp_ccts = interp(interp_time)
