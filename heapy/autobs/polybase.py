@@ -77,16 +77,30 @@ class PolyBase(object):
 
         sbs_ = cls(ts, bins, exp)
         return sbs_
+    
+    
+    def bblock(self, p0=0.05):
+        pos = np.where(self.cts > 0)[0]
+        edges_ = bayesian_blocks(self.time[pos], self.cts[pos], fitness='events', p0=p0)
+
+        edges = [self.time[0], edges_[0], edges_[-1], self.time[-1]]
+        for i in range(1, len(edges_) - 1, 1):
+            flag1 = (edges_[i] - edges_[i-1]) > np.min(self.binsize) / 1.8
+            flag2 = (edges_[i+1] - edges_[i]) > np.min(self.binsize) / 1.8
+            if flag1 and flag2:
+                edges.append(edges_[i])
+        self.edges = np.unique(edges)
+        self.nblock = len(self.edges) - 1
+        self.re_binsize = self.edges[1:] - self.edges[:-1]
+        
+        self.re_cts, _ = np.histogram(self.ts, bins=self.edges)
+
+        self.block_res = {'edges': self.edges, 'nblock': self.nblock, 're_binsize': self.re_binsize}
 
 
     def basefit(self, weight=None, ignore=None):
-        """
-        Parameters
-        ----------
-        weight: 1D array_like
-        ignore: 2D array_like, shape (, 2)
-        -------
-        """
+        if self.block_res is None: self.bblock()
+        
         if weight is None:
             weight = np.ones_like(self.time)
 
@@ -100,47 +114,23 @@ class PolyBase(object):
             weight[ignore_idx] = 0
 
         pos = np.where(self.cts > 0)[0]
-        bl = Baseline.set_method('drpls')
-        bl.fit(self.time[pos], self.rate[pos], w=weight[pos], lam=None, nk=None)
-        self.bak = bl.val(self.time)
+        self.bl = Baseline.set_method('drpls')
+        self.bl.fit(self.time[pos], self.rate[pos], w=weight[pos], lam=None, nk=None)
+        self.bak = self.bl.val(self.time)
         self.bcts = self.bak * self.exp
-
-        self.bts = np.array([])
-        for t1, t2, n in zip(self.lbins, self.rbins, self.bcts):
-            self.bts = np.append(self.bts, np.random.random(size=int(n)) * (t2 - t1) + t1)
+        
+        self.re_bcts = np.empty(self.nblock)
+        for i, (l, r) in enumerate(zip(self.edges[:-1], self.edges[1:])):
+            x = np.linspace(l, r, 100)
+            y = self.bl.val(x)
+            self.re_bcts[i] = np.trapz(y, x)
 
         # plus zero for copy
         self.base_res = {'bcts': self.bcts + 0, 'bak': self.bak + 0}
-    
-
-    def bblock(self, p0=0.05):
-        pos = np.where(self.cts > 0)[0]
-        edges_ = bayesian_blocks(self.time[pos], self.cts[pos], fitness='events', p0=p0)
-
-        edges = [self.bins[0], edges_[0] - self.binsize[0]/2, edges_[-1] + self.binsize[-1]/2, self.bins[-1]]
-        for i in range(1, len(edges_) - 1, 1):
-            flag1 = (edges_[i] - edges_[i-1]) > np.min(self.binsize) / 1.8
-            flag2 = (edges_[i+1] - edges_[i]) > np.min(self.binsize) / 1.8
-            if flag1 and flag2:
-                edges.append(edges_[i])
-        self.edges = np.unique(edges)
-        self.re_binsize = self.edges[1:] - self.edges[:-1]
-
-        self.block_res = {'edges': self.edges, 're_binsize': self.re_binsize}
-
-
-    @staticmethod
-    def rebin(bins, ts):
-        cts, _ = np.histogram(ts, bins=bins)
-        return cts
 
 
     def calsnr(self):
-        if self.block_res is None: self.bblock()
         if self.base_res is None: self.basefit()
-
-        self.re_cts = self.rebin(self.edges, self.ts)
-        self.re_bcts = self.rebin(self.edges, self.bts)
 
         self.snr = np.zeros_like(self.binsize)
         for i in range(len(self.binsize)):
@@ -277,9 +267,14 @@ class PolyBase(object):
 
         self.bcts = self.bak * self.exp
         self.bcts_se = self.bak_se * self.exp
-        self.bts = np.array([])
-        for t1, t2, n in zip(self.lbins, self.rbins, self.bcts):
-            self.bts = np.append(self.bts, np.random.random(size=int(n)) * (t2 - t1) + t1)
+        
+        self.re_bcts = np.empty(self.nblock)
+        self.re_bcts_se = np.empty(self.nblock)
+        for i, (l, r) in enumerate(zip(self.edges[:-1], self.edges[1:])):
+            x = np.linspace(l, r, 100)
+            y, y_se = self.poly.val(x)
+            self.re_bcts[i] = np.trapz(y, x)
+            self.re_bcts_se[i] = np.trapz(y_se, x)
 
         self.poly_res = {'deg': self.poly.deg,
                          'fit': self.poly.ls_res,

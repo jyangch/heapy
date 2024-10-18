@@ -323,6 +323,7 @@ class Event(Reduction):
         
         lc_bs = PolyBase(self.lc_ts, self.lc_bins, self.lc_exps)
         lc_bs.loop(sigma=2, deg=None)
+        lc_bs.loop(sigma=2, deg=None)
         
         return lc_bs
     
@@ -526,6 +527,7 @@ class Event(Reduction):
         interp_time = np.linspace(interp_range[0], interp_range[-1], 100)
         
         bs = PolyBase(self.spec_ts, bins)
+        bs.loop(sigma=2, deg=None)
         bs.loop(sigma=2, deg=None)
         
         ignore = bs.ignore

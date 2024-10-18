@@ -24,6 +24,7 @@ class pgTxx(PolyBase):
     def findpulse(self, sigma=3, deg=None, mp=True):
         if self.poly_res is None:
             self.loop(sigma=sigma, deg=deg)
+            self.loop(sigma=sigma, deg=deg)
 
         self.ncts = self.cts - self.bcts
         self.net = self.rate - self.bak

@@ -45,8 +45,7 @@ class ppSignal(object):
         self.rate = self.cts / self.exp
         self.bak = self.bcts * self.backscale / self.exp
 
-        self.ini_res = {'ts': self.ts, 'bts': self.bts, 
-                        'cts': self.cts, 'bcts': self.bcts, 
+        self.ini_res = {'cts': self.cts, 'bcts': self.bcts, 
                         'time': self.time, 'rate': self.rate, 
                         'bak': self.bak, 'exp': self.exp, 
                         'backscale': self.backscale, 'bins': self.bins}
@@ -117,19 +116,19 @@ class ppSignal(object):
         self.snr = np.zeros_like(self.binsize)
         for i in range(len(self.binsize)):
             cts_i = self.cts[i]
-            bcts_i = self.bcts[i] * self.backscale
+            bcts_i = self.bcts[i]
             
             if bcts_i < 0 or cts_i < 0:
                 snr_i = -5      # bad events
             else:
-                snr_i = ppsig(cts_i, bcts_i, 1)
+                snr_i = ppsig(cts_i, bcts_i, self.backscale)
 
             self.snr[i] = snr_i
             
         self.re_snr = np.zeros_like(self.re_binsize)
         for i in range(len(self.re_binsize)):
             cts_i = self.re_cts[i]
-            bcts_i = self.re_bcts[i] * self.backscale
+            bcts_i = self.re_bcts[i]
             size_i = self.re_binsize[i]
             alpha = size_i / (20 * self.binsize.mean())
 
@@ -140,7 +139,7 @@ class ppSignal(object):
             if bcts_i < 0 or cts_i < 0:
                 snr_i = -5      # bad events
             else:
-                snr_i = ppsig(cts_i, bcts_i, 1)
+                snr_i = ppsig(cts_i, bcts_i, self.backscale)
 
             self.re_snr[i] = snr_i
 
