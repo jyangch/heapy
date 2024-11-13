@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 from matplotlib import rcParams
 from astropy.stats import bayesian_blocks
 from ..util.significance import ppsig
-from ..util.data import msg_format, NpEncoder
+from ..util.data import msg_format, json_dump
 
 
 
@@ -216,10 +216,10 @@ class ppSignal(object):
         if not os.path.exists(savepath):
             os.makedirs(savepath)
 
-        json.dump(self.ini_res, open(savepath + '/ini_res%s.json'%suffix, 'w'), indent=4, cls=NpEncoder)
-        json.dump(self.block_res, open(savepath + '/block_res%s.json'%suffix, 'w'), indent=4, cls=NpEncoder)
-        json.dump(self.snr_res, open(savepath + '/snr_res%s.json'%suffix, 'w'), indent=4, cls=NpEncoder)
-        json.dump(self.sort_res, open(savepath + '/sort_res%s.json'%suffix, 'w'), indent=4, cls=NpEncoder)
+        json_dump(self.ini_res, savepath + '/ini_res%s.json'%suffix)
+        json_dump(self.block_res, savepath + '/block_res%s.json'%suffix)
+        json_dump(self.snr_res, savepath + '/snr_res%s.json'%suffix)
+        json_dump(self.sort_res, savepath + '/sort_res%s.json'%suffix)
 
         rcParams['font.family'] = 'serif'
         rcParams['font.sans-serif'] = 'Georgia'

@@ -1,45 +1,209 @@
 import os
-import json
+import warnings
 import numpy as np
+from astropy import units
+from astropy import table
 from astropy.io import fits
 from astropy.time import Time
 import plotly.graph_objs as go
-from .reduction import Reduction
+from astropy.units import UnitsWarning
+warnings.simplefilter('ignore', UnitsWarning)
+from .filter import Filter
+from .retrieve import gbmRetrieve, gecamRetrieve
 from ..temporal.txx import pgTxx
-from ..util.data import NpEncoder
 from ..autobs.polybase import PolyBase
+from ..util.data import msg_format, json_dump
+from ..util.time import fermi_met_to_utc, gecam_met_to_utc
 
 
 
-class Event(Reduction):
+class Event(object):
     
-    def __init__(self, reduction):
+    def __init__(self, file):
         
-        self.reduction = reduction
+        self._file = file
+        
+        self._read()
         
         
+    def _read(self):
+        
+        if self.file is not None:
+            hdu = fits.open(self.file)
+            self._event = table.Table.read(hdu['EVENTS'])
+            self._ebound = table.Table.read(hdu['EBOUNDS'])
+            self._gti = table.Table.read(hdu['GTI'])
+            
+            self._timezero = np.min(self._event['TIME'])
+            self._filter = Filter(self._event)
+            self._filter_info = {'time': None, 'energy': None, 'tag': None}
+
+    
+    @staticmethod
+    def _ch_to_energy(pi, ch, e1, e2):
+        
+        energy = np.zeros_like(pi)
+        
+        for i, chi in enumerate(ch):
+            chi_idx = np.where(pi == chi)[0]
+            chi_energy = Event._energy_of_ch(len(chi_idx), e1[i], e2[i])
+            energy[chi_idx] = chi_energy
+            
+        return energy
+
+
+    @staticmethod
+    def _energy_of_ch(n, e1, e2):
+        
+        energy_arr = np.random.random_sample(n)
+        energy = e1 + (e2 - e1) * energy_arr
+        
+        return energy
+
+
     @property
-    def reduction(self):
+    def file(self):
         
-        return self._reduction
+        return self._file
     
     
-    @reduction.setter
-    def reduction(self, new_reduction):
+    @file.setter
+    def file(self, new_file):
         
-        if not isinstance(new_reduction, Reduction):
-            raise TypeError('expected an instance of Reduction')
+        self._file = new_file
         
-        self._reduction = new_reduction
-        self.__dict__.update(new_reduction.__dict__)
-        
+        self._read()
     
+    
+    @property
+    def event(self):
+        
+        return self._filter.evt
+    
+    
+    @property
+    def gti(self):
+        
+        return self._gti
+    
+    
+    @property
+    def ebound(self):
+        
+        return self._ebound
+    
+    
+    @property
+    def timezero(self):
+        
+        return self._timezero
+    
+    
+    @timezero.setter
+    def timezero(self, new_timezero):
+        
+        if isinstance(new_timezero, float):
+            self._timezero = new_timezero
+        else:
+            raise ValueError('not expected type for timezero')
+        
+        
     @property
     def timezero_utc(self):
         
-        return self._reduction.timezero_utc
+        return None
+
+
+    def slice_time(self, t1t2):
+        
+        t1, t2 = t1t2
+        
+        met_t1 = self.timezero + t1
+        met_t2 = self.timezero + t2
+        
+        met_ts = self._event['TIME']
+        flt = (met_ts >= met_t1) & (met_ts <= met_t2)
+        self._event = self._event[flt]
+        
+        self._clear_filter()
+
+    
+    def filter_time(self, t1t2):
+        
+        if t1t2 is None:
+            expr = None
+            
+        elif isinstance(t1t2, list):
+            t1, t2 = t1t2
+            
+            met_t1 = self.timezero + t1
+            met_t2 = self.timezero + t2
+                
+            expr = f'(TIME >= {met_t1}) * (TIME <= {met_t2})'
+            
+        else:
+            raise ValueError('t1t2 is extected to be list or None')
+        
+        self._time_filter = t1t2
+        
+        self._filter_info['time'] = expr
+        
+        self._filter_update()
         
         
+    def filter_energy(self, e1e2):
+        
+        if e1e2 is None:
+            expr = None
+            
+        elif isinstance(e1e2, list):
+            e1, e2 = e1e2
+            expr = f'(ENERGY >= {e1}) * (ENERGY <= {e2})'
+            
+        else:
+            raise ValueError('e1e2 is extected to be list or None')
+        
+        self._filter_info['energy'] = expr
+        
+        self._filter_update()
+        
+        
+    def filter(self, expr):
+        
+        self._filter_info['tag'] = expr
+        
+        self._filter_update()
+        
+        
+    def _filter_update(self):
+        
+        self._clear_filter()
+        
+        self._filter.eval(self._filter_info['time'])
+        self._filter.eval(self._filter_info['energy'])
+        self._filter.eval(self._filter_info['tag'])
+        
+        
+    def _clear_filter(self):
+        
+        self._filter.clear()
+        
+        
+    @property
+    def filter_info(self):
+        
+        return self._filter_info
+    
+    
+    @property
+    def time_filter(self):
+        
+        if self._filter_info['time'] is None:
+            return [np.min(self._event['TIME']), np.max(self._event['TIME'])]
+        else:
+            return self._time_filter
+
+
     @property
     def _ts(self):
         
@@ -59,8 +223,8 @@ class Event(Reduction):
     def _dtime(self):
         
         return np.array(self._event['DEAD_TIME'])
-
-
+    
+    
     @property
     def ts(self):
     
@@ -92,20 +256,20 @@ class Event(Reduction):
     def channel_emax(self):
         
         return np.array(self.ebound['E_MAX'])
-
-
+    
+    
     @property
     def lc_t1t2(self):
         
         try:
             self._lc_t1t2
         except AttributeError:
-            return [np.min(self.ts), np.max(self.ts)]
+            return self.time_filter
         else:
             if self._lc_t1t2 is not None:
                 return self._lc_t1t2
             else:
-                return [np.min(self.ts), np.max(self.ts)]
+                return self.time_filter
         
         
     @lc_t1t2.setter
@@ -114,7 +278,7 @@ class Event(Reduction):
         if isinstance(new_lc_t1t2, (list, type(None))):
             self._lc_t1t2 = new_lc_t1t2
         else:
-            raise ValueError('not expected lc_t1t2 type')
+            raise ValueError('lc_t1t2 is extected to be list or None')
 
 
     @property
@@ -123,12 +287,12 @@ class Event(Reduction):
         try:
             self._spec_t1t2
         except AttributeError:
-            return [np.min(self.ts), np.max(self.ts)]
+            return self.time_filter
         else:
             if self._spec_t1t2 is not None:
                 return self._spec_t1t2
             else:
-                return [np.min(self.ts), np.max(self.ts)]
+                return self.time_filter
 
 
     @spec_t1t2.setter
@@ -137,7 +301,7 @@ class Event(Reduction):
         if isinstance(new_spec_t1t2, (list, type(None))):
             self._spec_t1t2 = new_spec_t1t2
         else:
-            raise ValueError('not expected spec_t1t2 type')
+            raise ValueError('spec_t1t2 is extected to be list or None')
     
     
     @property
@@ -169,7 +333,10 @@ class Event(Reduction):
     @lc_binsize.setter
     def lc_binsize(self, new_lc_binsize):
         
-        self._lc_binsize = new_lc_binsize
+        if isinstance(new_lc_binsize, (int, float, type(None))):
+            self._lc_binsize = new_lc_binsize
+        else:
+            raise ValueError('lc_binsize is extected to be int, float or None')
         
         
     @property
@@ -189,9 +356,12 @@ class Event(Reduction):
     @spec_binsize.setter
     def spec_binsize(self, new_spec_binsize):
         
-        self._spec_binsize = new_spec_binsize
-    
-    
+        if isinstance(new_spec_binsize, (int, float, type(None))):
+            self._spec_binsize = new_spec_binsize
+        else:
+            raise ValueError('spec_binsize is extected to be int, float or None')
+        
+        
     @property
     def lc_ts(self):
         
@@ -242,8 +412,8 @@ class Event(Reduction):
             
             elif binsize < 1:
                 return binsize
-    
-    
+            
+            
     def exposure(self, bin_list):
         
         ts = self._ts
@@ -259,7 +429,7 @@ class Event(Reduction):
 
         return binsize - dead_time
     
-    
+
     @property
     def lc_bins(self):
         
@@ -295,27 +465,27 @@ class Event(Reduction):
     
     
     @property
-    def src_cts(self):
+    def lc_src_cts(self):
         
         return np.histogram(self.lc_ts, bins=self.lc_bins)[0]
     
     
     @property
-    def src_cts_err(self):
+    def lc_src_cts_err(self):
         
-        return np.sqrt(self.src_cts)
+        return np.sqrt(self.lc_src_cts)
     
     
     @property
-    def src_rate(self):
+    def lc_src_rate(self):
         
-        return self.src_cts / self.lc_exps
+        return self.lc_src_cts / self.lc_exps
     
     
     @property
-    def src_rate_err(self):
+    def lc_src_rate_err(self):
         
-        return self.src_cts_err / self.lc_exps
+        return self.lc_src_cts_err / self.lc_exps
     
     
     @property
@@ -329,98 +499,102 @@ class Event(Reduction):
     
     
     @property
-    def bkg_rate(self):
+    def lc_bkg_rate(self):
         
         return self.lc_bs.poly.val(self.lc_time)[0]
     
     
     @property
-    def bkg_rate_err(self):
+    def lc_bkg_rate_err(self):
         
         return self.lc_bs.poly.val(self.lc_time)[1]
     
     
     @property
-    def bkg_cts(self):
+    def lc_bkg_cts(self):
         
-        return self.bkg_rate * self.lc_exps
+        return self.lc_bkg_rate * self.lc_exps
     
     
     @property
-    def bkg_cts_err(self):
+    def lc_bkg_cts_err(self):
         
-        return self.bkg_rate_err * self.lc_exps
+        return self.lc_bkg_rate_err * self.lc_exps
     
     
     @property
-    def net_rate(self):
+    def lc_net_rate(self):
         
-        return self.src_rate - self.bkg_rate
+        return self.lc_src_rate - self.lc_bkg_rate
     
     
     @property
-    def net_rate_err(self):
+    def lc_net_rate_err(self):
         
-        return np.sqrt(self.src_rate_err ** 2 + self.bkg_rate_err ** 2)
+        return np.sqrt(self.lc_src_rate_err ** 2 + self.lc_bkg_rate_err ** 2)
     
     
     @property
-    def net_cts(self):
+    def lc_net_cts(self):
         
-        return self.net_rate * self.lc_exps
+        return self.lc_net_rate * self.lc_exps
     
     
     @property
-    def net_cts_err(self):
+    def lc_net_cts_err(self):
         
-        return self.net_rate_err * self.lc_exps
+        return self.lc_net_rate_err * self.lc_exps
     
 
     @property
-    def net_ccts(self):
+    def lc_net_ccts(self):
         
-        return np.cumsum(self.net_cts)
+        return np.cumsum(self.lc_net_cts)
     
     
-    def extract_curve(self, savepath='./curve', show=False):
+    def extract_curve(self, savepath='./curve', autobs=True, show=False):
         
         if not os.path.exists(savepath):
             os.makedirs(savepath)
             
-        lc_bs = self.lc_bs
-        lc_bs.save(savepath=savepath + '/polybase')
+        if autobs:
+            lc_bs = self.lc_bs
+            lc_bs.save(savepath=savepath + '/polybase')
+            
+            lc_bkg_rate, lc_bkg_rate_err = lc_bs.poly.val(self.lc_time)
         
-        bkg_rate, bkg_rate_err = lc_bs.poly.val(self.lc_time)
-        
-        net_rate = self.src_rate - bkg_rate
-        net_cts = net_rate * self.lc_exps
+            lc_net_rate = self.lc_src_rate - lc_bkg_rate
+            lc_net_cts = lc_net_rate * self.lc_exps
+            
+            lc_net_ccts = np.cumsum(lc_net_cts)
         
         fig = go.Figure()
         src = go.Scatter(x=self.lc_time, 
-                         y=self.src_rate, 
+                         y=self.lc_src_rate, 
                          mode='lines+markers', 
                          name='source lightcurve', 
                          showlegend=True, 
                          error_y=dict(
                              type='data',
-                             array=self.src_rate_err,
+                             array=self.lc_src_rate_err,
                              thickness=1.5,
                              width=0), 
                          marker=dict(symbol='cross-thin', size=0))
-        bkg = go.Scatter(x=self.lc_time, 
-                         y=bkg_rate, 
-                         mode='lines+markers', 
-                         name='background lightcurve', 
-                         showlegend=True, 
-                         error_y=dict(
-                             type='data',
-                             array=bkg_rate_err,
-                             thickness=1.5,
-                             width=0), 
-                         marker=dict(symbol='cross-thin', size=0))
-        
         fig.add_trace(src)
-        fig.add_trace(bkg)
+        
+        if autobs:
+            bkg = go.Scatter(x=self.lc_time, 
+                             y=lc_bkg_rate, 
+                             mode='lines+markers', 
+                             name='background lightcurve', 
+                             showlegend=True, 
+                             error_y=dict(
+                                 type='data',
+                                 array=lc_bkg_rate_err,
+                                 thickness=1.5,
+                                 width=0), 
+                             marker=dict(symbol='cross-thin', size=0))
+            fig.add_trace(bkg)
         
         fig.update_xaxes(title_text=f'Time since {self.timezero_utc} (s)')
         fig.update_yaxes(title_text=f'Counts per second (binsize={self.lc_binsize} s)')
@@ -429,28 +603,27 @@ class Event(Reduction):
         
         if show: fig.show()
         fig.write_html(savepath + '/lc.html')
-        json.dump(fig.to_dict(), open(savepath + '/lc.json', 'w'), indent=4, cls=NpEncoder)
+        json_dump(fig.to_dict(), savepath + '/lc.json')
         
-        net_ccts = np.cumsum(net_cts)
-        
-        fig = go.Figure()
-        net = go.Scatter(x=self.lc_time, 
-                         y=net_ccts, 
-                         mode='lines', 
-                         name='net cumulated counts', 
-                         showlegend=True)
-        
-        fig.add_trace(net)
-        
-        fig.update_xaxes(title_text=f'Time since {self.timezero_utc} (s)')
-        fig.update_yaxes(title_text=f'Cumulated counts (binsize={self.lc_binsize} s)')
-        fig.update_layout(template='plotly_white', height=600, width=800)
-        fig.update_layout(legend=dict(x=1, y=1, xanchor='right', yanchor='bottom'))
-        
-        fig.write_html(savepath + '/cum_lc.html')
-        json.dump(fig.to_dict(), open(savepath + '/cum_lc.json', 'w'), indent=4, cls=NpEncoder)
-        
-        
+        if autobs:
+            fig = go.Figure()
+            net = go.Scatter(x=self.lc_time, 
+                            y=lc_net_ccts, 
+                            mode='lines', 
+                            name='net cumulated counts', 
+                            showlegend=True)
+            
+            fig.add_trace(net)
+            
+            fig.update_xaxes(title_text=f'Time since {self.timezero_utc} (s)')
+            fig.update_yaxes(title_text=f'Cumulated counts (binsize={self.lc_binsize} s)')
+            fig.update_layout(template='plotly_white', height=600, width=800)
+            fig.update_layout(legend=dict(x=1, y=1, xanchor='right', yanchor='bottom'))
+            
+            fig.write_html(savepath + '/cum_lc.html')
+            json_dump(fig.to_dict(), savepath + '/cum_lc.json')
+            
+
     def calculate_txx(self, sigma=2, mp=True, xx=0.9, pstart=None, pstop=None, 
                       lbkg=None, rbkg=None, savepath='./curve/duration'):
         
@@ -461,8 +634,29 @@ class Event(Reduction):
         txx.findpulse(sigma=sigma, mp=mp)
         txx.accumcts(xx=xx, pstart=pstart, pstop=pstop, lbkg=lbkg, rbkg=rbkg)
         txx.save(savepath=savepath)
-
-
+        
+        
+    @property
+    def spec_slices(self):
+        
+        try:
+            return self._spec_slices
+        except AttributeError:
+            return [self.time_filter]
+        
+        
+    @spec_slices.setter
+    def spec_slices(self, new_spec_slice):
+        
+        if isinstance(new_spec_slice, list):
+            if isinstance(new_spec_slice[0], list):
+                self._spec_slices = new_spec_slice
+            else:
+                raise ValueError('not expected spec_slices type')
+        else:
+            raise ValueError('not expected spec_slices type')
+        
+        
     def _extract_src_phaii(self, spec_slices):
         
         num_slices = len(spec_slices)
@@ -483,17 +677,17 @@ class Event(Reduction):
         return phaii
     
     
-    def extract_src_phaii(self, spec_slices, savepath='./spectrum'):
+    def extract_src_phaii(self, savepath='./spectrum'):
             
-        phaii = self._extract_src_phaii(spec_slices)
+        phaii = self._extract_src_phaii(self.spec_slices)
         
         if not os.path.exists(savepath):
             os.makedirs(savepath)
                 
-        exps = self.exposure(spec_slices)
+        exps = self.exposure(self.spec_slices)
             
-        lslices = np.array(spec_slices)[:, 0]
-        rslices = np.array(spec_slices)[:, 1]
+        lslices = np.array(self.spec_slices)[:, 0]
+        rslices = np.array(self.spec_slices)[:, 1]
     
         for i, (l, r) in enumerate(zip(lslices, rslices)):
             new_l = '{:+.2f}'.format(l).replace('-', 'm').replace('.', 'd').replace('+', 'p')
@@ -506,8 +700,8 @@ class Event(Reduction):
             if os.path.isfile(savepath + f'/{file_name}'):
                 os.remove(savepath + f'/{file_name}')
             pha_hdu.writeto(savepath + f'/{file_name}')
-                
-                
+            
+            
     def _extract_bkg_phaii(self, spec_slices, show=False):
         
         num_slices = len(spec_slices)
@@ -595,17 +789,17 @@ class Event(Reduction):
         return phaii, phaii_err
                 
                 
-    def extract_bkg_phaii(self, spec_slices, savepath='./spectrum', show=False):
+    def extract_bkg_phaii(self, savepath='./spectrum', show=False):
         
-        phaii, phaii_err = self._extract_bkg_phaii(spec_slices, show=show)
+        phaii, phaii_err = self._extract_bkg_phaii(self.spec_slices, show=show)
         
         if not os.path.exists(savepath):
             os.makedirs(savepath)
             
-        exps = self.exposure(spec_slices)
+        exps = self.exposure(self.spec_slices)
             
-        lslices = np.array(spec_slices)[:, 0]
-        rslices = np.array(spec_slices)[:, 1]
+        lslices = np.array(self.spec_slices)[:, 0]
+        rslices = np.array(self.spec_slices)[:, 1]
     
         for i, (l, r) in enumerate(zip(lslices, rslices)):
             new_l = '{:+.2f}'.format(l).replace('-', 'm').replace('.', 'd').replace('+', 'p')
@@ -620,13 +814,13 @@ class Event(Reduction):
             pha_hdu.writeto(savepath + f'/{file_name}')
                 
                 
-    def extract_spectrum(self, spec_slices, savepath='./spectrum', show=False):
+    def extract_spectrum(self, savepath='./spectrum', show=False):
         
         if not os.path.exists(savepath):
             os.makedirs(savepath)
         
-        self.extract_src_phaii(spec_slices, savepath=savepath)
-        self.extract_bkg_phaii(spec_slices, savepath=savepath, show=show)
+        self.extract_src_phaii(savepath=savepath)
+        self.extract_bkg_phaii(savepath=savepath, show=show)
 
 
     def _to_pha_fits(self, pha, pha_err, exp, file_name):
@@ -674,3 +868,233 @@ class Event(Reduction):
         pha_hdu = fits.HDUList([primary_hdu, spectrum_hdu, ebound_hdu])
         
         return pha_hdu
+
+
+
+class gbmTTE(Event):
+
+    def __init__(self, file):
+        
+        super().__init__(file)
+
+
+    @classmethod
+    def from_utc(cls, utc, det):
+        
+        dets = ['n0','n1','n2','n3','n4','n5','n6','n7','n8','n9','na','nb','b0','b1']
+        msg = 'invalid detector: %s' % det
+        assert det in dets, msg_format(msg)
+        
+        rtv = gbmRetrieve.from_utc(utc=utc, t1=-200, t2=500)
+
+        ttefile = rtv.rtv_res['tte'][det]
+            
+        msg = 'no retrieved tte file'
+        assert ttefile != [], msg_format(msg)
+        
+        return cls(ttefile)
+    
+
+    def _read(self):
+        
+        event_list = list()
+        gti_list = list()
+        
+        for i in range(len(self.file)):
+            hdu = fits.open(self.file[i])
+            event = table.Table.read(hdu['EVENTS'])
+            ebound = table.Table.read(hdu['EBOUNDS'])
+            gti = table.Table.read(hdu['GTI'])
+            hdu.close()
+            
+            pha = np.array(event['PHA']).astype(int)
+            ch = np.array(ebound['CHANNEL']).astype(int)
+            emin = np.array(ebound['E_MIN'])
+            emax = np.array(ebound['E_MAX'])
+            energy = Event._ch_to_energy(pha, ch, emin, emax)
+            event['ENERGY'] = energy * units.keV
+            event['DEAD_TIME'] = (pha == 127) * 10.0 + (pha < 127) * 2.6
+            
+            event_list.append(event)
+            gti_list.append(gti)
+            
+        self._event = table.vstack(event_list)
+        self._gti = table.vstack(gti_list)
+        self._ebound = ebound
+
+        self._event = table.unique(self._event, keys=['TIME', 'PHA'])
+        self._gti = table.unique(self._gti, keys=['START', 'STOP'])
+
+        self._event.sort('TIME')
+        self._gti.sort('START')
+        
+        self._timezero = np.min(self._event['TIME'])
+        
+        self._filter = Filter(self._event)
+        self._filter_info = {'time': None, 'energy': None, 'pha': None, 'tag': None}
+        
+        
+    @property
+    def timezero_utc(self):
+        
+        return fermi_met_to_utc(self.timezero)
+    
+    
+    def filter_pha(self, p1p2):
+        
+        if p1p2 is None:
+            expr = None
+            
+        elif isinstance(p1p2, list):
+            p1, p2 = p1p2
+            expr = f'(PHA >= {p1}) * (PHA <= {p2})'
+            
+        else:
+            raise ValueError('p1p2 is extected to be list or None')
+        
+        self._filter_info['pha'] = expr
+        
+        self._filter_update()
+        
+        
+    def _filter_update(self):
+        
+        self._clear_filter()
+        
+        self._filter.eval(self._filter_info['time'])
+        self._filter.eval(self._filter_info['pha'])
+        self._filter.eval(self._filter_info['energy'])
+        self._filter.eval(self._filter_info['tag'])
+
+
+
+class gecamEVT(Event):
+
+    def __init__(self, file, det, gain_type):
+        
+        self._file = file
+        self.det = det
+        self.gain_type = gain_type
+        
+        self._read()
+
+
+    @classmethod
+    def from_utc(cls, utc, det, gain_type):
+        
+        rtv = gecamRetrieve.from_utc(utc=utc, t1=-200, t2=500)
+
+        evtfile = rtv.rtv_res['grd_evt']
+            
+        msg = 'no retrieved evt file'
+        assert evtfile != [], msg_format(msg)
+        
+        return cls(evtfile, det, gain_type)
+        
+        
+    @property
+    def det(self):
+        
+        return self._det
+    
+    
+    @det.setter
+    def det(self, new_det):
+        
+        dets = ['%02d' % i for i in range(1, 26)]
+        msg = 'invalid detector: %s' % new_det
+        assert new_det in dets, msg_format(msg)
+        
+        self._det = new_det
+
+
+    @property
+    def gain_type(self):
+        
+        return self._gain_type
+    
+    
+    @gain_type.setter
+    def gain_type(self, new_gain_type):
+        
+        gain_types = ['HG', 'LG']
+        msg = 'invalid gain type: %s' % new_gain_type
+        assert new_gain_type in gain_types, msg_format(msg)
+        
+        self._gain_type = new_gain_type
+
+
+    def _read(self):
+        
+        event_list = list()
+        gti_list = list()
+        
+        for i in range(len(self.file)):
+            hdu = fits.open(self.file[i])
+            event = table.Table.read(hdu[f'EVENTS{self.det}'])
+            ebound = table.Table.read(hdu['EBOUNDS'])
+            gti = table.Table.read(hdu['GTI'])
+            hdu.close()
+            
+            gt = event['GAIN_TYPE']
+            if self.gain_type == 'HG':
+                event = event[gt == 0]
+            else:
+                event = event[gt == 1]
+            
+            pi = np.array(event['PI']).astype(int)
+            ch = np.array(ebound['CHANNEL']).astype(int)
+            emin = np.array(ebound['E_MIN'])
+            emax = np.array(ebound['E_MAX'])
+            energy = Event._ch_to_energy(pi, ch, emin, emax)
+            event['ENERGY'] = energy * units.keV
+            
+            event_list.append(event)
+            gti_list.append(gti)
+            
+        self._event = table.vstack(event_list)
+        self._gti = table.vstack(gti_list)
+
+        self._event = table.unique(self._event, keys=['TIME', 'PI', 'GAIN_TYPE'])
+        self._gti = table.unique(self._gti, keys=['START', 'STOP'])
+
+        self._event.sort('TIME')
+        self._gti.sort('START')
+        
+        self._timezero = np.min(self._event['TIME'])
+        
+        self._filter = Filter(self._event)
+        self._filter_info = {'time': None, 'energy': None, 'pi': None, 'tag': None}
+        
+        
+    @property
+    def timezero_utc(self):
+        
+        return gecam_met_to_utc(self.timezero)
+    
+    
+    def filter_pi(self, p1p2):
+        
+        if p1p2 is None:
+            expr = None
+            
+        elif isinstance(p1p2, list):
+            p1, p2 = p1p2
+            expr = f'(PI >= {p1}) * (PI <= {p2})'
+            
+        else:
+            raise ValueError('p1p2 is extected to be list or None')
+        
+        self._filter_info['pi'] = expr
+        
+        self._filter_update()
+        
+        
+    def _filter_update(self):
+        
+        self._clear_filter()
+        
+        self._filter.eval(self._filter_info['time'])
+        self._filter.eval(self._filter_info['pi'])
+        self._filter.eval(self._filter_info['energy'])
+        self._filter.eval(self._filter_info['tag'])

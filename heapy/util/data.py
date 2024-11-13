@@ -5,12 +5,6 @@ from .significance import pgsig, ppsig
 
 def intersection(A, B):
     
-    #A = [[0,2], [5,10], [13,23], [24,25]]
-    #B = [[1,5], [8,12], [15,24], [25,26]]
-    #--------------
-    #sort A and B
-    #--------------
-    
     A1 = np.array([i[-1] for i in A])
     B1 = np.array([i[-1] for i in B])
     A = np.array(A)[np.argsort(A1)]
@@ -34,10 +28,6 @@ def union(bins):
     if len(bins) == 0:
         return []
     
-    #--------------
-    #sort bins
-    #--------------
-    
     bins1 = np.array([bin[0] for bin in bins])
     bins = np.array(bins)[np.argsort(bins1)]
     bins = bins.tolist()
@@ -60,8 +50,81 @@ def rebin(bins,
           min_sigma=None, 
           min_evt=None, 
           max_bin=None,
-          backscale=1, 
+          backscale=None, 
           stat=None):
+    
+    bins, cts, bcts = list(bins), list(cts), list(bcts)
+    new_bins, new_cts, new_bcts, new_bcts_err = [], [], [], []
+    cc, cb, cb_err, j, k = 0, 0, 0, 0, 0
+    
+    if min_sigma is None:
+        min_sigma = -np.inf
+    
+    if min_evt is None:
+        min_evt = 0
+        
+    if max_bin is None:
+        max_bin = np.inf
+        
+    if backscale is None:
+        backscale = 1
+    
+    for i in range(len(cts)):
+        ci = cts[i]
+        bi = bcts[i]
+        bi_err = bcts_err[i]
+        cc += ci
+        cb += bi
+        cb_err = np.sqrt(cb_err ** 2 + bi_err ** 2)
+        
+        if stat is None: stat = 'pgstat'
+        if stat == 'pgstat':
+            sigma = pgsig(cc, cb * backscale, cb_err * backscale)
+        elif stat == 'cstat':
+            sigma = ppsig(cc, cb * backscale, 1)
+        else:
+            raise AttributeError(f'unsupported stat: {stat}')
+        
+        evt = cc - cb * backscale
+        
+        if ((sigma >= min_sigma) and (evt >= min_evt)) or ((j-i+1) == max_bin):
+            new_bins.append([bins[j][0], bins[i][1]])
+            new_cts.append(cc)
+            new_bcts.append(cb)
+            new_bcts_err.append(cb_err)
+            cc, cb, cb_err = 0, 0, 0
+            j = i + 1
+            k += 1
+            
+        if (i == len(cts) - 1) and ((sigma < min_sigma) or (evt < min_evt)) and (j-i+1) < max_bin:
+            if k >= 1:
+                new_bins[k-1][1] = bins[i][1]
+                new_cts[k-1] = new_cts[k-1] + cc
+                new_bcts[k-1] = new_bcts[k-1] + cb
+                new_bcts_err[k-1] = np.sqrt(new_bcts_err[k-1] ** 2 + cb_err ** 2)
+            else:
+                new_bins.append([bins[j][0], bins[i][1]])
+                new_cts.append(cc)
+                new_bcts.append(cb)
+                new_bcts_err.append(cb_err)
+                    
+    new_bins = np.array(new_bins)
+    new_cts = np.array(new_cts)
+    new_bcts = np.array(new_bcts)
+    new_bcts_err = np.array(new_bcts_err)
+            
+    return new_bins, new_cts, new_bcts, new_bcts_err
+
+
+def multi_rebin(bins, 
+                cts_list, 
+                bcts_list, 
+                bcts_err_list, 
+                min_sigma_list=None, 
+                min_evt_list=None, 
+                max_bin_list=None,
+                backscale=None, 
+                stat=None):
     
     bins, cts, bcts = list(bins), list(cts), list(bcts)
     new_bins, new_cts, new_bcts, new_bcts_err = [], [], [], []
@@ -200,9 +263,9 @@ def msg_format(msg):
     msg_format = uppline + msg_ + lowline
     
     return msg_format
-        
-        
-class NpEncoder(json.JSONEncoder):
+
+
+class JsonEncoder(json.JSONEncoder):
 
     def default(self, obj):
         if isinstance(obj, np.integer):
@@ -213,5 +276,12 @@ class NpEncoder(json.JSONEncoder):
             return obj.tolist()
         elif isinstance(obj, np.bool_):
             return bool(obj)
+        elif isinstance(obj, set):
+            return list(obj)
         else:
-            return super(NpEncoder, self).default(obj)
+            return super(JsonEncoder, self).default(obj)
+        
+        
+def json_dump(data, filepath):
+    with open(filepath, 'w') as f:
+        json.dump(data, f, indent=4, cls=JsonEncoder)

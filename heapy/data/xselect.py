@@ -1,71 +1,47 @@
 import os
-import json
 import shutil
-import warnings
 import subprocess
 import numpy as np
+from astropy import table
 from astropy.io import fits
 import plotly.graph_objs as go
-from .retrieve import epRetrieve
+from .filter import Filter
+from .retrieve import epRetrieve, swiftRetrieve
 from ..temporal.txx import ppTxx
+from ..util.data import json_dump
 from ..autobs.ppsignal import ppSignal
-from ..util.data import msg_format, NpEncoder
 from ..util.time import ep_met_to_utc, ep_utc_to_met
+from ..util.time import swift_met_to_utc, swift_utc_to_met
 
 
 
-class epXselect(object):
+class Xselect(object):
     
     def __init__(self, 
                  evtfile=None, 
                  regfile=None, 
-                 bkregfile=None, 
-                 armregfile=None, 
-                 arm=False
+                 bkregfile=None
                  ):
         
         self._evtfile = evtfile
         self._regfile = regfile
         self._bkregfile = bkregfile
-        self._armregfile = armregfile
-        self._arm = arm
         
-        hdu = fits.open(self._evtfile)
-        self._timezero = hdu['EVENTS'].header['TSTART']
-        hdu.close()
-        
-        self._update_backscale()
+        self._ini_xselect()
 
 
-    @classmethod
-    def from_wxtobs(cls, obsname, srcid):
-        
-        rtv = epRetrieve.from_wxtobs(obsname, srcid)
-
-        evtfile = rtv.rtv_res['evt']
-        regfile = rtv.rtv_res['reg']
-        bkregfile = rtv.rtv_res['bkreg']
-        armregfile = rtv.rtv_res['armreg']
-        
-        return cls(evtfile, regfile, bkregfile, armregfile)
-    
-    
     @property
     def evtfile(self):
         
         return os.path.abspath(self._evtfile)
-    
-    
+
+
     @evtfile.setter
     def evtfile(self, new_evtfile):
         
         self._evtfile = new_evtfile
         
-        hdu = fits.open(self._evtfile)
-        self._timezero = hdu['EVENTS'].header['TSTART']
-        hdu.close()
-        
-        self._update_backscale()
+        self._ini_xselect()
         
         
     @property
@@ -79,7 +55,7 @@ class epXselect(object):
         
         self._regfile = new_regfile
         
-        self._update_backscale()
+        self._ini_xselect()
         
         
     @property
@@ -93,73 +69,65 @@ class epXselect(object):
         
         self._bkregfile = new_bkregfile
         
-        self._update_backscale()
-            
-            
-    @property
-    def armregfile(self):
-        
-        return os.path.abspath(self._armregfile)
-    
-    
-    @armregfile.setter
-    def armregfile(self, new_armregfile):
-        
-        self._armregfile = new_armregfile
-        
-        self._update_backscale()
+        self._ini_xselect()
         
         
-    @property
-    def arm(self):
+    @staticmethod
+    def _run_xselect(commands):
         
-        return self._arm
-    
-    
-    @arm.setter
-    def arm(self, new_arm):
-        
-        self._arm = new_arm
-        
-        self._update_backscale()
+        process = subprocess.Popen('xselect', 
+                                   stdin=subprocess.PIPE, 
+                                   stdout=subprocess.PIPE, 
+                                   stderr=subprocess.PIPE, 
+                                   text=True)
 
+        stdout, stderr = process.communicate(input='\n'.join(commands) + '\nexit\nno\n')
 
-    def _update_backscale(self):
-            
-        savepath = os.path.dirname(self.evtfile) + '/spectrum'
+        return stdout, stderr
         
-        if os.path.isdir(savepath):
-            shutil.rmtree(savepath)
+        
+    def _ini_xselect(self):
+            
+        spectrum_savepath = os.path.dirname(self.evtfile) + '/spectrum'
+        
+        if os.path.isdir(spectrum_savepath):
+            shutil.rmtree(spectrum_savepath)
                 
-        os.mkdir(savepath)
+        os.mkdir(spectrum_savepath)
             
-        src_specfile = savepath + f'/total.src'
-        bkg_specfile = savepath + f'/total.bkg'
+        src_specfile = spectrum_savepath + '/src.pi'
+        bkg_specfile = spectrum_savepath + '/bkg.pi'
         
-        scc_start = self.timezero + 0
-        scc_stop = self.timezero + 200
+        events_savepath = os.path.dirname(self.evtfile) + '/events'
         
-        if self.arm and self.armregfile:
-            bkregfile = f'"{self.bkregfile} {self.armregfile}"'
-        else:
-            bkregfile = f'"{self.bkregfile}"'
+        if os.path.isdir(events_savepath):
+            shutil.rmtree(events_savepath)
+                
+        os.mkdir(events_savepath)
+        
+        src_evtfile = events_savepath + '/src.evt'
+        bkg_evtfile = events_savepath + '/bkg.evt'
         
         commands = ['xsel', 
                     'read events', 
                     os.path.dirname(self.evtfile), 
                     self.evtfile.split('/')[-1], 
                     'yes', 
-                    'filter time scc', 
-                    f'{scc_start}, {scc_stop}', 
-                    'x', 
                     f'filter region {self.regfile}', 
                     'extract spectrum', 
                     f'save spectrum {src_specfile}', 
+                    'extract events', 
+                    f'save events {src_evtfile}', 
+                    'no', 
+                    'clear events', 
                     'clear region', 
-                    f'filter region {bkregfile}', 
+                    f'filter region {self.bkregfile}', 
                     'extract spectrum', 
-                    f'save spectrum {bkg_specfile}']
-    
+                    f'save spectrum {bkg_specfile}', 
+                    'extract events', 
+                    f'save events {bkg_evtfile}', 
+                    'no']
+        
         _, _ = self._run_xselect(commands)
         
         src_hdu = fits.open(src_specfile)
@@ -171,152 +139,248 @@ class epXselect(object):
         bkg_hdu.close()
         
         self.backscale = self.src_backscale / self.bkg_backscale
+        
+        self.src_evtfile = src_evtfile
+        self.bkg_evtfile = bkg_evtfile
+        
+        hdu = fits.open(self.evtfile)
+        self._event = table.Table.read(hdu['EVENTS'])
+        self._filter = Filter(self._event)
+        hdu.close()
+        
+        src_hdu = fits.open(self.src_evtfile)
+        self._src_event = table.Table.read(src_hdu['EVENTS'])
+        self._src_filter = Filter(self._src_event)
+        src_hdu.close()
+        
+        bkg_hdu = fits.open(self.bkg_evtfile)
+        self._bkg_event = table.Table.read(bkg_hdu['EVENTS'])
+        self._bkg_filter = Filter(self._bkg_event)
+        bkg_hdu.close()
+        
+        self._filter_info = {'time': None, 'pi': None, 'tag': None}
 
 
     @property
     def timezero(self):
         
-        return self._timezero
-    
+        try:
+            return self._timezero
+        except AttributeError:
+            hdu = fits.open(self._evtfile)
+            return hdu['EVENTS'].header['TSTART']
+
     
     @timezero.setter
     def timezero(self, new_timezero):
         
-        if isinstance(new_timezero, float):
-            self._timezero = new_timezero
+        self._timezero = new_timezero
+        
+        
+    @property
+    def timezero_utc(self):
+        
+        return None
+        
+        
+    def slice_time(self, t1, t2):
+        
+        met_t1 = self.timezero + t1
+        met_t2 = self.timezero + t2
+        
+        met_ts = self._event['TIME']
+        flt = (met_ts >= met_t1) & (met_ts <= met_t2)
+        self._event = self._event[flt]
+        
+        src_met_ts = self._src_event['TIME']
+        flt = (src_met_ts >= met_t1) & (src_met_ts <= met_t2)
+        self._src_event = self._src_event[flt]
+        
+        bkg_met_ts = self._bkg_event['TIME']
+        flt = (bkg_met_ts >= met_t1) & (bkg_met_ts <= met_t2)
+        self._bkg_event = self._bkg_event[flt]
+        
+        self._clear_filter()
+        
+        
+    def filter_time(self, t1t2):
+        
+        if t1t2 is None:
+            expr = None
             
-        elif isinstance(new_timezero, str):
-            self._timezero = ep_utc_to_met(new_timezero)
+        elif isinstance(t1t2, list):
+            t1, t2 = t1t2
+            
+            met_t1 = self.timezero + t1
+            met_t2 = self.timezero + t2
+                
+            expr = f'(TIME >= {met_t1}) * (TIME <= {met_t2})'
             
         else:
-            msg = 'not expected type for timezero'
-            raise ValueError(msg_format(msg))
-
-
-    @staticmethod
-    def _run_xselect(commands):
+            raise ValueError('t1t2 is extected to be list or None')
         
-        process = subprocess.Popen('xselect', 
-                                   stdin=subprocess.PIPE, 
-                                   stdout=subprocess.PIPE, 
-                                   stderr=subprocess.PIPE, 
-                                   text=True)
+        self._time_filter = t1t2
+        
+        self._filter_info['time'] = expr
+        
+        self._filter_update()
+        
+        
+    def filter_pi(self, p1p2):
+        
+        if p1p2 is None:
+            expr = None
+            
+        elif isinstance(p1p2, list):
+            p1, p2 = p1p2
+            expr = f'(PI >= {p1}) * (PI <= {p2})'
+            
+        else:
+            raise ValueError('p1p2 is extected to be list or None')
+        
+        self._filter_info['pi'] = expr
+        
+        self._filter_update()
+        
+        
+    def filter(self, expr):
+        
+        self._filter_info['tag'] = expr
+        
+        self._filter_update()
+        
+        
+    def _filter_update(self):
+        
+        self._clear_filter()
+        
+        self._filter.eval(self._filter_info['time'])
+        self._filter.eval(self._filter_info['pi'])
+        self._filter.eval(self._filter_info['tag'])
+        
+        self._src_filter.eval(self._filter_info['time'])
+        self._src_filter.eval(self._filter_info['pi'])
+        self._src_filter.eval(self._filter_info['tag'])
+        
+        self._bkg_filter.eval(self._filter_info['time'])
+        self._bkg_filter.eval(self._filter_info['pi'])
+        self._bkg_filter.eval(self._filter_info['tag'])
+        
+        
+    def _clear_filter(self):
+        
+        self._filter.clear()
+        self._src_filter.clear()
+        self._bkg_filter.clear()
+        
 
-        stdout, stderr = process.communicate(input='\n'.join(commands) + '\nexit\n')
-
-        return stdout, stderr
+    @property
+    def filter_info(self):
+        
+        return self._filter_info
     
     
+    @property
+    def time_filter(self):
+        
+        if self._filter_info['time'] is None:
+            return [np.min(self._event['TIME']), np.max(self._event['TIME'])]
+        else:
+            return self._time_filter
+
+
+    @property
+    def event(self):
+        
+        return self._filter.evt
+        
+        
+    @property
+    def src_event(self):
+        
+        return self._src_filter.evt
+    
+    
+    @property
+    def bkg_event(self):
+        
+        return self._bkg_filter.evt
+
+        
+    def extract_image(self, savepath='./image', show=False):
+        
+        savepath = os.path.abspath(savepath)
+        
+        if os.path.isdir(savepath):
+            shutil.rmtree(savepath)
+                
+        os.mkdir(savepath)
+        
+        H, xedges, yedges = np.histogram2d(self.event['X'], self.event['Y'], bins=128)
+        H[H == 0] = 1
+        
+        fig = go.Figure()
+        image = go.Heatmap(x=xedges, 
+                           y=yedges,
+                           z=np.log10(H.T),
+                           colorscale='Jet')
+        fig.add_trace(image)
+        
+        fig.update_layout(template='plotly_white', height=700, width=700)
+
+        if show: fig.show()
+        fig.write_html(savepath + '/image.html')
+        json_dump(fig.to_dict(), savepath + '/image.json')
+
+
     @property
     def src_ts(self):
-        
-        try:
-            src_hdu = fits.open(self.src_evtfile)
-            
-        except AttributeError:
-            raise AttributeError('no src event file')
-        
-        else:
-            src_data = src_hdu['EVENTS'].data
-            src_ts = src_data['TIME'] - self.timezero
-        
-            return src_ts
-        
-        
+    
+        return np.array(self.src_event['TIME']) - self.timezero
+
+
     @property
     def bkg_ts(self):
-        
-        try:
-            bkg_hdu = fits.open(self.bkg_evtfile)
-            
-        except AttributeError:
-            raise AttributeError('no bkg event file')
-        
-        else:
-            bkg_data = bkg_hdu['EVENTS'].data
-            bkg_ts = bkg_data['TIME'] - self.timezero
-        
-            return bkg_ts
-        
-        
-    @property
-    def lc_p1p2(self):
-        
-        try:
-            self._lc_p1p2
-        except AttributeError:
-            return [50, 400]
-        else:
-            if self._lc_p1p2 is not None:
-                return self._lc_p1p2
-            else:
-                return [50, 400]
-        
-        
-    @lc_p1p2.setter
-    def lc_p1p2(self, new_lc_p1p2):
-        
-        if isinstance(new_lc_p1p2, (list, type(None))):
-            self._lc_p1p2 = new_lc_p1p2
-        else:
-            raise ValueError('not expected lc_t1t2 type')
-        
-        
-    @property
-    def lc_t1t2(self):
-        
-        try:
-            self._lc_t1t2
-        except AttributeError:
-            return [np.min(self.src_ts), np.max(self.src_ts)]
-        else:
-            if self._lc_t1t2 is not None:
-                return self._lc_t1t2
-            else:
-                return [np.min(self.src_ts), np.max(self.src_ts)]
-        
-        
-    @lc_t1t2.setter
-    def lc_t1t2(self, new_lc_t1t2):
-        
-        if isinstance(new_lc_t1t2, (list, type(None))):
-            self._lc_t1t2 = new_lc_t1t2
-        else:
-            raise ValueError('not expected lc_t1t2 type')
+    
+        return np.array(self.bkg_event['TIME']) - self.timezero
     
     
+    @property
+    def lc_slice(self):
+        
+        return self.time_filter
+
+
     @property
     def lc_interval(self):
         
-        return self.lc_t1t2[1] - self.lc_t1t2[0]
+        return self.lc_slice[1] - self.lc_slice[0]
     
     
     @property
     def lc_binsize(self):
         
         try:
-            self._lc_binsize
+            return self._lc_binsize
         except AttributeError:
             return self.lc_interval / 300
-        else:
-            if self._lc_binsize is not None:
-                return self._lc_binsize
-            else:
-                return self.lc_interval / 300
             
             
     @lc_binsize.setter
     def lc_binsize(self, new_lc_binsize):
         
-        self._lc_binsize = new_lc_binsize
-        
-        
+        if isinstance(new_lc_binsize, (int, float, type(None))):
+            self._lc_binsize = new_lc_binsize
+        else:
+            raise ValueError('lc_binsize is extected to be int, float or None')
+
+
     @property
     def lc_bins(self):
         
-        return np.arange(self.lc_t1t2[0], self.lc_t1t2[1] + 1e-5, self.lc_binsize)
-    
-    
+        return np.arange(self.lc_slice[0], self.lc_slice[1] + 1e-5, self.lc_binsize)
+
+
     @property
     def lc_bin_list(self):
         
@@ -337,84 +401,84 @@ class epXselect(object):
         lbins, rbins = self.lc_bins[:-1], self.lc_bins[1:]
         
         return (rbins - lbins) / 2
-    
-    
+
+
     @property
-    def src_cts(self):
+    def lc_src_cts(self):
         
         return np.histogram(self.src_ts, bins=self.lc_bins)[0]
     
     
     @property
-    def src_cts_err(self):
+    def lc_src_cts_err(self):
         
-        return np.sqrt(self.src_cts)
+        return np.sqrt(self.lc_src_cts)
     
     
     @property
-    def src_rate(self):
+    def lc_src_rate(self):
         
-        return self.src_cts / self.lc_binsize
+        return self.lc_src_cts / self.lc_binsize
     
     
     @property
-    def src_rate_err(self):
+    def lc_src_rate_err(self):
         
-        return self.src_cts_err / self.lc_binsize
+        return self.lc_src_cts_err / self.lc_binsize
     
     
     @property
-    def bkg_cts(self):
+    def lc_bkg_cts(self):
         
         return np.histogram(self.bkg_ts, bins=self.lc_bins)[0]
     
     
     @property
-    def bkg_cts_err(self):
+    def lc_bkg_cts_err(self):
         
-        return np.sqrt(self.bkg_cts)
+        return np.sqrt(self.lc_bkg_cts)
         
         
     @property
-    def bkg_rate(self):
+    def lc_bkg_rate(self):
         
-        return self.bkg_cts / self.lc_binsize * self.backscale
+        return self.lc_bkg_cts / self.lc_binsize * self.backscale
     
     
     @property
-    def bkg_rate_err(self):
+    def lc_bkg_rate_err(self):
         
-        return self.bkg_cts_err / self.lc_binsize * self.backscale
+        return self.lc_bkg_cts_err / self.lc_binsize * self.backscale
     
     
     @property
-    def net_rate(self):
+    def lc_net_rate(self):
         
-        return self.src_rate - self.bkg_rate
+        return self.lc_src_rate - self.lc_bkg_rate
     
     
     @property
-    def net_rate_err(self):
+    def lc_net_rate_err(self):
         
-        return np.sqrt(self.src_rate_err ** 2 + self.bkg_rate_err ** 2)
+        return np.sqrt(self.lc_src_rate_err ** 2 + self.lc_bkg_rate_err ** 2)
     
     
     @property
-    def net_cts(self):
+    def lc_net_cts(self):
         
-        return self.net_rate * self.lc_binsize
+        return self.lc_net_rate * self.lc_binsize
     
     
     @property
-    def net_cts_err(self):
+    def lc_net_cts_err(self):
         
-        return self.net_rate_err * self.lc_binsize
+        return self.lc_net_rate_err * self.lc_binsize
     
     
     @property
-    def net_ccts(self):
+    def lc_net_ccts(self):
         
-        return np.cumsum(self.net_cts)
+        return np.cumsum(self.lc_net_cts)
     
     
     @property
@@ -424,10 +488,10 @@ class epXselect(object):
         lc_ps.loop(sigma=3)
         
         return lc_ps
-            
-            
-    def extract_curve(self, std=False, savepath='./curve', show=False):
-            
+        
+        
+    def extract_curve(self, savepath='./curve', show=False):
+        
         savepath = os.path.abspath(savepath)
         
         if os.path.isdir(savepath):
@@ -435,53 +499,11 @@ class epXselect(object):
                 
         os.mkdir(savepath)
         
-        scc_start = self.timezero + self.lc_t1t2[0]
-        scc_stop = self.timezero + self.lc_t1t2[1]
-        
-        pha_start, pha_stop = [int(pha) for pha in self.lc_p1p2]
-        
-        src_evtfile = savepath + '/src.evt'
-        bkg_evtfile = savepath + '/bkg.evt'
-        
-        if self.arm and self.armregfile:
-            bkregfile = f'"{self.bkregfile} {self.armregfile}"'
-        else:
-            bkregfile = f'"{self.bkregfile}"'
-        
-        commands = ['xsel', 
-                    'read events', 
-                    os.path.dirname(self.evtfile), 
-                    self.evtfile.split('/')[-1], 
-                    'yes', 
-                    'filter time scc', 
-                    f'{scc_start}, {scc_stop}', 
-                    'x', 
-                    f'filter pha_cutoff {pha_start} {pha_stop}', 
-                    f'filter region {self.regfile}', 
-                    'extract events', 
-                    f'save events {src_evtfile}', 
-                    'no', 
-                    'clear events', 
-                    'clear region', 
-                    f'filter region {bkregfile}', 
-                    'extract events', 
-                    f'save events {bkg_evtfile}', 
-                    'no']
-        
-        stdout, stderr = self._run_xselect(commands)
-        
-        self.src_evtfile = src_evtfile
-        self.bkg_evtfile = bkg_evtfile
-        
-        if std: 
-            print(stdout)
-            print(stderr)
-        
         self.lc_ps.save(savepath=savepath + '/ppsignal')
         
         fig = go.Figure()
         src = go.Scatter(x=self.lc_time, 
-                         y=self.src_rate, 
+                         y=self.lc_src_rate, 
                          mode='markers', 
                          name='src counts rate', 
                          showlegend=True, 
@@ -492,12 +514,12 @@ class epXselect(object):
                              width=0), 
                          error_y=dict(
                              type='data',
-                             array=self.src_rate_err,
+                             array=self.lc_src_rate_err,
                              thickness=1.5,
                              width=0), 
                          marker=dict(symbol='circle', size=3))
         bkg = go.Scatter(x=self.lc_time, 
-                         y=self.bkg_rate, 
+                         y=self.lc_bkg_rate, 
                          mode='markers', 
                          name='bkg counts rate', 
                          showlegend=True, 
@@ -508,12 +530,12 @@ class epXselect(object):
                              width=0), 
                          error_y=dict(
                              type='data',
-                             array=self.bkg_rate_err,
+                             array=self.lc_bkg_rate_err,
                              thickness=1.5,
                              width=0), 
                          marker=dict(symbol='circle', size=3))
         net = go.Scatter(x=self.lc_time, 
-                         y=self.net_rate, 
+                         y=self.lc_net_rate, 
                          mode='markers', 
                          name='net counts rate', 
                          showlegend=True, 
@@ -524,7 +546,7 @@ class epXselect(object):
                              width=0), 
                          error_y=dict(
                              type='data',
-                             array=self.net_rate_err,
+                             array=self.lc_net_rate_err,
                              thickness=1.5,
                              width=0), 
                          marker=dict(symbol='circle', size=3))
@@ -533,32 +555,32 @@ class epXselect(object):
         fig.add_trace(bkg)
         fig.add_trace(net)
 
-        fig.update_xaxes(title_text=f'Time since {ep_met_to_utc(self.timezero)} (s)')
+        fig.update_xaxes(title_text=f'Time since {self.timezero_utc} (s)')
         fig.update_yaxes(title_text=f'Counts per second (binsize={self.lc_binsize} s)')
         fig.update_layout(template='plotly_white', height=600, width=800)
         fig.update_layout(legend=dict(x=1, y=1, xanchor='right', yanchor='bottom'))
 
         if show: fig.show()
         fig.write_html(savepath + '/lc.html')
-        json.dump(fig.to_dict(), open(savepath + '/lc.json', 'w'), indent=4, cls=NpEncoder)
+        json_dump(fig.to_dict(), savepath + '/lc.json')
         
         fig = go.Figure()
         net = go.Scatter(x=self.lc_time, 
-                         y=self.net_ccts, 
+                         y=self.lc_net_ccts, 
                          mode='lines', 
                          name='net cumulated counts', 
                          showlegend=True)
         
         fig.add_trace(net)
         
-        fig.update_xaxes(title_text=f'Time since {ep_met_to_utc(self.timezero)} (s)')
+        fig.update_xaxes(title_text=f'Time since {self.timezero_utc} (s)')
         fig.update_yaxes(title_text=f'Cumulated counts (binsize={self.lc_binsize} s)')
         fig.update_layout(template='plotly_white', height=600, width=800)
         fig.update_layout(legend=dict(x=1, y=1, xanchor='right', yanchor='bottom'))
         
         fig.write_html(savepath + '/cum_lc.html')
-        json.dump(fig.to_dict(), open(savepath + '/cum_lc.json', 'w'), indent=4, cls=NpEncoder)
-        
+        json_dump(fig.to_dict(), savepath + '/cum_lc.json')
+
         
     def calculate_txx(self, sigma=3, mp=True, xx=0.9, pstart=None, pstop=None, 
                       lbkg=None, rbkg=None, savepath='./curve/duration'):
@@ -574,9 +596,30 @@ class epXselect(object):
         txx.findpulse(sigma=sigma, mp=mp)
         txx.accumcts(xx=xx, pstart=pstart, pstop=pstop, lbkg=lbkg, rbkg=rbkg)
         txx.save(savepath=savepath)
+        
+        
+    @property
+    def spec_slices(self):
+        
+        try:
+            return self._spec_slices
+        except AttributeError:
+            return [self.time_filter]
+        
+        
+    @spec_slices.setter
+    def spec_slices(self, new_spec_slice):
+        
+        if isinstance(new_spec_slice, list):
+            if isinstance(new_spec_slice[0], list):
+                self._spec_slices = new_spec_slice
+            else:
+                raise ValueError('not expected spec_slices type')
+        else:
+            raise ValueError('not expected spec_slices type')
+        
 
-
-    def extract_spectrum(self, spec_slices, std=False, savepath='./spectrum'):
+    def extract_spectrum(self, savepath='./spectrum', std=False):
             
         savepath = os.path.abspath(savepath)
         
@@ -585,17 +628,12 @@ class epXselect(object):
                 
         os.mkdir(savepath)
             
-        json.dump(self.timezero, open(savepath + '/timezero.json', 'w'), indent=4, cls=NpEncoder)
+        json_dump(self.timezero, savepath + '/timezero.json')
         
-        json.dump(spec_slices, open(savepath + '/spec_slices.json', 'w'), indent=4, cls=NpEncoder)
+        json_dump(self.spec_slices, savepath + '/spec_slices.json')
         
-        lslices = np.array(spec_slices)[:, 0]
-        rslices = np.array(spec_slices)[:, 1]
-        
-        if self.arm and self.armregfile:
-            bkregfile = f'"{self.bkregfile} {self.armregfile}"'
-        else:
-            bkregfile = f'"{self.bkregfile}"'
+        lslices = np.array(self.spec_slices)[:, 0]
+        rslices = np.array(self.spec_slices)[:, 1]
         
         for l, r in zip(lslices, rslices):
             scc_start = self.timezero + l
@@ -617,11 +655,11 @@ class epXselect(object):
                         'filter time scc', 
                         f'{scc_start}, {scc_stop}', 
                         'x', 
-                        f'filter region {self.regfile}', 
+                        f'filter region {self.regfile}',  
                         'extract spectrum', 
                         f'save spectrum {src_specfile}', 
                         'clear region', 
-                        f'filter region {bkregfile}', 
+                        f'filter region {self.bkregfile}', 
                         'extract spectrum', 
                         f'save spectrum {bkg_specfile}']
         
@@ -630,3 +668,178 @@ class epXselect(object):
             if std: 
                 print(stdout)
                 print(stderr)
+
+
+
+class epXselect(Xselect):
+    
+    def __init__(self, 
+                 evtfile=None, 
+                 regfile=None, 
+                 bkregfile=None, 
+                 armregfile=None, 
+                 arm=False
+                 ):
+        
+        self._evtfile = evtfile
+        self._regfile = regfile
+        self._bkregfile = bkregfile
+        self._armregfile = armregfile
+        self._arm = arm
+        
+        self._ini_xselect()
+
+
+    @classmethod
+    def from_wxtobs(cls, obsid, srcid, datapath=None):
+        
+        rtv = epRetrieve.from_wxtobs(obsid, srcid, datapath)
+
+        evtfile = rtv.rtv_res['evt']
+        regfile = rtv.rtv_res['reg']
+        bkregfile = rtv.rtv_res['bkreg']
+        armregfile = rtv.rtv_res['armreg']
+        
+        return cls(evtfile, regfile, bkregfile, armregfile)
+    
+    
+    @classmethod
+    def from_fxtobs(cls, obsid, module, datapath=None):
+        
+        rtv = epRetrieve.from_fxtobs(obsid, module, datapath)
+
+        evtfile = rtv.rtv_res['evt']
+        regfile = rtv.rtv_res['reg']
+        bkregfile = rtv.rtv_res['bkreg']
+        
+        return cls(evtfile, regfile, bkregfile)
+            
+            
+    @property
+    def armregfile(self):
+        
+        return os.path.abspath(self._armregfile)
+    
+    
+    @armregfile.setter
+    def armregfile(self, new_armregfile):
+        
+        self._armregfile = new_armregfile
+        
+        self._ini_xselect()
+        
+        
+    @property
+    def arm(self):
+        
+        return self._arm
+    
+    
+    @arm.setter
+    def arm(self, new_arm):
+        
+        self._arm = new_arm
+        
+        self._ini_xselect()
+        
+        
+    @property
+    def bkregfile(self):
+        
+        if self.arm and self.armregfile:
+            return f'"{os.path.abspath(self._bkregfile)} {self.armregfile}"'
+        else:
+            return f'"{os.path.abspath(self._bkregfile)}"'
+        
+        
+    @property
+    def timezero(self):
+        
+        try:
+            return self._timezero
+        except AttributeError:
+            hdu = fits.open(self._evtfile)
+            return hdu['EVENTS'].header['TSTART']
+
+
+    @timezero.setter
+    def timezero(self, new_timezero):
+        
+        if isinstance(new_timezero, float):
+            self._timezero = new_timezero
+            
+        elif isinstance(new_timezero, str):
+            self._timezero = ep_utc_to_met(new_timezero)
+            
+        else:
+            raise ValueError('not expected type for timezero')
+
+
+    @property
+    def timezero_utc(self):
+        
+        return ep_met_to_utc(self.timezero)
+
+
+
+class swiftXselect(Xselect):
+    
+    def __init__(self, 
+                 evtfile=None, 
+                 regfile=None, 
+                 bkregfile=None
+                 ):
+        
+        self._evtfile = evtfile
+        self._regfile = regfile
+        self._bkregfile = bkregfile
+        
+        self._ini_xselect()
+
+
+    @classmethod
+    def from_xrtobs(cls, obsid, datapath=None):
+        
+        rtv = swiftRetrieve.from_wxtobs(obsid, datapath)
+
+        evtfile = rtv.rtv_res['evt']
+        regfile = rtv.rtv_res['reg']
+        bkregfile = rtv.rtv_res['bkreg']
+        
+        return cls(evtfile, regfile, bkregfile)
+    
+    
+    @property
+    def utcf(self):
+        
+        hdu = fits.open(self._evtfile)
+        return hdu['EVENTS'].header['UTCFINIT']
+
+
+    @property
+    def timezero(self):
+        
+        try:
+            return self._timezero
+        except AttributeError:
+            hdu = fits.open(self._evtfile)
+            return hdu['EVENTS'].header['TSTART']
+
+
+    @timezero.setter
+    def timezero(self, new_timezero):
+        
+        if isinstance(new_timezero, float):
+            self._timezero = new_timezero
+            
+        elif isinstance(new_timezero, str):
+            self._timezero = swift_utc_to_met(new_timezero, self.utcf)
+            
+        else:
+            raise ValueError('not expected type for timezero')
+
+
+    @property
+    def timezero_utc(self):
+        
+        return swift_met_to_utc(self.timezero, self.utcf)

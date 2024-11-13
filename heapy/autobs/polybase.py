@@ -1,5 +1,4 @@
 import os
-import json
 import warnings
 import numpy as np
 import matplotlib.pyplot as plt
@@ -8,7 +7,7 @@ from astropy.stats import bayesian_blocks
 from .baseline import Baseline
 from .polynomial import Polynomial
 from ..util.significance import pgsig, ppsig
-from ..util.data import union, msg_format, NpEncoder
+from ..util.data import union, msg_format, json_dump
 
 
 
@@ -118,12 +117,6 @@ class PolyBase(object):
         self.bl.fit(self.time[pos], self.rate[pos], w=weight[pos], lam=None, nk=None)
         self.bak = self.bl.val(self.time)
         self.bcts = self.bak * self.exp
-        
-        self.re_bcts = np.empty(self.nblock)
-        for i, (l, r) in enumerate(zip(self.edges[:-1], self.edges[1:])):
-            x = np.linspace(l, r, 100)
-            y = self.bl.val(x)
-            self.re_bcts[i] = np.trapz(y, x)
 
         # plus zero for copy
         self.base_res = {'bcts': self.bcts + 0, 'bak': self.bak + 0}
@@ -131,6 +124,21 @@ class PolyBase(object):
 
     def calsnr(self):
         if self.base_res is None: self.basefit()
+        
+        if self.poly_res is not None:
+            self.re_bcts = np.empty(self.nblock)
+            self.re_bcts_se = np.empty(self.nblock)
+            for i, (l, r) in enumerate(zip(self.edges[:-1], self.edges[1:])):
+                x = np.linspace(l, r, 100)
+                y, y_se = self.poly.val(x)
+                self.re_bcts[i] = np.trapz(y, x)
+                self.re_bcts_se[i] = np.trapz(y_se, x)
+        else:
+            self.re_bcts = np.empty(self.nblock)
+            for i, (l, r) in enumerate(zip(self.edges[:-1], self.edges[1:])):
+                x = np.linspace(l, r, 100)
+                y = self.bl.val(x)
+                self.re_bcts[i] = np.trapz(y, x)
 
         self.snr = np.zeros_like(self.binsize)
         for i in range(len(self.binsize)):
@@ -267,14 +275,6 @@ class PolyBase(object):
 
         self.bcts = self.bak * self.exp
         self.bcts_se = self.bak_se * self.exp
-        
-        self.re_bcts = np.empty(self.nblock)
-        self.re_bcts_se = np.empty(self.nblock)
-        for i, (l, r) in enumerate(zip(self.edges[:-1], self.edges[1:])):
-            x = np.linspace(l, r, 100)
-            y, y_se = self.poly.val(x)
-            self.re_bcts[i] = np.trapz(y, x)
-            self.re_bcts_se[i] = np.trapz(y_se, x)
 
         self.poly_res = {'deg': self.poly.deg,
                          'fit': self.poly.ls_res,
@@ -294,12 +294,12 @@ class PolyBase(object):
         if not os.path.exists(savepath):
             os.makedirs(savepath)
 
-        json.dump(self.ini_res, open(savepath + '/ini_res%s.json'%suffix, 'w'), indent=4, cls=NpEncoder)
-        json.dump(self.base_res, open(savepath + '/base_res%s.json'%suffix, 'w'), indent=4, cls=NpEncoder)
-        json.dump(self.block_res, open(savepath + '/block_res%s.json'%suffix, 'w'), indent=4, cls=NpEncoder)
-        json.dump(self.snr_res, open(savepath + '/snr_res%s.json'%suffix, 'w'), indent=4, cls=NpEncoder)
-        json.dump(self.sort_res, open(savepath + '/sort_res%s.json'%suffix, 'w'), indent=4, cls=NpEncoder)
-        json.dump(self.poly_res, open(savepath + '/poly_res%s.json'%suffix, 'w'), indent=4, cls=NpEncoder)
+        json_dump(self.ini_res, savepath + '/ini_res%s.json'%suffix)
+        json_dump(self.base_res, savepath + '/base_res%s.json'%suffix)
+        json_dump(self.block_res, savepath + '/block_res%s.json'%suffix)
+        json_dump(self.snr_res, savepath + '/snr_res%s.json'%suffix)
+        json_dump(self.sort_res, savepath + '/sort_res%s.json'%suffix)
+        json_dump(self.poly_res, savepath + '/poly_res%s.json'%suffix)
 
         rcParams['font.family'] = 'serif'
         rcParams['font.sans-serif'] = 'Georgia'

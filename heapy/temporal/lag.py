@@ -1,5 +1,4 @@
 import os
-import json
 import operator
 import numpy as np
 from scipy import signal
@@ -7,7 +6,7 @@ import matplotlib.pyplot as plt
 from matplotlib import rcParams
 from astropy.modeling import models
 from astropy.stats import sigma_clip, mad_std
-from ..util.data import NpEncoder
+from ..util.data import json_dump
 
 
 
@@ -205,7 +204,7 @@ class Lag(CCF):
         if not os.path.exists(savepath):
             os.makedirs(savepath)
 
-        json.dump(self.lag_res, open(savepath + '/lag_res%s.json'%suffix, 'w'), indent=4, cls=NpEncoder)
+        json_dump(self.lag_res, savepath + '/lag_res%s.json'%suffix)
 
         rcParams['font.family'] = 'serif'
         rcParams['font.sans-serif'] = 'Georgia'

@@ -301,12 +301,12 @@ class epRetrieve(Retrieve):
         
         
     @classmethod
-    def from_wxtobs(cls, obsname, srcid, datapath=None): 
+    def from_wxtobs(cls, obsid, srcid, datapath=None): 
         
         if datapath is None:
             datapath = '/Users/jyang/Documents/EinsteinProbe/WXT'
             
-        local_dir = datapath + '/' + obsname
+        local_dir = datapath + '/' + obsid
         
         ff = FileFinder(local_dir=local_dir)
         
@@ -344,7 +344,7 @@ class epRetrieve(Retrieve):
             with open(reg, 'w') as f_obj:
                 f_obj.write('circle ' + items[1] + ' 67)')
 
-        rtv_res = {'satelite': 'WXT', 'obsname': obsname, 'srcid': srcid, 
+        rtv_res = {'satelite': 'WXT', 'obsid': obsid, 'srcid': srcid, 
                    'evt': evt, 'rmf': rmf, 'arf': arf, 
                    'armreg': armreg, 'reg': reg, 'bkreg': bkreg}
         
@@ -354,36 +354,36 @@ class epRetrieve(Retrieve):
 
 
     @classmethod
-    def from_fxtobs(cls, obsname, srcid, datapath=None): 
+    def from_fxtobs(cls, obsid, module, datapath=None): 
         
         if datapath is None:
             datapath = '/Users/jyang/Documents/EinsteinProbe/FXT'
             
-        local_dir = datapath + '/' + obsname
+        local_dir = datapath + '/' + obsid
         
         ff = FileFinder(local_dir=local_dir)
         
-        evt_feature = 'fxt_*_cl_*.fits'
+        evt_feature = f'fxt_{module}_*_cl_*.fits'
         evt_file = ff.find(evt_feature)
         evt = evt_file[-1] if evt_file else None
 
-        rmf_feature = 'fxt_*.rmf'
+        rmf_feature = f'fxt_{module}_*.rmf'
         rmf_file = ff.find(rmf_feature)
         rmf = rmf_file[-1] if rmf_file else None
         
-        arf_feature = 'fxt_*.arf'
+        arf_feature = f'fxt_{module}_*.arf'
         arf_file = ff.find(arf_feature)
         arf = arf_file[-1] if arf_file else None
         
-        reg_feature = 'fxt_*' + srcid + '.reg'
+        reg_feature = f'fxt_{module}_*.reg'
         reg_file = ff.find(reg_feature)
         reg = reg_file[-1] if reg_file else None
         
-        bkreg_feature = 'fxt_*' + srcid + 'bk.reg'
+        bkreg_feature = f'fxt_{module}_*bk.arf'
         bkreg_file = ff.find(bkreg_feature)
         bkreg = bkreg_file[-1] if bkreg_file else None
         
-        rtv_res = {'satelite': 'FXT', 'obsname': obsname, 'srcid': srcid, 
+        rtv_res = {'satelite': 'FXT', 'obsid': obsid, 'module': module, 
                    'evt': evt, 'rmf': rmf, 'arf': arf, 
                    'reg': reg, 'bkreg': bkreg}
         
@@ -393,40 +393,40 @@ class epRetrieve(Retrieve):
 
 
     @classmethod
-    def from_fxtsrc(cls, obsname, datapath=None):
+    def from_fxtsrc(cls, obsid, module, datapath=None):
         
         if datapath is None:
             datapath = '/Users/jyang/Documents/EinsteinProbe/FXT'
             
-        local_dir = datapath + '/' + obsname
+        local_dir = datapath + '/' + obsid
         
         ff = FileFinder(local_dir=local_dir)
         
-        src_evt_feature = 'fxt_*_src*cl_*.fits'
+        src_evt_feature = f'fxt_{module}_*_cl_src_*.fits'
         src_evt_file = ff.find(src_evt_feature)
         src_evt = src_evt_file[-1] if src_evt_file else None
         
-        bkg_evt_feature = 'fxt_*_bkg*cl_*.fits'
+        bkg_evt_feature = f'fxt_{module}_*_cl_bkg_*.fits'
         bkg_evt_file = ff.find(bkg_evt_feature)
         bkg_evt = bkg_evt_file[-1] if bkg_evt_file else None
         
-        src_spec_feature = 'fxt_*_src_*.pha'
+        src_spec_feature = f'fxt_{module}_*_src_*.pha'
         src_spec_file = ff.find(src_spec_feature)
         src_spec = src_spec_file[-1] if src_spec_file else None
         
-        bkg_spec_feature = 'fxt_*_bkg_*.pha'
+        bkg_spec_feature = f'fxt_{module}_*_bkg_*.pha'
         bkg_spec_file = ff.find(bkg_spec_feature)
         bkg_spec = bkg_spec_file[-1] if bkg_spec_file else None
 
-        rmf_feature = 'fxt_*.rmf'
+        rmf_feature = f'fxt_{module}_*_src_*.rmf'
         rmf_file = ff.find(rmf_feature)
         rmf = rmf_file[-1] if rmf_file else None
         
-        arf_feature = 'fxt_*.arf'
+        arf_feature = f'fxt_{module}_*_src_*.arf'
         arf_file = ff.find(arf_feature)
         arf = arf_file[-1] if arf_file else None
         
-        rtv_res = {'satelite': 'FXT', 'obsname': obsname, 
+        rtv_res = {'satelite': 'FXT', 'obsid': obsid, 'module': module, 
                    'src_evt': src_evt, 'bkg_evt': bkg_evt, 
                    'src_spec': src_spec, 'bkg_spec': bkg_spec, 
                    'rmf': rmf, 'arf': arf}
@@ -434,7 +434,87 @@ class epRetrieve(Retrieve):
         rtv = cls(rtv_res)
         
         return rtv
+    
+    
+    
+class swiftRetrieve(Retrieve):
 
+    def __init__(self, rtv_res):
+        
+        super().__init__(rtv_res)
+        
+        
+    @classmethod
+    def from_xrtobs(cls, obsid, datapath=None): 
+        
+        if datapath is None:
+            datapath = '/Users/jyang/Documents/swift'
+            
+        local_dir = datapath + '/' + obsid + '/xrt/event'
+        
+        ff = FileFinder(local_dir=local_dir)
+        
+        evt_feature = 'sw*po_cl.evt'
+        evt_file = ff.find(evt_feature)
+        evt = evt_file[-1] if evt_file else None
+        
+        bkreg_feature = 'sw*bk.reg'
+        bkreg_file = ff.find(bkreg_feature)
+        bkreg = bkreg_file[-1] if bkreg_file else None
+        
+        reg_feature = 'sw*.reg'
+        reg_file = ff.find(reg_feature)
+        reg = reg_file[-1] if reg_file else None
+
+        rtv_res = {'satelite': 'XRT', 'obsid': obsid, 
+                   'evt': evt, 'reg': reg, 'bkreg': bkreg}
+        
+        rtv = cls(rtv_res)
+        
+        return rtv
+    
+    
+    @classmethod
+    def from_batobs(cls, obsid, datapath=None):
+        
+        if datapath is None:
+            datapath = '/Users/jyang/Documents/swift'
+            
+        local_dir = datapath + '/' + obsid
+        
+        ff = FileFinder(local_dir=local_dir + '/bat/event')
+        ufevt_feature = 'sw*bevshsp_uf.evt'
+        ufevt_file = ff.find(ufevt_feature)
+        ufevt = ufevt_file[-1] if ufevt_file else None
+        
+        ff = FileFinder(local_dir=local_dir + '/bat/hk')
+        caldb_feature = 'sw*bgocb.hk.gz'
+        caldb_file = ff.find(caldb_feature)
+        caldb = caldb_file[-1] if caldb_file else None
+        
+        ff = FileFinder(local_dir=local_dir + '/bat/hk')
+        detmask_feature = 'sw*bdecb.hk.gz'
+        detmask_file = ff.find(detmask_feature)
+        detmask = detmask_file[-1] if detmask_file else None
+        
+        ff = FileFinder(local_dir=local_dir + '/auxil')
+        att_feature = 'sw*sat.fits.gz'
+        att_file = ff.find(att_feature)
+        att = att_file[-1] if att_file else None
+        
+        ff = FileFinder(local_dir=local_dir + '/bat/event')
+        aux_feature = 'sw*bevtr.fits.gz'
+        aux_file = ff.find(aux_feature)
+        aux = aux_file[-1] if aux_file else None
+        
+        rtv_res = {'satelite': 'BAT', 'obsid': obsid, 
+                   'ufevt': ufevt, 'caldb': caldb, 
+                   'detmask': detmask, 'att': att, 'aux': aux}
+        
+        rtv = cls(rtv_res)
+        
+        return rtv
+        
 
 
 class FileFinder(object):

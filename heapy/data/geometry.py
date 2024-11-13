@@ -4,7 +4,6 @@ import matplotlib.pyplot as plt
 from gbm.plot.lib import sky_point
 from gbm.plot import SkyPlot, EarthPlot
 from .retrieve import gbmRetrieve
-from ..util.data import msg_format
 from ..util.time import fermi_utc_to_met
 
 
@@ -29,7 +28,7 @@ class gbmGeometry(object):
         poshist_file = rtv.rtv_res['poshist']
         
         msg = 'no retrieved poshist file'
-        assert poshist_file != [], msg_format(msg)
+        assert poshist_file != [], msg
         
         return cls(utc, poshist_file[0])
     

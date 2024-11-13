@@ -9,7 +9,7 @@ from scipy.interpolate import interp1d
 from astropy.stats import sigma_clip, mad_std
 from ..autobs.ppsignal import ppSignal
 from ..autobs.polybase import PolyBase
-from ..util.data import asym_gaus_gen, msg_format, NpEncoder
+from ..util.data import asym_gaus_gen, msg_format, json_dump
 
 
 
@@ -214,8 +214,8 @@ class pgTxx(PolyBase):
         if not os.path.exists(savepath):
             os.makedirs(savepath)
 
-        json.dump(self.pulse_res, open(savepath + '/pulse_res%s.json'%suffix, 'w'), indent=4, cls=NpEncoder)
-        json.dump(self.txx_res, open(savepath + '/txx_res%s.json'%suffix, 'w'), indent=4, cls=NpEncoder)
+        json_dump(self.pulse_res, savepath + '/pulse_res%s.json'%suffix)
+        json_dump(self.txx_res, savepath + '/txx_res%s.json'%suffix)
 
         rcParams['font.family'] = 'serif'
         rcParams['font.sans-serif'] = 'Georgia'
@@ -511,8 +511,8 @@ class ppTxx(ppSignal):
         if not os.path.exists(savepath):
             os.makedirs(savepath)
 
-        json.dump(self.pulse_res, open(savepath + '/pulse_res%s.json'%suffix, 'w'), indent=4, cls=NpEncoder)
-        json.dump(self.txx_res, open(savepath + '/txx_res%s.json'%suffix, 'w'), indent=4, cls=NpEncoder)
+        json_dump(self.pulse_res, savepath + '/pulse_res%s.json'%suffix)
+        json_dump(self.txx_res, savepath + '/txx_res%s.json'%suffix)
 
         rcParams['font.family'] = 'serif'
         rcParams['font.sans-serif'] = 'Georgia'

@@ -2,7 +2,6 @@ import os
 import numpy as np
 from gbm_drm_gen.drmgen_tte import DRMGenTTE
 from .retrieve import gbmRetrieve
-from ..util.data import msg_format
 from ..util.file import copy, remove
 from ..util.time import fermi_utc_to_met
 
@@ -27,19 +26,19 @@ class gbmResponse(object):
         
         dets = ['n0','n1','n2','n3','n4','n5','n6','n7','n8','n9','na','nb','b0','b1']
         msg = 'invalid detector: %s' % det
-        assert det in dets, msg_format(msg)
+        assert det in dets, msg
         
         rtv = gbmRetrieve.from_utc(utc=utc, t1=0, t2=0)
         
         cspec_file = rtv.rtv_res['cspec_pha'][det]
         
         msg = 'no retrieved cspec file'
-        assert cspec_file != [], msg_format(msg)
+        assert cspec_file != [], msg
         
         poshist_file = rtv.rtv_res['poshist']
         
         msg = 'no retrieved poshist file'
-        assert poshist_file != [], msg_format(msg)
+        assert poshist_file != [], msg
         
         return cls(utc, det, cspec_file[0], poshist_file[0])
     
