@@ -44,19 +44,39 @@ def union(bins):
 
 
 def rebin(bins, 
+          stat,
           cts, 
-          bcts, 
-          bcts_err, 
+          cts_err=None,
+          bcts=None, 
+          bcts_err=None, 
           min_sigma=None, 
           min_evt=None, 
           max_bin=None,
-          backscale=None, 
-          stat=None):
+          backscale=None):
     
-    bins, cts, bcts = list(bins), list(cts), list(bcts)
-    new_bins, new_cts, new_bcts, new_bcts_err = [], [], [], []
-    cc, cb, cb_err, j, k = 0, 0, 0, 0, 0
+    _allowed_stat = ['gstat', 'cstat', 'pgstat']
     
+    assert stat in _allowed_stat, f'unsupported stat: {stat}'
+    
+    if stat == 'gstat':
+        assert cts_err is not None
+        
+    if stat == 'cstat':
+        assert bcts is not None
+        
+    if stat == 'pgstat':
+        assert bcts is not None
+        assert bcts_err is not None
+        
+    if cts_err is None:
+        cts_err = np.zeros_like(cts)
+        
+    if bcts is None:
+        bcts = np.zeros_like(cts)
+        
+    if bcts_err is None:
+        bcts_err = np.zeros_like(cts)
+        
     if min_sigma is None:
         min_sigma = -np.inf
     
@@ -68,17 +88,24 @@ def rebin(bins,
         
     if backscale is None:
         backscale = 1
+
+    new_bins, new_cts, new_cts_err, new_bcts, new_bcts_err = [], [], [], [], []
+    cc, cb, cc_err, cb_err, j, k = 0, 0, 0, 0, 0, 0
     
-    for i in range(len(cts)):
+    for i in range(len(bins)):
         ci = cts[i]
         bi = bcts[i]
+        ci_err = cts_err[i]
         bi_err = bcts_err[i]
+        
         cc += ci
         cb += bi
+        cc_err = np.sqrt(cc_err ** 2 + ci_err ** 2)
         cb_err = np.sqrt(cb_err ** 2 + bi_err ** 2)
-        
-        if stat is None: stat = 'pgstat'
-        if stat == 'pgstat':
+
+        if stat == 'gstat':
+            sigma = cc / cc_err
+        elif stat == 'pgstat':
             sigma = pgsig(cc, cb * backscale, cb_err * backscale)
         elif stat == 'cstat':
             sigma = ppsig(cc, cb * backscale, 1)
@@ -91,99 +118,155 @@ def rebin(bins,
             new_bins.append([bins[j][0], bins[i][1]])
             new_cts.append(cc)
             new_bcts.append(cb)
+            new_cts_err.append(cc_err)
             new_bcts_err.append(cb_err)
-            cc, cb, cb_err = 0, 0, 0
+            cc, cb, cc_err, cb_err = 0, 0, 0, 0
             j = i + 1
             k += 1
             
-        if (i == len(cts) - 1) and ((sigma < min_sigma) or (evt < min_evt)) and (j-i+1) < max_bin:
+        if (i == len(bins) - 1) and ((sigma < min_sigma) or (evt < min_evt)) and (j-i+1) < max_bin:
             if k >= 1:
                 new_bins[k-1][1] = bins[i][1]
                 new_cts[k-1] = new_cts[k-1] + cc
                 new_bcts[k-1] = new_bcts[k-1] + cb
+                new_cts_err[k-1] = np.sqrt(new_cts_err[k-1] ** 2 + cc_err ** 2)
                 new_bcts_err[k-1] = np.sqrt(new_bcts_err[k-1] ** 2 + cb_err ** 2)
             else:
                 new_bins.append([bins[j][0], bins[i][1]])
                 new_cts.append(cc)
                 new_bcts.append(cb)
+                new_cts_err.append(cc_err)
                 new_bcts_err.append(cb_err)
                     
     new_bins = np.array(new_bins)
     new_cts = np.array(new_cts)
+    new_cts_err = np.array(new_cts_err)
     new_bcts = np.array(new_bcts)
     new_bcts_err = np.array(new_bcts_err)
             
-    return new_bins, new_cts, new_bcts, new_bcts_err
+    return new_bins, new_cts, new_cts_err, new_bcts, new_bcts_err
 
 
 def multi_rebin(bins, 
+                stat_list,
                 cts_list, 
-                bcts_list, 
-                bcts_err_list, 
+                cts_err_list=None,
+                bcts_list=None, 
+                bcts_err_list=None, 
                 min_sigma_list=None, 
                 min_evt_list=None, 
-                max_bin_list=None,
-                backscale=None, 
-                stat=None):
+                backscale_list=None):
     
-    bins, cts, bcts = list(bins), list(cts), list(bcts)
-    new_bins, new_cts, new_bcts, new_bcts_err = [], [], [], []
-    cc, cb, cb_err, j, k = 0, 0, 0, 0, 0
+    _allowed_stat = ['gstat', 'cstat', 'pgstat']
     
-    if min_sigma is None:
-        min_sigma = -np.inf
+    multi = len(cts_list)
     
-    if min_evt is None:
-        min_evt = 0
-        
-    if max_bin is None:
-        max_bin = np.inf
+    for n in range(multi):
     
-    for i in range(len(cts)):
-        ci = cts[i]
-        bi = bcts[i]
-        bi_err = bcts_err[i]
-        cc += ci
-        cb += bi
-        cb_err = np.sqrt(cb_err ** 2 + bi_err ** 2)
+        assert stat_list[n] in _allowed_stat, f'unsupported stat: {stat_list[n]}'
         
-        if stat is None: stat = 'pgstat'
-        if stat == 'pgstat':
-            sigma = pgsig(cc, cb * backscale, cb_err * backscale)
-        elif stat == 'cstat':
-            sigma = ppsig(cc, cb * backscale, 1)
-        else:
-            raise AttributeError(f'unsupported stat: {stat}')
+        if stat_list[n] == 'gstat':
+            assert cts_err_list[n] is not None
+            
+        if stat_list[n] == 'cstat':
+            assert bcts_list[n] is not None
+            
+        if stat_list[n] == 'pgstat':
+            assert bcts_list[n] is not None
+            assert bcts_err_list[n] is not None
+            
+        if cts_err_list[n] is None:
+            cts_err_list[n] = np.zeros_like(cts_list[n])
+            
+        if bcts_list[n] is None:
+            bcts_list[n] = np.zeros_like(cts_list[n])
+            
+        if bcts_err_list[n] is None:
+            bcts_err_list[n] = np.zeros_like(cts_list[n])
+            
+        if min_sigma_list[n] is None:
+            min_sigma_list[n] = -np.inf
         
-        evt = cc - cb * backscale
-        
-        if ((sigma >= min_sigma) and (evt >= min_evt)) or ((j-i+1) == max_bin):
+        if min_evt_list[n] is None:
+            min_evt_list[n] = 0
+            
+        if backscale_list[n] is None:
+            backscale_list[n] = 1
+            
+    new_bins, new_cts_list, new_cts_err_list = [], [[]] * multi, [[]] * multi
+    new_bcts_list, new_bcts_err_list = [[]] * multi, [[]] * multi
+    
+    j, k = 0, 0
+    cc_list, cb_list = np.zeros(multi), np.zeros(multi)
+    cc_err_list, cb_err_list = np.zeros(multi), np.zeros(multi)
+    rebin_flag = [False] * multi
+    last_flag = [False] * multi
+
+    for i in range(len(bins)):
+        for n in range(multi):
+            ci = cts_list[n][i]
+            bi = bcts_list[n][i]
+            ci_err = cts_err_list[n][i]
+            bi_err = bcts_err_list[n][i]
+            
+            cc_list[n] = cc_list[n] + ci
+            cb_list[n] = cb_list[n] + bi
+            cc_err_list[n] = np.sqrt(cc_err_list[n] ** 2 + ci_err ** 2)
+            cb_err_list[n] = np.sqrt(cb_err_list[n] ** 2 + bi_err ** 2)
+            
+            if stat_list[n] == 'gstat':
+                sigma = cc_list[n] / cc_err_list[n]
+            elif stat_list[n] == 'pgstat':
+                sigma = pgsig(cc_list[n], cb_list[n] * backscale_list[n], cb_err_list[n] * backscale_list[n])
+            elif stat_list[n] == 'cstat':
+                sigma = ppsig(cc_list[n], cb_list[n] * backscale_list[n], 1)
+            else:
+                raise AttributeError(f'unsupported stat: {stat_list[n]}')
+            
+            evt = cc_list[n] - cb_list[n] * backscale_list[n]
+            
+            if ((sigma >= min_sigma_list[n]) and (evt >= min_evt_list[n])):
+                rebin_flag[n] = True
+                
+            if (i == len(bins) - 1) and ((sigma < min_sigma_list[n]) or (evt < min_evt_list[n])):
+                last_flag[n] = True
+                
+        if False not in rebin_flag:
             new_bins.append([bins[j][0], bins[i][1]])
-            new_cts.append(cc)
-            new_bcts.append(cb)
-            new_bcts_err.append(cb_err)
-            cc, cb, cb_err = 0, 0, 0
+            for n in range(multi):
+                new_cts_list[n].append(cc_list[n])
+                new_bcts_list[n].append(cb_list[n])
+                new_cts_err_list[n].append(cc_err_list[n])
+                new_bcts_err_list[n].append(cb_err_list[n])
+                
+            rebin_flag = [False] * multi
+            cc_list, cb_list = np.zeros(multi), np.zeros(multi)
+            cc_err_list, cb_err_list = np.zeros(multi), np.zeros(multi)
             j = i + 1
             k += 1
             
-        if (i == len(cts) - 1) and ((sigma < min_sigma) or (evt < min_evt)) and (j-i+1) < max_bin:
+        if True in last_flag:
             if k >= 1:
-                new_bins[k-1][1] = bins[i][1]
-                new_cts[k-1] = new_cts[k-1] + cc
-                new_bcts[k-1] = new_bcts[k-1] + cb
-                new_bcts_err[k-1] = np.sqrt(new_bcts_err[k-1] ** 2 + cb_err ** 2)
+                for n in range(multi):
+                    new_bins[k-1][1] = bins[i][1]
+                    new_cts_list[n][k-1] = new_cts_list[n][k-1] + cc_list[n]
+                    new_bcts_list[n][k-1] = new_bcts_list[n][k-1] + cb_list[n]
+                    new_cts_err_list[n][k-1] = np.sqrt(new_cts_err_list[n][k-1] ** 2 + cc_err_list[n] ** 2)
+                    new_bcts_err_list[n][k-1] = np.sqrt(new_bcts_err_list[n][k-1] ** 2 + cb_err_list[n] ** 2)
             else:
-                new_bins.append([bins[j][0], bins[i][1]])
-                new_cts.append(cc)
-                new_bcts.append(cb)
-                new_bcts_err.append(cb_err)
+                for n in range(multi):
+                    new_cts_list[n].append(cc_list[n])
+                    new_bcts_list[n].append(cb_list[n])
+                    new_cts_err_list[n].append(cc_err_list[n])
+                    new_bcts_err_list[n].append(cb_err_list[n])
                     
     new_bins = np.array(new_bins)
-    new_cts = np.array(new_cts)
-    new_bcts = np.array(new_bcts)
-    new_bcts_err = np.array(new_bcts_err)
+    new_cts_list = [np.array(cts) for cts in new_cts_list]
+    new_cts_err_list = [np.array(cts_err) for cts_err in new_cts_err_list]
+    new_bcts_list = [np.array(bcts) for bcts in new_bcts_list]
+    new_bcts_err_list = [np.array(bcts_err) for bcts_err in new_bcts_err_list]
             
-    return new_bins, new_cts, new_bcts, new_bcts_err
+    return new_bins, new_cts_list, new_cts_err_list, new_bcts_list, new_bcts_err_list
 
 
 def scale_of_one(seq, seq_min=None):

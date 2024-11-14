@@ -5,7 +5,7 @@ import numpy as np
 from astropy.io import fits
 import plotly.graph_objs as go
 from .retrieve import swiftRetrieve
-from ..util.data import json_dump
+from ..util.data import json_dump, rebin
 from ..util.time import swift_met_to_utc, swift_utc_to_met
 
 
@@ -334,6 +334,15 @@ class batPipe(object):
         return swift_met_to_utc(self.timezero, self.utcf)
     
     
+    def filter_time(self, t1t2):
+        
+        if isinstance(t1t2, (list, type(None))):
+            self._time_filter = t1t2
+            
+        else:
+            raise ValueError('t1t2 is extected to be list or None')
+    
+    
     @property
     def time_filter(self):
         
@@ -346,17 +355,17 @@ class batPipe(object):
                 return [self.tstart - self.timezero, self.tstop - self.timezero]
             else:
                 return self._time_filter
-
-
-    @time_filter.setter
-    def time_filter(self, new_time_filter):
+            
         
-        if isinstance(new_time_filter, (list, type(None))):
-            self._time_filter = new_time_filter
+    def filter_energy(self, e1e2):
+        
+        if isinstance(e1e2, (list, type(None))):
+            self._energy_filter = e1e2
+            
         else:
-            raise ValueError('time_filter is extected to be list type')
-        
-        
+            raise ValueError('e1e2 is extected to be list or None')
+
+
     @property
     def energy_filter(self):
         
@@ -371,15 +380,6 @@ class batPipe(object):
                 return self._energy_filter
 
 
-    @energy_filter.setter
-    def energy_filter(self, new_energy_filter):
-        
-        if isinstance(new_energy_filter, (list, type(None))):
-            self._energy_filter = new_energy_filter
-        else:
-            raise ValueError('energy_filter is extected to be list type')
-    
-    
     @property
     def lc_binsize(self):
         
@@ -387,8 +387,8 @@ class batPipe(object):
             return self._lc_binsize
         except AttributeError:
             return 1
-            
-            
+
+
     @lc_binsize.setter
     def lc_binsize(self, new_lc_binsize):
         
@@ -476,6 +476,75 @@ class batPipe(object):
         
         fig.write_html(savepath + '/cum_lc.html')
         json_dump(fig.to_dict(), savepath + '/cum_lc.json')
+        
+        
+    def extract_rebin_curve(self, min_sigma=None, min_evt=None, max_bin=None, 
+                            savepath='./curve', loglog=False, std=False, show=False):
+        
+        savepath = os.path.abspath(savepath)
+        
+        if os.path.isdir(savepath):
+            shutil.rmtree(savepath)
+                
+        os.mkdir(savepath)
+        
+        self.batbinevt_curve(savepath=savepath, std=std)
+        
+        lc_hdu = fits.open(self.lcfile)
+        self.lc_time = np.array(lc_hdu['RATE'].data['TIME']) - self.timezero
+        self.lc_net_rate = np.array(lc_hdu['RATE'].data['RATE'])
+        self.lc_net_rate_err = np.array(lc_hdu['RATE'].data['ERROR'])
+        
+        lbins, rbins = self.lc_time - self.lc_binsize / 2, self.lc_time + self.lc_binsize / 2
+        self.lc_bin_list = np.vstack((lbins, rbins)).T
+        
+        self.lc_net_cts = self.lc_net_rate * self.lc_binsize
+        self.lc_net_cts_err = self.lc_net_rate_err * self.lc_binsize
+        
+        self.lc_rebin_list, self.lc_net_rects, self.lc_net_rects_err, _, _ = \
+            rebin(
+                self.lc_bin_list, 
+                'gstat', 
+                self.lc_net_cts, 
+                cts_err=self.lc_net_cts_err,
+                bcts=None, 
+                bcts_err=None, 
+                min_sigma=min_sigma, 
+                min_evt=min_evt, 
+                max_bin=max_bin,
+                backscale=1)
+                
+        self.lc_retime = np.mean(self.lc_rebin_list, axis=1)
+        self.lc_rebinsize = self.lc_rebin_list[:, 1] - self.lc_rebin_list[:, 0]
+        self.lc_net_rerate = self.lc_net_rects / self.lc_rebinsize
+        self.lc_net_rerate_err = self.lc_net_rects_err / self.lc_rebinsize
+        
+        fig = go.Figure()
+        net = go.Scatter(x=self.lc_retime, 
+                         y=self.lc_net_rerate, 
+                         mode='lines+markers', 
+                         name='net lightcurve', 
+                         showlegend=True, 
+                         error_y=dict(
+                             type='data',
+                             array=self.lc_net_rerate_err,
+                             thickness=1.5,
+                             width=0), 
+                         marker=dict(symbol='cross-thin', size=0))
+        fig.add_trace(net)
+        
+        if loglog: 
+            fig.update_xaxes(title_text=f'Time since {self.timezero_utc} (s)', type='log')
+            fig.update_yaxes(title_text='Counts per second', type='log')
+        else:
+            fig.update_xaxes(title_text=f'Time since {self.timezero_utc} (s)')
+            fig.update_yaxes(title_text='Counts per second')
+        fig.update_layout(template='plotly_white', height=600, width=800)
+        fig.update_layout(legend=dict(x=1, y=1, xanchor='right', yanchor='bottom'))
+        
+        if show: fig.show()
+        fig.write_html(savepath + '/rebin_lc.html')
+        json_dump(fig.to_dict(), savepath + '/rebin_lc.json')
 
 
     @property

@@ -12,7 +12,7 @@ from .filter import Filter
 from .retrieve import gbmRetrieve, gecamRetrieve
 from ..temporal.txx import pgTxx
 from ..autobs.polybase import PolyBase
-from ..util.data import msg_format, json_dump
+from ..util.data import msg_format, json_dump, rebin
 from ..util.time import fermi_met_to_utc, gecam_met_to_utc
 
 
@@ -634,8 +634,62 @@ class Event(object):
         txx.findpulse(sigma=sigma, mp=mp)
         txx.accumcts(xx=xx, pstart=pstart, pstop=pstop, lbkg=lbkg, rbkg=rbkg)
         txx.save(savepath=savepath)
+
         
+    def extract_rebin_curve(self, min_sigma=None, min_evt=None, max_bin=None, savepath='./curve', loglog=False, show=False):
         
+        if not os.path.exists(savepath):
+            os.makedirs(savepath)
+        
+        self.lc_rebin_list, self.lc_src_rects, self.lc_src_rects_err, \
+            self.lc_bkg_rebcts, self.lc_bkg_rebcts_err = \
+                rebin(
+                    self.lc_bin_list, 
+                    'pgstat', 
+                    self.lc_src_cts, 
+                    cts_err=self.lc_src_cts_err,
+                    bcts=self.lc_bkg_cts, 
+                    bcts_err=self.lc_bkg_cts_err, 
+                    min_sigma=min_sigma, 
+                    min_evt=min_evt, 
+                    max_bin=max_bin,
+                    backscale=1)
+                
+        self.lc_retime = np.mean(self.lc_rebin_list, axis=1)
+        self.lc_reexps = self.exposure(self.lc_rebin_list)
+        self.lc_net_rects = self.lc_src_rects - self.lc_bkg_rebcts
+        self.lc_net_rects_err = np.sqrt(self.lc_src_rects_err ** 2 + self.lc_bkg_rebcts_err ** 2)
+        self.lc_net_rerate = self.lc_net_rects / self.lc_reexps
+        self.lc_net_rerate_err = self.lc_net_rects_err / self.lc_reexps
+        
+        fig = go.Figure()
+        net = go.Scatter(x=self.lc_retime, 
+                         y=self.lc_net_rerate, 
+                         mode='lines+markers', 
+                         name='net lightcurve', 
+                         showlegend=True, 
+                         error_y=dict(
+                             type='data',
+                             array=self.lc_net_rerate_err,
+                             thickness=1.5,
+                             width=0), 
+                         marker=dict(symbol='cross-thin', size=0))
+        fig.add_trace(net)
+        
+        if loglog: 
+            fig.update_xaxes(title_text=f'Time since {self.timezero_utc} (s)', type='log')
+            fig.update_yaxes(title_text='Counts per second', type='log')
+        else:
+            fig.update_xaxes(title_text=f'Time since {self.timezero_utc} (s)')
+            fig.update_yaxes(title_text='Counts per second')
+        fig.update_layout(template='plotly_white', height=600, width=800)
+        fig.update_layout(legend=dict(x=1, y=1, xanchor='right', yanchor='bottom'))
+        
+        if show: fig.show()
+        fig.write_html(savepath + '/rebin_lc.html')
+        json_dump(fig.to_dict(), savepath + '/rebin_lc.json')
+
+
     @property
     def spec_slices(self):
         
