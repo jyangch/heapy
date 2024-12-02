@@ -587,7 +587,7 @@ class batPipe(object):
             new_l = '{:+.2f}'.format(l).replace('-', 'm').replace('.', 'd').replace('+', 'p')
             new_r = '{:+.2f}'.format(r).replace('-', 'm').replace('.', 'd').replace('+', 'p')
             
-            file_name = '-'.join([new_l, new_r])
+            file_name = '_'.join([new_l, new_r])
             
             specfile = savepath + f'/{file_name}.pha'
         

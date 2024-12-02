@@ -8,6 +8,8 @@ from astropy.time import Time
 import plotly.graph_objs as go
 from astropy.units import UnitsWarning
 warnings.simplefilter('ignore', UnitsWarning)
+from astropy.utils.metadata import MergeConflictWarning
+warnings.simplefilter('ignore', MergeConflictWarning)
 from .filter import Filter
 from .retrieve import gbmRetrieve, gecamRetrieve
 from ..temporal.txx import pgTxx
@@ -16,12 +18,16 @@ from ..util.data import msg_format, json_dump, rebin
 from ..util.time import fermi_met_to_utc, gecam_met_to_utc
 
 
+from datetime import datetime
+
 
 class Event(object):
     
     def __init__(self, file):
         
         self._file = file
+        
+        self._exposure = True
         
         self._read()
         
@@ -42,23 +48,28 @@ class Event(object):
     @staticmethod
     def _ch_to_energy(pi, ch, e1, e2):
         
-        energy = np.zeros_like(pi)
+        pi = np.asarray(pi)
+        ch = np.asarray(ch)
+        e1 = np.asarray(e1)
+        e2 = np.asarray(e2)
+
+        ch_to_index = np.zeros(np.max(ch) + 1, dtype=int)
+        ch_to_index[ch] = np.arange(len(ch))
         
-        for i, chi in enumerate(ch):
-            chi_idx = np.where(pi == chi)[0]
-            chi_energy = Event._energy_of_ch(len(chi_idx), e1[i], e2[i])
-            energy[chi_idx] = chi_energy
-            
+        indices = ch_to_index[pi]
+
+        e1_selected = e1[indices]
+        e2_selected = e2[indices]
+
+        energy = Event._energy_of_ch(len(pi), e1_selected, e2_selected)
+
         return energy
-
-
+    
+    
     @staticmethod
     def _energy_of_ch(n, e1, e2):
-        
-        energy_arr = np.random.random_sample(n)
-        energy = e1 + (e2 - e1) * energy_arr
-        
-        return energy
+
+        return e1 + (e2 - e1) * np.random.random_sample(n)
 
 
     @property
@@ -91,6 +102,24 @@ class Event(object):
     def ebound(self):
         
         return self._ebound
+    
+    
+    @property
+    def chantype(self):
+        
+        return 'None'
+    
+    
+    @property
+    def telescope(self):
+        
+        return 'None'
+    
+    
+    @property
+    def instrument(self):
+        
+        return 'None'
     
     
     @property
@@ -412,8 +441,8 @@ class Event(object):
             
             elif binsize < 1:
                 return binsize
-            
-            
+
+
     def exposure(self, bin_list):
         
         ts = self._ts
@@ -423,12 +452,16 @@ class Event(object):
         rbins = np.array(bin_list)[:, 1]
         binsize = rbins - lbins
         
-        dead_time = np.empty_like(binsize)
-        for i, (l, r) in enumerate(zip(lbins, rbins)):
-            dead_time[i] = 1e-6 * np.sum(dtime[(ts >= l) & (ts < r)])
+        if not self._exposure:
+            return binsize
+        
+        else:
+            dead_time = np.empty_like(binsize)
+            for i, (l, r) in enumerate(zip(lbins, rbins)):
+                dead_time[i] = 1e-6 * np.sum(dtime[(ts >= l) & (ts < r)])
 
-        return binsize - dead_time
-    
+            return binsize - dead_time
+
 
     @property
     def lc_bins(self):
@@ -747,9 +780,9 @@ class Event(object):
             new_l = '{:+.2f}'.format(l).replace('-', 'm').replace('.', 'd').replace('+', 'p')
             new_r = '{:+.2f}'.format(r).replace('-', 'm').replace('.', 'd').replace('+', 'p')
             
-            file_name = '-'.join([new_l, new_r]) + '.src'
+            file_name = '_'.join([new_l, new_r]) + '.src'
             
-            pha_hdu = self._to_pha_fits(phaii[i], np.sqrt(phaii[i]), exps[i], file_name)
+            pha_hdu = self._to_pha_fits(phaii[i], np.sqrt(phaii[i]), exps[i], self.timezero + l, self.timezero + r, file_name)
 
             if os.path.isfile(savepath + f'/{file_name}'):
                 os.remove(savepath + f'/{file_name}')
@@ -859,9 +892,9 @@ class Event(object):
             new_l = '{:+.2f}'.format(l).replace('-', 'm').replace('.', 'd').replace('+', 'p')
             new_r = '{:+.2f}'.format(r).replace('-', 'm').replace('.', 'd').replace('+', 'p')
             
-            file_name = '-'.join([new_l, new_r]) + '.bkg'
+            file_name = '_'.join([new_l, new_r]) + '.bkg'
             
-            pha_hdu = self._to_pha_fits(phaii[i], phaii_err[i], exps[i], file_name)
+            pha_hdu = self._to_pha_fits(phaii[i], phaii_err[i], exps[i], self.timezero + l, self.timezero + r, file_name)
             
             if os.path.isfile(savepath + f'/{file_name}'):
                 os.remove(savepath + f'/{file_name}')
@@ -877,12 +910,15 @@ class Event(object):
         self.extract_bkg_phaii(savepath=savepath, show=show)
 
 
-    def _to_pha_fits(self, pha, pha_err, exp, file_name):
+    def _to_pha_fits(self, pha, pha_err, exp, tstart, tstop, file_name):
         
         hdr = fits.Header()
+        hdr['HDUCLASS'] = ('ogip', 'Format conforms to OGIP/GSFC conventions')
+        hdr['HDUVERS'] = ('1.2.1', 'Version of format (OGIP memo OGIP-92-007)')
         hdr['FILENAME'] = (f'{file_name}', 'name of this file')
-        hdr['AUTHOR'] = ('JunYang', 'author of this file')
+        hdr['AUTHOR'] = ('Jun Yang', 'author of this file')
         hdr['EMAIL'] = ('jyang@smail.nju.edu.cn', 'email of author')
+        hdr['DATE'] = (Time.now().isot, 'file generated date')
         primary_hdu = fits.PrimaryHDU(header=hdr)
 
         channel_field = fits.Column(name='CHANNEL', array=self.channel, format='I')
@@ -899,18 +935,39 @@ class Event(object):
         spectrum_hdu.header['TFORM3'] = ('E', 'data format of field: 32-bit SINGLE FLOAT')
         spectrum_hdu.header['TUNIT3'] = ('count', 'physical unit of field')
         spectrum_hdu.header['EXTNAME'] = ('SPECTRUM', 'name of this binary table extension')
+        spectrum_hdu.header['TLMIN1'] = (np.min(self.channel), 'Lowest legal channel number')
+        spectrum_hdu.header['TLMAX1'] = (np.max(self.channel), 'Highest legal channel number')
+        spectrum_hdu.header['POISSERR'] = (False, 'Poissonian errors to be assumed')
+        spectrum_hdu.header['STAT_ERR'] = (0, 'no statisical error specified')
+        spectrum_hdu.header['SYS_ERR'] = (0, 'no systematic error specified')
+        spectrum_hdu.header['QUALITY'] = (0, 'no data quality information specified')
+        spectrum_hdu.header['GROUPING'] = (0, 'no grouping data has been specified')
+        spectrum_hdu.header['DETCHANS'] = (len(self.channel), 'Total No. of Detector Channels available')
 
         spectrum_hdu.header['EXPOSURE'] = (round(exp, 5), 'exposure time in second')
         spectrum_hdu.header['AREASCAL'] = (1.0, 'nominal effective area')
         spectrum_hdu.header['CORRSCAL'] = (1.0, 'correlation scale factor')
         spectrum_hdu.header['BACKSCAL'] = (1.0, 'background scale factor')
-        spectrum_hdu.header['BACKFILE'] = ('NONE', 'background FITS file for this object')
-        spectrum_hdu.header['CORRFILE'] = ('NONE', 'correlation FITS file for this object')
-        spectrum_hdu.header['RESPFILE'] = ('NONE', 'redistribution; RSP')
-        spectrum_hdu.header['ANCRFILE'] = ('NONE', 'ancillary response; ARF')
-
-        spectrum_hdu.header['DATE'] = (Time.now().isot, 'file generated date')
+        spectrum_hdu.header['BACKFILE'] = ('None', 'background FITS file for this object')
+        spectrum_hdu.header['CORRFILE'] = ('None', 'correlation FITS file for this object')
+        spectrum_hdu.header['RESPFILE'] = ('None', 'redistribution; RSP')
+        spectrum_hdu.header['ANCRFILE'] = ('None', 'ancillary response; ARF')
+        
+        if self.chantype == 'pha':
+            spectrum_hdu.header['CHANTYPE'] = (self.chantype, 'No corrections have been applied')
+        elif self.chantype == 'pi':
+            spectrum_hdu.header['CHANTYPE'] = (self.chantype, 'Channels assigned by detector electronics')
+            
+        spectrum_hdu.header['TSTART'] = (round(tstart, 5), 'Observation start time')
+        spectrum_hdu.header['TSTOP'] = (round(tstop, 5), 'Observation stop time')
         spectrum_hdu.header['TIMEZERO'] = (round(self.timezero, 5), 'zero time in MET format')
+            
+        spectrum_hdu.header['HDUCLASS'] = ('OGIP', 'format conforms to OGIP standard')
+        spectrum_hdu.header['HDUCLAS1'] = ('SPECTRUM', 'PHA dataset (OGIP memo OGIP-92-007)')
+        spectrum_hdu.header['HDUVERS'] = ('1.2.1', 'Version of format (OGIP memo OGIP-92-007)')
+        spectrum_hdu.header['TELESCOP'] = (self.telescope, 'Telescope (mission) name')
+        spectrum_hdu.header['INSTRUME'] = (self.instrument, 'Instrument name')
+        spectrum_hdu.header['FILTER'] = ('None', 'Instrument filter in use')
 
         channel_field = fits.Column(name='CHANNEL', array=self.channel, format='I', unit='channel')
         e_min_field = fits.Column(name='E_MIN', array=self.channel_emin, format='E', unit='keV')
@@ -918,6 +975,22 @@ class Event(object):
         ebound_hdu = fits.BinTableHDU.from_columns([channel_field, e_min_field, e_max_field])
         
         ebound_hdu.header['EXTNAME'] = ('EBOUNDS', 'name of this binary table extension')
+        ebound_hdu.header['TLMIN1'] = (np.min(self.channel), 'Lowest legal channel number')
+        ebound_hdu.header['TLMAX1'] = (np.max(self.channel), 'Highest legal channel number')
+        ebound_hdu.header['DETCHANS'] = (len(self.channel), 'Total No. of Detector Channels available')
+        
+        if self.chantype == 'pha':
+            ebound_hdu.header['CHANTYPE'] = (self.chantype, 'No corrections have been applied')
+        elif self.chantype == 'pi':
+            ebound_hdu.header['CHANTYPE'] = (self.chantype, 'Channels assigned by detector electronics')
+        
+        ebound_hdu.header['HDUCLASS'] = ('OGIP', 'format conforms to OGIP standard')
+        ebound_hdu.header['HDUCLAS1'] = ('RESPONSE', 'These are typically found in RMF files')
+        ebound_hdu.header['HDUCLAS2'] = ('EBOUNDS', 'From CAL/GEN/92-002')
+        ebound_hdu.header['HDUVERS'] = ('1.2.1', 'Version of format (OGIP memo OGIP-92-007)')
+        ebound_hdu.header['TELESCOP'] = (self.telescope, 'Telescope (mission) name')
+        ebound_hdu.header['INSTRUME'] = (self.instrument, 'Instrument name')
+        ebound_hdu.header['FILTER'] = ('None', 'Instrument filter in use')
 
         pha_hdu = fits.HDUList([primary_hdu, spectrum_hdu, ebound_hdu])
         
@@ -986,6 +1059,24 @@ class gbmTTE(Event):
         
         self._filter = Filter(self._event)
         self._filter_info = {'time': None, 'energy': None, 'pha': None, 'tag': None}
+        
+        
+    @property
+    def chantype(self):
+        
+        return 'pha'
+    
+    
+    @property
+    def telescope(self):
+        
+        return 'GLAST'
+    
+    
+    @property
+    def instrument(self):
+        
+        return 'GBM'
         
         
     @property
@@ -1119,6 +1210,24 @@ class gecamEVT(Event):
         
         self._filter = Filter(self._event)
         self._filter_info = {'time': None, 'energy': None, 'pi': None, 'tag': None}
+        
+        
+    @property
+    def chantype(self):
+        
+        return 'pi'
+    
+    
+    @property
+    def telescope(self):
+        
+        return 'GECAM'
+    
+    
+    @property
+    def instrument(self):
+        
+        return 'GRD'
         
         
     @property

@@ -263,12 +263,13 @@ class PolyBase(object):
 
         notice_time = np.delete(self.time, ignore_idx)
         notice_rate = np.delete(self.rate, ignore_idx)
-        notice_lbins = np.delete(self.lbins, ignore_idx)
-        notice_rbins = np.delete(self.rbins, ignore_idx)
-        notice_binsize = notice_rbins - notice_lbins
+        notice_exp = np.delete(self.exp, ignore_idx)
+        # notice_lbins = np.delete(self.lbins, ignore_idx)
+        # notice_rbins = np.delete(self.rbins, ignore_idx)
+        # notice_binsize = notice_rbins - notice_lbins
 
         self.poly = Polynomial.set_method('2pass')
-        self.poly.fit(notice_time, notice_rate, deg=deg, dx=notice_binsize)
+        self.poly.fit(notice_time, notice_rate, deg=deg, dx=notice_exp)
         self.bak, self.bak_se = self.poly.val(self.time)
         # self.bak[self.re_bad_index] = 0
         # self.bak_se[self.re_bad_index] = 0

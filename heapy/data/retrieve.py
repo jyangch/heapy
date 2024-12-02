@@ -43,39 +43,39 @@ class gbmRetrieve(Retrieve):
 
         dets = ['n0','n1','n2','n3','n4','n5','n6','n7','n8','n9','na','nb','b0','b1']
         tte_dict = {}
-        cspec_pha_dict = {}
-        cspec_rsp_dict = {}
-        ctime_pha_dict = {}
-        ctime_rsp_dict = {}
+        # cspec_pha_dict = {}
+        # cspec_rsp_dict = {}
+        # ctime_pha_dict = {}
+        # ctime_rsp_dict = {}
 
         for det in dets:
             tte_feature = 'glg_tte_' + det + '_' + burstid + '_v*fit'
             tte_file = ff.find(tte_feature)
             tte_dict[det] = tte_file[-1] if tte_file else None
 
-            cspec_feature = 'glg_cspec_' + det + '_' + burstid + '_v*pha'
-            cspec_file = ff.find(cspec_feature)
-            cspec_pha_dict[det] = cspec_file[-1] if cspec_file else None
+            # cspec_feature = 'glg_cspec_' + det + '_' + burstid + '_v*pha'
+            # cspec_file = ff.find(cspec_feature)
+            # cspec_pha_dict[det] = cspec_file[-1] if cspec_file else None
 
-            cspec_feature = 'glg_cspec_' + det + '_' + burstid + '_v*rsp2'
-            cspec_file = ff.find(cspec_feature)
-            cspec_rsp_dict[det] = cspec_file[-1] if cspec_file else None
+            # cspec_feature = 'glg_cspec_' + det + '_' + burstid + '_v*rsp2'
+            # cspec_file = ff.find(cspec_feature)
+            # cspec_rsp_dict[det] = cspec_file[-1] if cspec_file else None
 
-            ctime_feature = 'glg_ctime_' + det + '_' + burstid + '_v*pha'
-            ctime_file = ff.find(ctime_feature)
-            ctime_pha_dict[det] = ctime_file[-1] if ctime_file else None
+            # ctime_feature = 'glg_ctime_' + det + '_' + burstid + '_v*pha'
+            # ctime_file = ff.find(ctime_feature)
+            # ctime_pha_dict[det] = ctime_file[-1] if ctime_file else None
 
-            ctime_feature = 'glg_ctime_' + det + '_' + burstid + '_v*rsp2'
-            ctime_file = ff.find(ctime_feature)
-            ctime_rsp_dict[det] = ctime_file[-1] if ctime_file else None
+            # ctime_feature = 'glg_ctime_' + det + '_' + burstid + '_v*rsp2'
+            # ctime_file = ff.find(ctime_feature)
+            # ctime_rsp_dict[det] = ctime_file[-1] if ctime_file else None
             
         healpix_feature = 'glg_healpix_all_' + burstid + '_v*fit'
         healpix_file = ff.find(healpix_feature)
         healpix = healpix_file[-1] if healpix_file else None
 
         rtv_res = {'burstid': burstid, 'datapath': datapath, 'tte': tte_dict, 
-                   'cspec_pha': cspec_pha_dict, 'cspec_rsp': cspec_rsp_dict, 
-                   'ctime_pha': ctime_pha_dict, 'ctime_rsp': ctime_rsp_dict, 
+                #    'cspec_pha': cspec_pha_dict, 'cspec_rsp': cspec_rsp_dict, 
+                #    'ctime_pha': ctime_pha_dict, 'ctime_rsp': ctime_rsp_dict, 
                    'healpix': healpix}
         
         rtv = cls(rtv_res)
@@ -117,8 +117,8 @@ class gbmRetrieve(Retrieve):
         poshist_list = []
         dets = ['n0','n1','n2','n3','n4','n5','n6','n7','n8','n9','na','nb','b0','b1']
         tte_dict = {det:[] for det in dets}
-        cspec_pha_dict = {det:[] for det in dets}
-        ctime_pha_dict = {det:[] for det in dets}
+        # cspec_pha_dict = {det:[] for det in dets}
+        # ctime_pha_dict = {det:[] for det in dets}
 
         for date in dates_perH:
             year = '%d' % date.year
@@ -152,22 +152,22 @@ class gbmRetrieve(Retrieve):
             ff.local_dir = local_dir
             ff.ftp_url = ftp_url
             
-            for det in dets:
-                cspec_feature = 'glg_cspec_' + det + '_' + year[-2:] + month + day + '_v*pha'
-                cspec_file = ff.find(cspec_feature)
-                cspec_pha_dict[det].append(cspec_file[-1] if cspec_file else None)
+            # for det in dets:
+            #     cspec_feature = 'glg_cspec_' + det + '_' + year[-2:] + month + day + '_v*pha'
+            #     cspec_file = ff.find(cspec_feature)
+            #     cspec_pha_dict[det].append(cspec_file[-1] if cspec_file else None)
 
-                ctime_feature = 'glg_ctime_' + det + '_' + year[-2:] + month + day + '_v*pha'
-                ctime_file = ff.find(ctime_feature)
-                ctime_pha_dict[det].append(ctime_file[-1] if ctime_file else None)
+            #     ctime_feature = 'glg_ctime_' + det + '_' + year[-2:] + month + day + '_v*pha'
+            #     ctime_file = ff.find(ctime_feature)
+            #     ctime_pha_dict[det].append(ctime_file[-1] if ctime_file else None)
 
             poshist_feature = 'glg_poshist_all_' + year[-2:] + month + day + '_v*fit'
             poshist_file = ff.find(poshist_feature)
             poshist_list.append(poshist_file[-1] if poshist_file else None)
 
         rtv_res = {'utc': utc.value, 't1': t1.value, 't2': t2.value, 'datapath': datapath, 
-                   'tte': tte_dict, 'cspec_pha': cspec_pha_dict, 
-                   'ctime_pha': ctime_pha_dict, 'poshist': poshist_list}
+                #    'cspec_pha': cspec_pha_dict, 'ctime_pha': ctime_pha_dict, 
+                   'tte': tte_dict, 'poshist': poshist_list}
         
         rtv = cls(rtv_res)
         
