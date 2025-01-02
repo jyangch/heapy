@@ -126,15 +126,15 @@ class PolyBase(object):
         if self.base_res is None: self.basefit()
         
         if self.poly_res is not None:
-            self.re_bcts = np.empty(self.nblock)
-            self.re_bcts_se = np.empty(self.nblock)
+            self.re_bcts = np.zeros(self.nblock, dtype=float)
+            self.re_bcts_se = np.zeros(self.nblock, dtype=float)
             for i, (l, r) in enumerate(zip(self.edges[:-1], self.edges[1:])):
                 x = np.linspace(l, r, 100)
                 y, y_se = self.poly.val(x)
                 self.re_bcts[i] = np.trapz(y, x)
                 self.re_bcts_se[i] = np.sqrt(np.trapz(y_se ** 2, x))
         else:
-            self.re_bcts = np.empty(self.nblock)
+            self.re_bcts = np.zeros(self.nblock, dtype=float)
             for i, (l, r) in enumerate(zip(self.edges[:-1], self.edges[1:])):
                 x = np.linspace(l, r, 100)
                 y = self.bl.val(x)

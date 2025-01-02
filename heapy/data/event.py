@@ -18,16 +18,12 @@ from ..util.data import msg_format, json_dump, rebin
 from ..util.time import fermi_met_to_utc, gecam_met_to_utc
 
 
-from datetime import datetime
-
 
 class Event(object):
     
     def __init__(self, file):
         
         self._file = file
-        
-        self._exposure = True
         
         self._read()
         
@@ -452,15 +448,12 @@ class Event(object):
         rbins = np.array(bin_list)[:, 1]
         binsize = rbins - lbins
         
-        if not self._exposure:
-            return binsize
-        
-        else:
-            dead_time = np.empty_like(binsize)
-            for i, (l, r) in enumerate(zip(lbins, rbins)):
-                dead_time[i] = 1e-6 * np.sum(dtime[(ts >= l) & (ts < r)])
+        dead_time = np.zeros_like(binsize, dtype=float)
+        print(dead_time)
+        for i, (l, r) in enumerate(zip(lbins, rbins)):
+            dead_time[i] = 1e-6 * np.sum(dtime[(ts >= l) & (ts < r)])
 
-            return binsize - dead_time
+        return binsize - dead_time
 
 
     @property
@@ -749,7 +742,7 @@ class Event(object):
         num_slices = len(spec_slices)
         num_channels = len(self.channel)
         
-        phaii = np.empty([num_slices, num_channels])
+        phaii = np.zeros([num_slices, num_channels], dtype=float)
         
         lslices = np.array(spec_slices)[:, 0]
         rslices = np.array(spec_slices)[:, 1]
@@ -794,8 +787,8 @@ class Event(object):
         num_slices = len(spec_slices)
         num_channels = len(self.channel)
         
-        phaii = np.empty([num_slices, num_channels])
-        phaii_err = np.empty([num_slices, num_channels])
+        phaii = np.zeros([num_slices, num_channels], dtype=float)
+        phaii_err = np.zeros([num_slices, num_channels], dtype=float)
         
         lslices = np.array(spec_slices)[:, 0]
         rslices = np.array(spec_slices)[:, 1]
