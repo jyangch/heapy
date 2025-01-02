@@ -439,7 +439,7 @@ class Event(object):
                 return binsize
 
 
-    def exposure(self, bin_list):
+    def exposure(self, bin_list, dead=True):
         
         ts = self._ts
         dtime = self._dtime
@@ -449,9 +449,10 @@ class Event(object):
         binsize = rbins - lbins
         
         dead_time = np.zeros_like(binsize, dtype=float)
-        print(dead_time)
-        for i, (l, r) in enumerate(zip(lbins, rbins)):
-            dead_time[i] = 1e-6 * np.sum(dtime[(ts >= l) & (ts < r)])
+        
+        if dead:
+            for i, (l, r) in enumerate(zip(lbins, rbins)):
+                dead_time[i] = 1e-6 * np.sum(dtime[(ts >= l) & (ts < r)])
 
         return binsize - dead_time
 
@@ -473,7 +474,7 @@ class Event(object):
     @property
     def lc_exps(self):
         
-        return self.exposure(self.lc_bin_list)
+        return self.exposure(self.lc_bin_list, dead=False)
     
     
     @property
@@ -682,7 +683,7 @@ class Event(object):
                     backscale=1)
                 
         self.lc_retime = np.mean(self.lc_rebin_list, axis=1)
-        self.lc_reexps = self.exposure(self.lc_rebin_list)
+        self.lc_reexps = self.exposure(self.lc_rebin_list, dead=False)
         self.lc_net_rects = self.lc_src_rects - self.lc_bkg_rebcts
         self.lc_net_rects_err = np.sqrt(self.lc_src_rects_err ** 2 + self.lc_bkg_rebcts_err ** 2)
         self.lc_net_rerate = self.lc_net_rects / self.lc_reexps
