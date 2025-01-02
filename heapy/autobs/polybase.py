@@ -132,7 +132,7 @@ class PolyBase(object):
                 x = np.linspace(l, r, 100)
                 y, y_se = self.poly.val(x)
                 self.re_bcts[i] = np.trapz(y, x)
-                self.re_bcts_se[i] = np.trapz(y_se, x)
+                self.re_bcts_se[i] = np.sqrt(np.trapz(y_se ** 2, x))
         else:
             self.re_bcts = np.empty(self.nblock)
             for i, (l, r) in enumerate(zip(self.edges[:-1], self.edges[1:])):

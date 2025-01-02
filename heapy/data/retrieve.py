@@ -366,26 +366,17 @@ class epRetrieve(Retrieve):
         evt_feature = f'fxt_{module}_*_cl_*.fits'
         evt_file = ff.find(evt_feature)
         evt = evt_file[-1] if evt_file else None
-
-        rmf_feature = f'fxt_{module}_*.rmf'
-        rmf_file = ff.find(rmf_feature)
-        rmf = rmf_file[-1] if rmf_file else None
-        
-        arf_feature = f'fxt_{module}_*.arf'
-        arf_file = ff.find(arf_feature)
-        arf = arf_file[-1] if arf_file else None
         
         reg_feature = f'fxt_{module}_*.reg'
         reg_file = ff.find(reg_feature)
         reg = reg_file[-1] if reg_file else None
         
-        bkreg_feature = f'fxt_{module}_*bk.arf'
+        bkreg_feature = f'fxt_{module}_*bk.reg'
         bkreg_file = ff.find(bkreg_feature)
         bkreg = bkreg_file[-1] if bkreg_file else None
         
         rtv_res = {'satelite': 'FXT', 'obsid': obsid, 'module': module, 
-                   'evt': evt, 'rmf': rmf, 'arf': arf, 
-                   'reg': reg, 'bkreg': bkreg}
+                   'evt': evt, 'reg': reg, 'bkreg': bkreg}
         
         rtv = cls(rtv_res)
         

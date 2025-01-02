@@ -112,9 +112,6 @@ class Lag(CCF):
 
         self.xncts = self.xcts - self.xbcts
         self.yncts = self.ycts - self.ybcts
-        
-        self.xsigidx = xsigidx
-        self.ysigidx = ysigidx
 
 
     @staticmethod

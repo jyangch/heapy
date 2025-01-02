@@ -843,7 +843,7 @@ class Event(object):
                 brate_j, brate_err_j = bs_i.poly.val(bins_j)
                 
                 phaii[j, i] = np.trapz(brate_j, bins_j)
-                phaii_err[j, i] = np.trapz(brate_err_j, bins_j)
+                phaii_err[j, i] = np.sqrt(np.trapz(brate_err_j ** 2, bins_j))
                 
         fig = go.Figure()
         src = go.Scatter(x=bs.time, 

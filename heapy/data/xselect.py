@@ -284,7 +284,8 @@ class Xselect(object):
     def time_filter(self):
         
         if self._filter_info['time'] is None:
-            return [np.min(self._event['TIME']), np.max(self._event['TIME'])]
+            return [np.floor(np.min(self._event['TIME'])) - self.timezero, 
+                    np.ceil(np.max(self._event['TIME'])) - self.timezero]
         else:
             return self._time_filter
 
@@ -490,7 +491,7 @@ class Xselect(object):
         return lc_ps
         
         
-    def extract_curve(self, savepath='./curve', show=False):
+    def extract_curve(self, savepath='./curve', sig=True, show=False):
         
         savepath = os.path.abspath(savepath)
         
@@ -499,7 +500,7 @@ class Xselect(object):
                 
         os.mkdir(savepath)
         
-        self.lc_ps.save(savepath=savepath + '/ppsignal')
+        if sig: self.lc_ps.save(savepath=savepath + '/ppsignal')
         
         fig = go.Figure()
         src = go.Scatter(x=self.lc_time, 
