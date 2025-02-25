@@ -5,6 +5,7 @@ import numpy as np
 from astropy.io import fits
 import plotly.graph_objs as go
 from .retrieve import swiftRetrieve
+from ..temporal.txx import ggTxx
 from ..util.data import json_dump, rebin
 from ..util.time import swift_met_to_utc, swift_utc_to_met
 
@@ -478,8 +479,30 @@ class batPipe(object):
         json_dump(fig.to_dict(), savepath + '/cum_lc.json')
         
         
-    def extract_rebin_curve(self, min_sigma=None, min_evt=None, max_bin=None, 
-                            savepath='./curve', loglog=False, std=False, show=False):
+    def calculate_txx(self, xx=0.9, pstart=None, pstop=None, lbkg=None, rbkg=None, 
+                      savepath='./duration', std=False):
+        
+        savepath = os.path.abspath(savepath)
+        
+        if os.path.isdir(savepath):
+            shutil.rmtree(savepath)
+                
+        os.mkdir(savepath)
+        
+        self.batbinevt_curve(savepath=savepath, std=std)
+        
+        lc_hdu = fits.open(self.lcfile)
+        self.lc_time = np.array(lc_hdu['RATE'].data['TIME']) - self.timezero
+        self.lc_net_cts = np.array(lc_hdu['RATE'].data['RATE']) * self.lc_binsize
+        self.lc_net_cts_err = np.array(lc_hdu['RATE'].data['ERROR']) * self.lc_binsize
+        
+        txx = ggTxx(self.lc_time, self.lc_net_cts, self.lc_net_cts_err)
+        txx.accumcts(xx=xx, pstart=pstart, pstop=pstop, lbkg=lbkg, rbkg=rbkg)
+        txx.save(savepath=savepath)
+
+
+    def extract_rebin_curve(self, trange=None, min_sigma=None, min_evt=None, max_bin=None, 
+                            savepath='./rebin_curve', loglog=False, std=False, show=False):
         
         savepath = os.path.abspath(savepath)
         
@@ -501,12 +524,17 @@ class batPipe(object):
         self.lc_net_cts = self.lc_net_rate * self.lc_binsize
         self.lc_net_cts_err = self.lc_net_rate_err * self.lc_binsize
         
+        if trange is not None:
+            idx = (self.lc_bin_list[:, 0] >= trange[0]) * (self.lc_bin_list[:, 1] <= trange[1])
+        else:
+            idx = np.ones(len(self.lc_bin_list), dtype=bool)
+        
         self.lc_rebin_list, self.lc_net_rects, self.lc_net_rects_err, _, _ = \
             rebin(
-                self.lc_bin_list, 
+                self.lc_bin_list[idx], 
                 'gstat', 
-                self.lc_net_cts, 
-                cts_err=self.lc_net_cts_err,
+                self.lc_net_cts[idx], 
+                cts_err=self.lc_net_cts_err[idx],
                 bcts=None, 
                 bcts_err=None, 
                 min_sigma=min_sigma, 

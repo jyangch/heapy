@@ -599,20 +599,26 @@ class Xselect(object):
         txx.save(savepath=savepath)
         
         
-    def extract_rebin_curve(self, min_sigma=None, min_evt=None, max_bin=None, savepath='./curve', loglog=False, show=False):
+    def extract_rebin_curve(self, trange=None, min_sigma=None, min_evt=None, max_bin=None, 
+                            savepath='./curve', loglog=False, show=False):
         
         if not os.path.exists(savepath):
             os.makedirs(savepath)
+            
+        if trange is not None:
+            idx = (self.lc_bin_list[:, 0] >= trange[0]) * (self.lc_bin_list[:, 1] <= trange[1])
+        else:
+            idx = np.ones(len(self.lc_bin_list), dtype=bool)
         
         self.lc_rebin_list, self.lc_src_rects, self.lc_src_rects_err, \
             self.lc_bkg_rebcts, self.lc_bkg_rebcts_err = \
                 rebin(
-                    self.lc_bin_list, 
+                    self.lc_bin_list[idx], 
                     'cstat', 
-                    self.lc_src_cts, 
-                    cts_err=self.lc_src_cts_err,
-                    bcts=self.lc_bkg_cts, 
-                    bcts_err=self.lc_bkg_cts_err, 
+                    self.lc_src_cts[idx], 
+                    cts_err=self.lc_src_cts_err[idx],
+                    bcts=self.lc_bkg_cts[idx], 
+                    bcts_err=self.lc_bkg_cts_err[idx], 
                     min_sigma=min_sigma, 
                     min_evt=min_evt, 
                     max_bin=max_bin,

@@ -28,7 +28,7 @@ class gbmRetrieve(Retrieve):
     def from_burst(cls, burstid, datapath=None):
         
         if datapath is None:
-            datapath = '/Users/jyang/Documents/fermi/data/gbm/bursts'
+            datapath = '/Users/junyang/Documents/fermi/data/gbm/bursts'
             
         dataurl = 'ftp://129.164.179.23/fermi/data/gbm/bursts'
 
@@ -87,7 +87,7 @@ class gbmRetrieve(Retrieve):
     def from_utc(cls, utc, t1, t2, datapath=None):
         
         if datapath is None:
-            datapath = '/Users/jyang/Documents/fermi/data/gbm/daily'
+            datapath = '/Users/junyang/Documents/fermi/data/gbm/daily'
             
         dataurl = 'ftp://129.164.179.23/fermi/data/gbm/daily'
         
@@ -186,7 +186,7 @@ class gecamRetrieve(Retrieve):
     def from_burst(cls, burstid, datapath=None):
         
         if datapath is None:
-            datapath = '/Users/jyang/Documents/gecam/bursts'
+            datapath = '/Users/junyang/Documents/gecam/bursts'
 
         year = '20' + burstid[2:4]
         month = burstid[4:6]
@@ -224,7 +224,7 @@ class gecamRetrieve(Retrieve):
     def from_utc(cls, utc, t1, t2, datapath=None):
         
         if datapath is None:
-            datapath = '/Users/jyang/Documents/gecam/daily'
+            datapath = '/Users/junyang/Documents/gecam/daily'
             
         ff = FileFinder(local_dir=datapath)
 
@@ -304,7 +304,7 @@ class epRetrieve(Retrieve):
     def from_wxtobs(cls, obsid, srcid, datapath=None): 
         
         if datapath is None:
-            datapath = '/Users/jyang/Documents/EinsteinProbe/WXT'
+            datapath = '/Users/junyang/Documents/EinsteinProbe/WXT'
             
         local_dir = datapath + '/' + obsid
         
@@ -357,7 +357,7 @@ class epRetrieve(Retrieve):
     def from_fxtobs(cls, obsid, module, datapath=None): 
         
         if datapath is None:
-            datapath = '/Users/jyang/Documents/EinsteinProbe/FXT'
+            datapath = '/Users/junyang/Documents/EinsteinProbe/FXT'
             
         local_dir = datapath + '/' + obsid
         
@@ -387,7 +387,7 @@ class epRetrieve(Retrieve):
     def from_fxtsrc(cls, obsid, module, datapath=None):
         
         if datapath is None:
-            datapath = '/Users/jyang/Documents/EinsteinProbe/FXT'
+            datapath = '/Users/junyang/Documents/EinsteinProbe/FXT'
             
         local_dir = datapath + '/' + obsid
         
@@ -439,7 +439,7 @@ class swiftRetrieve(Retrieve):
     def from_xrtobs(cls, obsid, datapath=None): 
         
         if datapath is None:
-            datapath = '/Users/jyang/Documents/swift'
+            datapath = '/Users/junyang/Documents/swift'
             
         local_dir = datapath + '/' + obsid + '/xrt/event'
         
@@ -469,7 +469,7 @@ class swiftRetrieve(Retrieve):
     def from_batobs(cls, obsid, datapath=None):
         
         if datapath is None:
-            datapath = '/Users/jyang/Documents/swift'
+            datapath = '/Users/junyang/Documents/swift'
             
         local_dir = datapath + '/' + obsid
         

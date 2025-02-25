@@ -100,16 +100,16 @@ def leia_met_to_utc(met):
 def swift_met_to_utc(met, utcf):
 
     dt = TimeDelta(met + utcf, format='sec')
-    ref_utc = Time('2001-01-01T00:00:00.00', scale='utc', format='isot')
-    now_utc = (ref_utc + dt).value
+    ref_tt = Time('2001-01-01T00:00:00.00', scale='tt', format='isot')
+    now_utc = (ref_tt + dt).value
 
     return now_utc
 
 
 def swift_utc_to_met(utc, utcf, format='isot'):
 
-    ref_utc = Time('2001-01-01T00:00:00.00', scale='utc', format='isot')
-    now_utc = Time(utc, scale='utc', format=format)
-    met = (now_utc - ref_utc).sec - utcf
+    ref_tt = Time('2001-01-01T00:00:00.00', scale='tt', format='isot')
+    now_utc = Time(utc, scale='tt', format=format)
+    met = (now_utc - ref_tt).sec - utcf
 
     return met
