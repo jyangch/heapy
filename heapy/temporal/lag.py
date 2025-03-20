@@ -314,7 +314,6 @@ class Lag(CCF):
 
         rcParams['font.family'] = 'serif'
         rcParams['font.sans-serif'] = 'Georgia'
-        rcParams['text.usetex'] = True
         rcParams['font.size'] = 12
         rcParams['pdf.fonttype'] = 42
 
