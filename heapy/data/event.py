@@ -40,7 +40,7 @@ class Event(object):
             self._filter = Filter(self._event)
             self._filter_info = {'time': None, 'energy': None, 'tag': None}
 
-    
+
     @staticmethod
     def _ch_to_energy(pi, ch, e1, e2):
         
@@ -64,7 +64,7 @@ class Event(object):
     
     @staticmethod
     def _energy_of_ch(n, e1, e2):
-
+        
         return e1 + (e2 - e1) * np.random.random_sample(n)
 
 

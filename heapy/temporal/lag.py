@@ -4,7 +4,8 @@ import numpy as np
 from scipy import signal
 import matplotlib.pyplot as plt
 from matplotlib import rcParams
-from astropy.modeling import models
+from scipy.optimize import curve_fit
+from scipy.interpolate import CubicSpline
 from astropy.stats import sigma_clip, mad_std
 from ..util.data import json_dump
 
@@ -56,7 +57,6 @@ class CCF(object):
         sy = np.sum(y ** 2)
         nor = np.sqrt(sx * sy)
         tau = [dt * d for d in range(-N + 1, N, 1)]
-        # ccfs = np.correlate(y, x, mode='full') / nor
         ccfs = signal.correlate(y, x, mode='full', method='auto') / nor
         
         return np.array(tau), np.array(ccfs)
@@ -68,58 +68,141 @@ class Lag(CCF):
     def __init__(self, 
                  xcts, 
                  ycts, 
-                 xbcts,
-                 ybcts,
                  dt,
-                 xtype='pg', 
-                 ytype='pg',
+                 xcts_se=None,
+                 ycts_se=None,
+                 xbcts=None,
+                 ybcts=None,
                  xbcts_se=None,
                  ybcts_se=None,
-                 xsigidx=None,
-                 ysigidx=None):
+                 xtype='pg', 
+                 ytype='pg',
+                 ):
+        """
+        low energy band is taken as y
+        high energy band is taken as x
+        """
         
         super().__init__()
 
         self.xcts = xcts
         self.ycts = ycts
         
-        self.xcts_se = np.sqrt(xcts)
-        self.ycts_se = np.sqrt(ycts)
-
-        self.xbcts = xbcts
-        self.ybcts = ybcts
-        
         self.dt = dt
         
         self.xtype = xtype
         self.ytype = ytype
         
-        if xbcts_se is None:
-            if xtype == 'pp':
+        if xtype == 'pg':
+            if xcts_se is None:
+                self.xcts_se = np.sqrt(xcts)
+            else:
+                self.xcts_se = xcts_se
+                
+            if xbcts is None:
+                raise ValueError('unknown xbcts')
+            else:
+                self.xbcts = xbcts
+                
+            if xbcts_se is None:
+                raise ValueError('unknown xbcts_se')
+            else:
+                self.xbcts_se = xbcts_se
+        
+        elif xtype == 'pp':
+            if xcts_se is None:
+                self.xcts_se = np.sqrt(xcts)
+            else:
+                self.xcts_se = xcts_se
+                
+            if xbcts is None:
+                raise ValueError('unknown xbcts')
+            else:
+                self.xbcts = xbcts
+                
+            if xbcts_se is None:
                 self.xbcts_se = np.sqrt(xbcts)
             else:
-                raise ValueError('unknown xbcts error')
+                self.xbcts_se = xbcts_se
+                
+        elif xtype == 'gg':
+            if xcts_se is None:
+                raise ValueError('unknown xcts_se')
+            else:
+                self.xcts_se = xcts_se
+                
+            if xbcts is None:
+                self.xbcts = np.zeros_like(xcts)
+            else:
+                self.xbcts = xbcts
+                
+            if xbcts_se is None:
+                self.xbcts_se = np.zeros_like(xcts)
+            else:
+                self.xbcts_se = xbcts_se
+                
         else:
-            self.xbcts_se = xbcts_se
+            raise ValueError('unknown xtype')
             
-        if ybcts_se is None:
-            if ytype == 'pp':
+        if ytype == 'pg':
+            if ycts_se is None:
+                self.ycts_se = np.sqrt(ycts)
+            else:
+                self.ycts_se = ycts_se
+                
+            if ybcts is None:
+                raise ValueError('unknown ybcts')
+            else:
+                self.ybcts = ybcts
+                
+            if ybcts_se is None:
+                raise ValueError('unknown ybcts_se')
+            else:
+                self.ybcts_se = ybcts_se
+        
+        elif ytype == 'pp':
+            if ycts_se is None:
+                self.ycts_se = np.sqrt(ycts)
+            else:
+                self.ycts_se = ycts_se
+                
+            if ybcts is None:
+                raise ValueError('unknown ybcts')
+            else:
+                self.ybcts = ybcts
+                
+            if ybcts_se is None:
                 self.ybcts_se = np.sqrt(ybcts)
             else:
-                raise ValueError('unknown ybcts error')
+                self.ybcts_se = ybcts_se
+                
+        elif ytype == 'gg':
+            if ycts_se is None:
+                raise ValueError('unknown ycts_se')
+            else:
+                self.ycts_se = ycts_se
+                
+            if ybcts is None:
+                self.ybcts = np.zeros_like(ycts)
+            else:
+                self.ybcts = ybcts
+                
+            if ybcts_se is None:
+                self.ybcts_se = np.zeros_like(ycts)
+            else:
+                self.ybcts_se = ybcts_se
+                
         else:
-            self.ybcts_se = ybcts_se  
-
+            raise ValueError('unknown ytype')
+        
         self.xncts = self.xcts - self.xbcts
         self.yncts = self.ycts - self.ybcts
 
 
     @staticmethod
-    def gmo(x, amp, mean, std):
+    def gaussian(x, cons, amp, mu, sigma):
         
-        g = models.Gaussian1D(amplitude=amp, mean=mean, stddev=std)
-        
-        return g(x)
+        return cons + amp * np.exp(-((x - mu) ** 2) / (2 * sigma ** 2))
     
 
     def mc_simulation(self, nmc):
@@ -135,6 +218,9 @@ class Lag(CCF):
             elif self.xtype == 'pp':
                 xmc = np.random.poisson(lam=self.xcts) \
                     - np.random.poisson(lam=self.xbcts)
+            elif self.xtype == 'gg':
+                xmc = (self.xcts + self.xcts_se * np.random.randn(self.N)) \
+                    - (self.xbcts + self.xbcts_se * np.random.randn(self.N))
             else:
                 raise TypeError("invalid xtype")
 
@@ -144,6 +230,9 @@ class Lag(CCF):
             elif self.ytype == 'pp':
                 ymc = np.random.poisson(lam=self.ycts) \
                     - np.random.poisson(lam=self.ybcts)
+            elif self.ytype == 'gg':
+                ymc = (self.ycts + self.ycts_se * np.random.randn(self.N)) \
+                    - (self.ybcts + self.ybcts_se * np.random.randn(self.N))
             else:
                 raise TypeError("invalid ytype")
             
@@ -151,24 +240,44 @@ class Lag(CCF):
             self.mc_yncts.append(ymc)
 
 
-    def callag(self, width=5, deg=5):
+    def callag(self, width=3, method='polyfit'):
         
         self.taus, ccfs0 = self.ccfs_scipy(self.dt, self.mc_xncts[0], self.mc_yncts[0])
 
         pidx = np.argmax(ccfs0)
         self.nidx = np.arange(pidx - width if pidx >= width else 0, pidx + width + 1, 1)
         self.itp_taus = np.arange(self.taus[self.nidx[0]], self.taus[self.nidx[-1]], 1e-4)
+        
+        mu_init = self.taus[pidx]
+        sigma_init = (self.taus[self.nidx[-1]] - self.taus[self.nidx[0]]) / 6
+        cons_init = (self.taus[self.nidx[-1]] + self.taus[self.nidx[0]]) / 2
+        amp_init = np.max(ccfs0) - cons_init
 
         self.mc_ccfs, self.mc_itp_ccfs = [], []
         self.mc_peak_lags, self.mc_fit_lags = [], []
-        for _, (x, y) in enumerate(zip(self.mc_xncts, self.mc_yncts)):
+        for i, (x, y) in enumerate(zip(self.mc_xncts, self.mc_yncts)):
             _, ccfs_i = self.ccfs_scipy(self.dt, x, y)
             self.mc_ccfs.append(ccfs_i)
-
-            poly_fit = np.polyfit(self.taus[self.nidx], ccfs_i[self.nidx], deg=deg)
-            itp_ccfs_i = np.polyval(poly_fit, self.itp_taus)
-            self.mc_itp_ccfs.append(itp_ccfs_i)
-
+            
+            if method == 'spline':
+                cubic_spline = CubicSpline(self.taus[self.nidx], ccfs_i[self.nidx], bc_type='natural')
+                itp_ccfs_i = cubic_spline(self.itp_taus)
+                self.mc_itp_ccfs.append(itp_ccfs_i)
+                
+            elif method == 'polyfit':
+                poly_fit = np.polyfit(self.taus[self.nidx], ccfs_i[self.nidx], deg=4)
+                itp_ccfs_i = np.polyval(poly_fit, self.itp_taus)
+                self.mc_itp_ccfs.append(itp_ccfs_i)
+                
+            elif method == 'gaussian':
+                popt, _ = curve_fit(Lag.gaussian, self.taus[self.nidx], ccfs_i[self.nidx], 
+                                    p0=[cons_init, amp_init, mu_init, sigma_init])
+                itp_ccfs_i = Lag.gaussian(self.itp_taus, *popt)
+                self.mc_itp_ccfs.append(itp_ccfs_i)
+                
+            else:
+                raise ValueError('unknown method')
+            
             lag_i = self.taus[np.argmax(ccfs_i)]
             self.mc_peak_lags.append(lag_i)
 
@@ -185,7 +294,7 @@ class Lag(CCF):
         lag_err = np.diff([lag_lo, lag_bv, lag_hi])
         self.lag = [lag_bv, lag_err[0], lag_err[1]]
 
-        self.lag_res = {'lag': self.lag, 'width': width, 'deg': deg, 
+        self.lag_res = {'lag': self.lag, 'width': width, 'method': method, 
                         'mc_peak_lags': self.mc_peak_lags, 'mc_fit_lags': self.mc_fit_lags, 
                         'ccfs': self.mc_ccfs[0], 'itp_ccfs': self.mc_itp_ccfs[0], 
                         'taus': self.taus, 'itp_taus': self.itp_taus}
