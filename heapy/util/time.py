@@ -61,6 +61,21 @@ def gecam_utc_to_met(utc, format='isot'):
     return met
 
 
+def grid_met_to_utc(met):
+    
+    now_utc = Time(met, scale='utc', format='unix').to_value('isot')
+    
+    return now_utc
+
+
+def grid_utc_to_met(isot, format='isot'):
+    
+    now_utc = Time(isot, scale='utc', format=format)
+    met = now_utc.to_value('unix')
+    
+    return met
+
+
 def ep_utc_to_met(utc, format='isot'):
 
     ref_utc = Time('2020-01-01T00:00:00.000', format='isot', scale='utc')

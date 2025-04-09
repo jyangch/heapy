@@ -11,11 +11,11 @@ warnings.simplefilter('ignore', UnitsWarning)
 from astropy.utils.metadata import MergeConflictWarning
 warnings.simplefilter('ignore', MergeConflictWarning)
 from .filter import Filter
-from .retrieve import gbmRetrieve, gecamRetrieve
+from .retrieve import gbmRetrieve, gecamRetrieve, gridRetrieve
 from ..temporal.txx import pgTxx
 from ..autobs.polybase import PolyBase
 from ..util.data import msg_format, json_dump, rebin
-from ..util.time import fermi_met_to_utc, gecam_met_to_utc
+from ..util.time import fermi_met_to_utc, gecam_met_to_utc, grid_met_to_utc
 
 
 
@@ -519,8 +519,8 @@ class Event(object):
     def lc_bs(self):
         
         lc_bs = PolyBase(self.lc_ts, self.lc_bins, self.lc_exps)
-        lc_bs.loop(sigma=2, deg=None)
-        lc_bs.loop(sigma=2, deg=None)
+        lc_bs.loop(sigma=3, deg=None)
+        lc_bs.loop(sigma=3, deg=None)
         
         return lc_bs
     
@@ -651,7 +651,7 @@ class Event(object):
             json_dump(fig.to_dict(), savepath + '/cum_lc.json')
             
 
-    def calculate_txx(self, sigma=2, mp=True, xx=0.9, pstart=None, pstop=None, 
+    def calculate_txx(self, sigma=3, mp=True, xx=0.9, pstart=None, pstop=None, 
                       lbkg=None, rbkg=None, savepath='./curve/duration'):
         
         if not os.path.exists(savepath):
@@ -808,8 +808,8 @@ class Event(object):
         interp_time = np.linspace(interp_range[0], interp_range[-1], 100)
         
         bs = PolyBase(self.spec_ts, bins)
-        bs.loop(sigma=2, deg=None)
-        bs.loop(sigma=2, deg=None)
+        bs.loop(sigma=3, deg=None)
+        bs.loop(sigma=3, deg=None)
         
         ignore = bs.ignore
         brate, _ = bs.poly.val(interp_time)
@@ -1199,6 +1199,7 @@ class gecamEVT(Event):
             
         self._event = table.vstack(event_list)
         self._gti = table.vstack(gti_list)
+        self._ebound = ebound
 
         self._event = table.unique(self._event, keys=['TIME', 'PI', 'GAIN_TYPE'])
         self._gti = table.unique(self._gti, keys=['START', 'STOP'])
@@ -1234,6 +1235,143 @@ class gecamEVT(Event):
     def timezero_utc(self):
         
         return gecam_met_to_utc(self.timezero)
+    
+    
+    def filter_pi(self, p1p2):
+        
+        if p1p2 is None:
+            expr = None
+            
+        elif isinstance(p1p2, list):
+            p1, p2 = p1p2
+            expr = f'(PI >= {p1}) * (PI <= {p2})'
+            
+        else:
+            raise ValueError('p1p2 is extected to be list or None')
+        
+        self._filter_info['pi'] = expr
+        
+        self._filter_update()
+        
+        
+    def _filter_update(self):
+        
+        self._clear_filter()
+        
+        self._filter.eval(self._filter_info['time'])
+        self._filter.eval(self._filter_info['pi'])
+        self._filter.eval(self._filter_info['energy'])
+        self._filter.eval(self._filter_info['tag'])
+
+
+
+class gridTTE(Event):
+
+    def __init__(self, ttefile, rspfile, det):
+        
+        self._file = ttefile
+        self.rspfile = rspfile
+        self.det = det
+        
+        self._read()
+
+
+    @classmethod
+    def from_utc(cls, utc, det):
+        
+        rtv = gridRetrieve.from_utc(utc=utc, t1=-200, t2=500, det=det)
+
+        ttefile = rtv.rtv_res['tte']
+        rspfile = rtv.rtv_res['rsp']
+            
+        msg = 'no retrieved tte file'
+        assert ttefile != [], msg_format(msg)
+        
+        msg = 'no retrieved rsp file'
+        assert rspfile != [], msg_format(msg)
+        
+        return cls(ttefile, rspfile, det)
+        
+        
+    @property
+    def det(self):
+        
+        return self._det
+    
+    
+    @det.setter
+    def det(self, new_det):
+        
+        dets = ['%d' % i for i in range(0, 4)]
+        msg = 'invalid detector: %s' % new_det
+        assert new_det in dets, msg_format(msg)
+        
+        self._det = new_det
+
+
+    def _read(self):
+        
+        event_list = list()
+        
+        for i in range(len(self.file)):
+            tte_hdu = fits.open(self.file[i])
+            rsp_hdu = fits.open(self.rspfile[i])
+            event = table.Table.read(tte_hdu[f'T_E{self.det}'])
+            ebound = table.Table.read(rsp_hdu['EBOUNDS'])
+            tte_hdu.close()
+            rsp_hdu.close()
+            
+            event[f't{self.det}'].name = 'TIME'
+            event[f'E{self.det}'].name = 'ENERGY'
+            event.remove_columns([f'adcv{self.det}', f'adcv_c{self.det}'])
+            
+            ch = np.array(ebound['CHANNEL']).astype(int)
+            emin = np.array(ebound['E_MIN'])
+            emax = np.array(ebound['E_MAX'])
+            
+            energy = np.array(event['ENERGY'])
+            pi = ch[np.searchsorted(emin, energy, side='right') - 1]
+            event['PI'] = pi
+            
+            event['DEAD_TIME'] = np.zeros_like(event['TIME'])
+            
+            event_list.append(event)
+            
+        self._event = table.vstack(event_list)
+        self._gti = None
+        self._ebound = ebound
+
+        self._event = table.unique(self._event, keys=['TIME', 'PI'])
+        self._event.sort('TIME')
+        
+        self._timezero = np.min(self._event['TIME'])
+        
+        self._filter = Filter(self._event)
+        self._filter_info = {'time': None, 'energy': None, 'pi': None, 'tag': None}
+        
+        
+    @property
+    def chantype(self):
+        
+        return 'pi'
+    
+    
+    @property
+    def telescope(self):
+        
+        return 'GRID'
+    
+    
+    @property
+    def instrument(self):
+        
+        return 'GRID'
+        
+        
+    @property
+    def timezero_utc(self):
+        
+        return grid_met_to_utc(self.timezero)
     
     
     def filter_pi(self, p1p2):

@@ -293,6 +293,74 @@ class gecamRetrieve(Retrieve):
 
 
 
+class gridRetrieve(Retrieve):
+
+    def __init__(self, rtv_res):
+        
+        super().__init__(rtv_res)
+        
+        
+    @classmethod
+    def from_utc(cls, utc, t1, t2, det, datapath=None):
+        
+        if datapath is None:
+            datapath = '/Users/junyang/Documents/grid/G05'
+            
+        ff = FileFinder(local_dir=datapath)
+
+        if isinstance(utc, Time) == False:
+            utc = Time(utc, format='isot', scale='utc')
+
+        t1 = TimeDelta(t1, format='sec')
+        t2 = TimeDelta(t2, format='sec')
+
+        tstart = utc + t1
+        tstop = utc + t2
+
+        year_start, month_start, day_start, hour_start = list(tstart.ymdhms)[:4]
+        year_stop, month_stop, day_stop, hour_stop = list(tstop.ymdhms)[:4]
+
+        start = '%d-%02d-%02d %02d' % (year_start, month_start, day_start, hour_start)+':00:00'
+        stop = '%d-%02d-%02d %02d' % (year_stop, month_stop, day_stop, hour_stop) + ':00:00'
+        dates_perD = pd.date_range(start, stop, freq='D')
+
+        if len(dates_perD) > 2:
+            msg = 'the time range is too long'
+            warnings.warn(msg_format(msg), UserWarning, stacklevel=2)
+            
+        dets = ['%d' % i for i in range(0, 4)]
+        msg = 'invalid detector: %s' % det
+        assert det in dets, msg_format(msg)
+
+        tte_list = []
+        rsp_list = []
+
+        for date in dates_perD:
+            year = '%d' % date.year
+            month = '%.2d' % date.month
+            day = '%.2d' % date.day
+            
+            tte_local_dir = datapath + '/' + year + '/' + month + '/' + day
+            ff.local_dir = tte_local_dir
+            tte_feature = '*_tte_' + year[-2:] + month + day + '*'
+            tte_file = ff.find(tte_feature)
+            tte_list.append(tte_file[-1] if tte_file else None)
+            
+            rsp_local_dir = datapath + '/' + year + '/' + month + '/' + day
+            ff.local_dir = rsp_local_dir
+            rsp_feature = '*_det' + det + '_*.rsp'
+            rsp_file = ff.find(rsp_feature)
+            rsp_list.append(rsp_file[-1] if rsp_file else None)
+
+        rtv_res = {'utc': utc.value, 't1': t1.value, 't2': t2.value, 'det': det, 
+                   'datapath': datapath, 'tte': tte_list, 'rsp': rsp_list}
+        
+        rtv = cls(rtv_res)
+        
+        return rtv
+
+
+
 class epRetrieve(Retrieve):
 
     def __init__(self, rtv_res):

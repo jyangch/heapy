@@ -36,13 +36,13 @@ class CCF(object):
 
 
     @staticmethod
-    def ccfs_band(self, dt, x, y):
+    def ccfs_band(dt, x, y):
         
         x = np.array(x)
         y = np.array(y)
         N = len(x)
         tau = [dt * d for d in range(-N + 1, N, 1)]
-        ccfs = [self.ccf_band(d, x, y) for d in range(-N + 1, N, 1)]
+        ccfs = [CCF.ccf_band(d, x, y) for d in range(-N + 1, N, 1)]
         
         return np.array(tau), np.array(ccfs)
 
@@ -76,7 +76,9 @@ class Lag(CCF):
                  xbcts_se=None,
                  ybcts_se=None,
                  xtype='pg', 
-                 ytype='pg',
+                 ytype='pg', 
+                 mc=True, 
+                 nmc=1000, 
                  ):
         """
         low energy band is taken as y
@@ -90,113 +92,130 @@ class Lag(CCF):
         
         self.dt = dt
         
-        self.xtype = xtype
-        self.ytype = ytype
+        self.mc = mc
+        self.nmc = nmc
         
-        if xtype == 'pg':
-            if xcts_se is None:
-                self.xcts_se = np.sqrt(xcts)
-            else:
-                self.xcts_se = xcts_se
-                
-            if xbcts is None:
-                raise ValueError('unknown xbcts')
-            else:
-                self.xbcts = xbcts
-                
-            if xbcts_se is None:
-                raise ValueError('unknown xbcts_se')
-            else:
-                self.xbcts_se = xbcts_se
+        if self.mc:
         
-        elif xtype == 'pp':
-            if xcts_se is None:
-                self.xcts_se = np.sqrt(xcts)
-            else:
-                self.xcts_se = xcts_se
-                
-            if xbcts is None:
-                raise ValueError('unknown xbcts')
-            else:
-                self.xbcts = xbcts
-                
-            if xbcts_se is None:
-                self.xbcts_se = np.sqrt(xbcts)
-            else:
-                self.xbcts_se = xbcts_se
-                
-        elif xtype == 'gg':
-            if xcts_se is None:
-                raise ValueError('unknown xcts_se')
-            else:
-                self.xcts_se = xcts_se
-                
-            if xbcts is None:
-                self.xbcts = np.zeros_like(xcts)
-            else:
-                self.xbcts = xbcts
-                
-            if xbcts_se is None:
-                self.xbcts_se = np.zeros_like(xcts)
-            else:
-                self.xbcts_se = xbcts_se
-                
-        else:
-            raise ValueError('unknown xtype')
+            self.xtype = xtype
+            self.ytype = ytype
             
-        if ytype == 'pg':
-            if ycts_se is None:
-                self.ycts_se = np.sqrt(ycts)
+            if xtype == 'pg':
+                if xcts_se is None:
+                    self.xcts_se = np.sqrt(xcts)
+                else:
+                    self.xcts_se = xcts_se
+                    
+                if xbcts is None:
+                    raise ValueError('unknown xbcts')
+                else:
+                    self.xbcts = xbcts
+                    
+                if xbcts_se is None:
+                    raise ValueError('unknown xbcts_se')
+                else:
+                    self.xbcts_se = xbcts_se
+            
+            elif xtype == 'pp':
+                if xcts_se is None:
+                    self.xcts_se = np.sqrt(xcts)
+                else:
+                    self.xcts_se = xcts_se
+                    
+                if xbcts is None:
+                    raise ValueError('unknown xbcts')
+                else:
+                    self.xbcts = xbcts
+                    
+                if xbcts_se is None:
+                    self.xbcts_se = np.sqrt(xbcts)
+                else:
+                    self.xbcts_se = xbcts_se
+                    
+            elif xtype == 'gg':
+                if xcts_se is None:
+                    raise ValueError('unknown xcts_se')
+                else:
+                    self.xcts_se = xcts_se
+                    
+                if xbcts is None:
+                    self.xbcts = np.zeros_like(xcts)
+                else:
+                    self.xbcts = xbcts
+                    
+                if xbcts_se is None:
+                    self.xbcts_se = np.zeros_like(xcts)
+                else:
+                    self.xbcts_se = xbcts_se
+                    
             else:
-                self.ycts_se = ycts_se
+                raise ValueError('unknown xtype')
                 
-            if ybcts is None:
-                raise ValueError('unknown ybcts')
+            if ytype == 'pg':
+                if ycts_se is None:
+                    self.ycts_se = np.sqrt(ycts)
+                else:
+                    self.ycts_se = ycts_se
+                    
+                if ybcts is None:
+                    raise ValueError('unknown ybcts')
+                else:
+                    self.ybcts = ybcts
+                    
+                if ybcts_se is None:
+                    raise ValueError('unknown ybcts_se')
+                else:
+                    self.ybcts_se = ybcts_se
+            
+            elif ytype == 'pp':
+                if ycts_se is None:
+                    self.ycts_se = np.sqrt(ycts)
+                else:
+                    self.ycts_se = ycts_se
+                    
+                if ybcts is None:
+                    raise ValueError('unknown ybcts')
+                else:
+                    self.ybcts = ybcts
+                    
+                if ybcts_se is None:
+                    self.ybcts_se = np.sqrt(ybcts)
+                else:
+                    self.ybcts_se = ybcts_se
+                    
+            elif ytype == 'gg':
+                if ycts_se is None:
+                    raise ValueError('unknown ycts_se')
+                else:
+                    self.ycts_se = ycts_se
+                    
+                if ybcts is None:
+                    self.ybcts = np.zeros_like(ycts)
+                else:
+                    self.ybcts = ybcts
+                    
+                if ybcts_se is None:
+                    self.ybcts_se = np.zeros_like(ycts)
+                else:
+                    self.ybcts_se = ybcts_se
+                    
             else:
-                self.ybcts = ybcts
-                
-            if ybcts_se is None:
-                raise ValueError('unknown ybcts_se')
-            else:
-                self.ybcts_se = ybcts_se
-        
-        elif ytype == 'pp':
-            if ycts_se is None:
-                self.ycts_se = np.sqrt(ycts)
-            else:
-                self.ycts_se = ycts_se
-                
-            if ybcts is None:
-                raise ValueError('unknown ybcts')
-            else:
-                self.ybcts = ybcts
-                
-            if ybcts_se is None:
-                self.ybcts_se = np.sqrt(ybcts)
-            else:
-                self.ybcts_se = ybcts_se
-                
-        elif ytype == 'gg':
-            if ycts_se is None:
-                raise ValueError('unknown ycts_se')
-            else:
-                self.ycts_se = ycts_se
-                
-            if ybcts is None:
-                self.ybcts = np.zeros_like(ycts)
-            else:
-                self.ybcts = ybcts
-                
-            if ybcts_se is None:
-                self.ybcts_se = np.zeros_like(ycts)
-            else:
-                self.ybcts_se = ybcts_se
-                
+                raise ValueError('unknown ytype')
+            
+            self.xncts = self.xcts - self.xbcts
+            self.yncts = self.ycts - self.ybcts
+            
+            self.mc_xncts = [self.xncts]
+            self.mc_yncts = [self.yncts]
+            
+            self._mc_simulation(self.nmc)
+            
         else:
-            raise ValueError('unknown ytype')
-        
-        self.xncts = self.xcts - self.xbcts
-        self.yncts = self.ycts - self.ybcts
+            self.xncts = xcts
+            self.yncts = ycts
+            
+            self.mc_xncts = [self.xncts]
+            self.mc_yncts = [self.yncts]
 
 
     @staticmethod
@@ -204,13 +223,20 @@ class Lag(CCF):
         
         return cons + amp * np.exp(-((x - mu) ** 2) / (2 * sigma ** 2))
     
+    
+    @staticmethod
+    def asymmetric_gaussian(x, cons, amp, mu, sigma_l, sigma_r):
+        
+        gaussian_l = cons + amp * np.exp(-((x - mu) ** 2) / (2 * sigma_l ** 2))
+        gaussian_r = cons + amp * np.exp(-((x - mu) ** 2) / (2 * sigma_r ** 2))
+        
+        return gaussian_l * (x <= mu) + gaussian_r * (x > mu)
 
-    def mc_simulation(self, nmc):
+
+    def _mc_simulation(self, nmc):
         
         self.nmc = int(nmc)
         self.N = len(self.xcts)
-        self.mc_xncts = [self.xncts]
-        self.mc_yncts = [self.yncts]
         for _ in range(self.nmc):
             if self.xtype == 'pg':
                 xmc = np.random.poisson(lam=self.xcts) \
@@ -240,12 +266,17 @@ class Lag(CCF):
             self.mc_yncts.append(ymc)
 
 
-    def callag(self, width=3, method='polyfit'):
+    def calculate(self, width=3, method='polyfit'):
         
         self.taus, ccfs0 = self.ccfs_scipy(self.dt, self.mc_xncts[0], self.mc_yncts[0])
 
         pidx = np.argmax(ccfs0)
-        self.nidx = np.arange(pidx - width if pidx >= width else 0, pidx + width + 1, 1)
+        
+        if width is None:
+            self.nidx = np.arange(0, len(ccfs0), 1)
+        else:
+            self.nidx = np.arange(pidx - width if pidx >= width else 0, pidx + width + 1, 1)
+            
         self.itp_taus = np.arange(self.taus[self.nidx[0]], self.taus[self.nidx[-1]], 1e-4)
         
         mu_init = self.taus[pidx]
@@ -275,6 +306,12 @@ class Lag(CCF):
                 itp_ccfs_i = Lag.gaussian(self.itp_taus, *popt)
                 self.mc_itp_ccfs.append(itp_ccfs_i)
                 
+            elif method == 'asymmetric_gaussian':
+                popt, _ = curve_fit(Lag.asymmetric_gaussian, self.taus[self.nidx], ccfs_i[self.nidx], 
+                                    p0=[cons_init, amp_init, mu_init, sigma_init, sigma_init])
+                itp_ccfs_i = Lag.asymmetric_gaussian(self.itp_taus, *popt)
+                self.mc_itp_ccfs.append(itp_ccfs_i)
+                
             else:
                 raise ValueError('unknown method')
             
@@ -285,24 +322,33 @@ class Lag(CCF):
             self.mc_fit_lags.append(lag_i)
 
         lag_bv = self.mc_fit_lags[0]
+        
+        if self.mc:
+            mask = sigma_clip(self.mc_fit_lags, sigma=5, maxiters=5, stdfunc=mad_std).mask
+            not_mask = list(map(operator.not_, mask))
+            mc_fit_lags_filter = np.array(self.mc_fit_lags)[not_mask]
 
-        mask = sigma_clip(self.mc_fit_lags, sigma=5, maxiters=5, stdfunc=mad_std).mask
-        not_mask = list(map(operator.not_, mask))
-        mc_fit_lags_filter = np.array(self.mc_fit_lags)[not_mask]
-
-        lag_lo, lag_hi = np.percentile(mc_fit_lags_filter, [16, 84])
-        lag_err = np.diff([lag_lo, lag_bv, lag_hi])
-        self.lag = [lag_bv, lag_err[0], lag_err[1]]
+            lag_lo, lag_hi = np.percentile(mc_fit_lags_filter, [16, 84])
+            lag_err = np.diff([lag_lo, lag_bv, lag_hi])
+            self.lag = [lag_bv, lag_err[0], lag_err[1]]
+            
+            print('\n+-----------------------------------------------+')
+            print(' %-15s%-15s%-15s' % ('lag (s)', 'lag_le (s)', 'lag_he (s)'))
+            print(' %-15.4f%-15.4f%-15.4f' % (self.lag[0], self.lag[1], self.lag[2]))
+            print('+-----------------------------------------------+\n')
+            
+        else:
+            self.lag = lag_bv
+            
+            print('\n+-----------------------------------------------+')
+            print(' %-15s ' % 'lag (s)')
+            print(' %-15.4f ' % self.lag)
+            print('+-----------------------------------------------+\n')
 
         self.lag_res = {'lag': self.lag, 'width': width, 'method': method, 
                         'mc_peak_lags': self.mc_peak_lags, 'mc_fit_lags': self.mc_fit_lags, 
                         'ccfs': self.mc_ccfs[0], 'itp_ccfs': self.mc_itp_ccfs[0], 
                         'taus': self.taus, 'itp_taus': self.itp_taus}
-
-        print('\n+-----------------------------------------------+')
-        print(' %-15s%-15s%-15s' % ('lag (s)', 'lag_le (s)', 'lag_he (s)'))
-        print(' %-15.4f%-15.4f%-15.4f' % (self.lag[0], self.lag[1], self.lag[2]))
-        print('+-----------------------------------------------+\n')
 
 
     def save(self, savepath, suffix=''):
@@ -321,10 +367,11 @@ class Lag(CCF):
         ax.scatter(self.taus[self.nidx], self.mc_ccfs[0][self.nidx], marker='+', 
                    color='r', s=20, linewidths=0.5, alpha=1.0)
         ax.plot(self.itp_taus, self.mc_itp_ccfs[0], c='b', lw=0.5, alpha=1.0)
-        for i in np.arange(1, self.nmc + 1, 100):
-            ax.scatter(self.taus[self.nidx], self.mc_ccfs[i][self.nidx], marker='+', 
-                       color='grey', s=20, linewidths=0.5, alpha=1.0)
-            ax.plot(self.itp_taus, self.mc_itp_ccfs[i], c='grey', lw=0.5, alpha=1.0)
+        # if self.mc:
+        #     for i in np.random.choice(np.arange(1, self.nmc + 1), 10):
+        #         ax.scatter(self.taus[self.nidx], self.mc_ccfs[i][self.nidx], marker='+', 
+        #             color='grey', s=20, linewidths=0.5, alpha=1.0)
+        #         ax.plot(self.itp_taus, self.mc_itp_ccfs[i], c='grey', lw=0.5, alpha=1.0)
         ax.set_xlabel('Time delay (s)')
         ax.set_ylabel('CCF value')
         ax.minorticks_on()
@@ -336,22 +383,23 @@ class Lag(CCF):
         ax.yaxis.set_ticks_position('both')
         fig.savefig(savepath + '/tau_ccf%s.pdf'%suffix, bbox_inches='tight', pad_inches=0.1, dpi=300)
         plt.close(fig)
-
-        fig, ax = plt.subplots(1, 1, figsize=(7, 6))
-        lag_bins = np.linspace(min(self.mc_fit_lags), max(self.mc_fit_lags), 30)
-        ax.hist(self.mc_fit_lags, lag_bins, density=False, histtype='step', color='b', lw=1.0)
-        ax.axvline(self.lag[0], c='grey', lw=1.0)
-        ax.axvline(self.lag[0] - self.lag[1], c='grey', ls='--', lw=1.0)
-        ax.axvline(self.lag[0] + self.lag[2], c='grey', ls='--', lw=1.0)
-        ax.set_xlabel('Lags (sec)')
-        ax.set_ylabel('Counts')
-        ax.set_title(r'$\tau=%.4f_{-%.4f}^{+%.4f}~{\rm s}$'%(self.lag[0], self.lag[1], self.lag[2]))
-        ax.minorticks_on()
-        ax.tick_params(axis='x', which='both', direction='in', labelcolor='k', colors='k')
-        ax.tick_params(axis='y', which='both', direction='in', labelcolor='k', colors='k')
-        ax.tick_params(which='major', width=1.0, length=5)
-        ax.tick_params(which='minor', width=1.0, length=3)
-        ax.xaxis.set_ticks_position('both')
-        ax.yaxis.set_ticks_position('both')
-        fig.savefig(savepath + '/lag_pdf%s.pdf'%suffix, bbox_inches='tight', pad_inches=0.1, dpi=300)
-        plt.close(fig)
+        
+        if self.mc:
+            fig, ax = plt.subplots(1, 1, figsize=(7, 6))
+            lag_bins = np.linspace(min(self.mc_fit_lags), max(self.mc_fit_lags), 30)
+            ax.hist(self.mc_fit_lags, lag_bins, density=False, histtype='step', color='b', lw=1.0)
+            ax.axvline(self.lag[0], c='grey', lw=1.0)
+            ax.axvline(self.lag[0] - self.lag[1], c='grey', ls='--', lw=1.0)
+            ax.axvline(self.lag[0] + self.lag[2], c='grey', ls='--', lw=1.0)
+            ax.set_xlabel('Lags (sec)')
+            ax.set_ylabel('Counts')
+            ax.set_title(r'$\tau=%.4f_{-%.4f}^{+%.4f}~{\rm s}$'%(self.lag[0], self.lag[1], self.lag[2]))
+            ax.minorticks_on()
+            ax.tick_params(axis='x', which='both', direction='in', labelcolor='k', colors='k')
+            ax.tick_params(axis='y', which='both', direction='in', labelcolor='k', colors='k')
+            ax.tick_params(which='major', width=1.0, length=5)
+            ax.tick_params(which='minor', width=1.0, length=3)
+            ax.xaxis.set_ticks_position('both')
+            ax.yaxis.set_ticks_position('both')
+            fig.savefig(savepath + '/lag_pdf%s.pdf'%suffix, bbox_inches='tight', pad_inches=0.1, dpi=300)
+            plt.close(fig)
