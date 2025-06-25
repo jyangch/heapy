@@ -224,7 +224,8 @@ class Event(object):
     def time_filter(self):
         
         if self._filter_info['time'] is None:
-            return [np.min(self._event['TIME']), np.max(self._event['TIME'])]
+            return [np.min(self._event['TIME']) - self.timezero, 
+                    np.max(self._event['TIME']) - self.timezero]
         else:
             return self._time_filter
 
@@ -663,7 +664,7 @@ class Event(object):
         txx.save(savepath=savepath)
 
         
-    def extract_rebin_curve(self, trange=None, min_sigma=None, min_evt=None, max_bin=None, 
+    def extract_rebin_curve(self, trange=None, stat='pgstat', min_sigma=None, min_evt=None, max_bin=None, 
                             savepath='./curve', loglog=False, show=False):
         
         if not os.path.exists(savepath):
@@ -678,7 +679,7 @@ class Event(object):
             self.lc_bkg_rebcts, self.lc_bkg_rebcts_err = \
                 rebin(
                     self.lc_bin_list[idx], 
-                    'pgstat', 
+                    stat, 
                     self.lc_src_cts[idx], 
                     cts_err=self.lc_src_cts_err[idx],
                     bcts=self.lc_bkg_cts[idx], 
@@ -1334,6 +1335,118 @@ class gridTTE(Event):
             event['PI'] = pi
             
             event['DEAD_TIME'] = np.zeros_like(event['TIME'])
+            
+            event_list.append(event)
+            
+        self._event = table.vstack(event_list)
+        self._gti = None
+        self._ebound = ebound
+
+        self._event = table.unique(self._event, keys=['TIME', 'PI'])
+        self._event.sort('TIME')
+        
+        self._timezero = np.min(self._event['TIME'])
+        
+        self._filter = Filter(self._event)
+        self._filter_info = {'time': None, 'energy': None, 'pi': None, 'tag': None}
+        
+        
+    @property
+    def chantype(self):
+        
+        return 'pi'
+    
+    
+    @property
+    def telescope(self):
+        
+        return 'GRID'
+    
+    
+    @property
+    def instrument(self):
+        
+        return 'GRID'
+        
+        
+    @property
+    def timezero_utc(self):
+        
+        return grid_met_to_utc(self.timezero)
+    
+    
+    def filter_pi(self, p1p2):
+        
+        if p1p2 is None:
+            expr = None
+            
+        elif isinstance(p1p2, list):
+            p1, p2 = p1p2
+            expr = f'(PI >= {p1}) * (PI <= {p2})'
+            
+        else:
+            raise ValueError('p1p2 is extected to be list or None')
+        
+        self._filter_info['pi'] = expr
+        
+        self._filter_update()
+        
+        
+    def _filter_update(self):
+        
+        self._clear_filter()
+        
+        self._filter.eval(self._filter_info['time'])
+        self._filter.eval(self._filter_info['pi'])
+        self._filter.eval(self._filter_info['energy'])
+        self._filter.eval(self._filter_info['tag'])
+
+
+
+class gridgroundTTE(Event):
+
+    def __init__(self, ttefile, det):
+        
+        self._file = ttefile
+        self.det = det
+        
+        self._read()
+
+
+    @property
+    def det(self):
+        
+        return self._det
+    
+    
+    @det.setter
+    def det(self, new_det):
+        
+        dets = ['%d' % i for i in range(0, 4)]
+        msg = 'invalid detector: %s' % new_det
+        assert new_det in dets, msg_format(msg)
+        
+        self._det = new_det
+
+
+    def _read(self):
+        
+        event_list = list()
+        
+        for i in range(len(self.file)):
+            tte_hdu = fits.open(self.file[i])
+            event = table.Table.read(tte_hdu[f'EVENTS{self.det}'])
+            ebound = table.Table.read(tte_hdu['EBOUNDS'])
+            tte_hdu.close()
+            
+            ebound['Channel'].name = 'CHANNEL'
+            
+            pi = np.array(event['PI']).astype(int)
+            ch = np.array(ebound['CHANNEL']).astype(int)
+            emin = np.array(ebound['E_MIN'])
+            emax = np.array(ebound['E_MAX'])
+            energy = Event._ch_to_energy(pi, ch, emin, emax)
+            event['ENERGY'] = energy * units.keV
             
             event_list.append(event)
             

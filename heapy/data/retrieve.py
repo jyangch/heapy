@@ -84,7 +84,7 @@ class gbmRetrieve(Retrieve):
 
 
     @classmethod
-    def from_utc(cls, utc, t1, t2, datapath=None):
+    def from_utc(cls, utc, t1, t2, datapath=None, skip_tte=False, skip_poshist=False):
         
         if datapath is None:
             datapath = '/Users/junyang/Documents/fermi/data/gbm/daily'
@@ -120,50 +120,52 @@ class gbmRetrieve(Retrieve):
         # cspec_pha_dict = {det:[] for det in dets}
         # ctime_pha_dict = {det:[] for det in dets}
 
-        for date in dates_perH:
-            year = '%d' % date.year
-            month = '%.2d' % date.month
-            day = '%.2d' % date.day
-            hour = '%.2d' % date.hour
+        if not skip_tte:
+            for date in dates_perH:
+                year = '%d' % date.year
+                month = '%.2d' % date.month
+                day = '%.2d' % date.day
+                hour = '%.2d' % date.hour
 
-            local_dir = datapath + '/' + year + '/' + month + '/' + day + '/current'
-            if not os.path.isdir(local_dir): os.makedirs(local_dir)
-            
-            ftp_url = dataurl + '/' + year + '/' + month + '/' + day + '/current'
-            
-            ff.local_dir = local_dir
-            ff.ftp_url = ftp_url
+                local_dir = datapath + '/' + year + '/' + month + '/' + day + '/current'
+                if not os.path.isdir(local_dir): os.makedirs(local_dir)
+                
+                ftp_url = dataurl + '/' + year + '/' + month + '/' + day + '/current'
+                
+                ff.local_dir = local_dir
+                ff.ftp_url = ftp_url
 
-            for det in dets:
-                tte_feature = 'glg_tte_' + det + '_' + year[-2:] + month + day + '_' + hour + 'z_v*fit.gz'
-                tte_file = ff.find(tte_feature)
-                tte_dict[det].append(tte_file[-1] if tte_file else None)
+                for det in dets:
+                    tte_feature = 'glg_tte_' + det + '_' + year[-2:] + month + day + '_' + hour + 'z_v*fit.gz'
+                    tte_file = ff.find(tte_feature)
+                    tte_dict[det].append(tte_file[-1] if tte_file else None)
 
-        for date in dates_perD:
-            year = '%d' % date.year
-            month = '%.2d' % date.month
-            day = '%.2d' % date.day
+        if not skip_poshist:
+            for date in dates_perD:
+                year = '%d' % date.year
+                month = '%.2d' % date.month
+                day = '%.2d' % date.day
 
-            local_dir = datapath + '/' + year + '/' + month + '/' + day + '/current'
-            if not os.path.isdir(local_dir): os.makedirs(local_dir)
-            
-            ftp_url = dataurl + '/' + year + '/' + month + '/' + day + '/current'
-            
-            ff.local_dir = local_dir
-            ff.ftp_url = ftp_url
-            
-            # for det in dets:
-            #     cspec_feature = 'glg_cspec_' + det + '_' + year[-2:] + month + day + '_v*pha'
-            #     cspec_file = ff.find(cspec_feature)
-            #     cspec_pha_dict[det].append(cspec_file[-1] if cspec_file else None)
+                local_dir = datapath + '/' + year + '/' + month + '/' + day + '/current'
+                if not os.path.isdir(local_dir): os.makedirs(local_dir)
+                
+                ftp_url = dataurl + '/' + year + '/' + month + '/' + day + '/current'
+                
+                ff.local_dir = local_dir
+                ff.ftp_url = ftp_url
+                
+                # for det in dets:
+                #     cspec_feature = 'glg_cspec_' + det + '_' + year[-2:] + month + day + '_v*pha'
+                #     cspec_file = ff.find(cspec_feature)
+                #     cspec_pha_dict[det].append(cspec_file[-1] if cspec_file else None)
 
-            #     ctime_feature = 'glg_ctime_' + det + '_' + year[-2:] + month + day + '_v*pha'
-            #     ctime_file = ff.find(ctime_feature)
-            #     ctime_pha_dict[det].append(ctime_file[-1] if ctime_file else None)
+                #     ctime_feature = 'glg_ctime_' + det + '_' + year[-2:] + month + day + '_v*pha'
+                #     ctime_file = ff.find(ctime_feature)
+                #     ctime_pha_dict[det].append(ctime_file[-1] if ctime_file else None)
 
-            poshist_feature = 'glg_poshist_all_' + year[-2:] + month + day + '_v*fit'
-            poshist_file = ff.find(poshist_feature)
-            poshist_list.append(poshist_file[-1] if poshist_file else None)
+                poshist_feature = 'glg_poshist_all_' + year[-2:] + month + day + '_v*fit'
+                poshist_file = ff.find(poshist_feature)
+                poshist_list.append(poshist_file[-1] if poshist_file else None)
 
         rtv_res = {'utc': utc.value, 't1': t1.value, 't2': t2.value, 'datapath': datapath, 
                 #    'cspec_pha': cspec_pha_dict, 'ctime_pha': ctime_pha_dict, 
@@ -195,15 +197,15 @@ class gecamRetrieve(Retrieve):
         
         ff = FileFinder(local_dir=local_dir)
 
-        grd_evt_feature = 'g_evt_' + burstid + '*'
+        grd_evt_feature = '*g_evt_' + burstid + '*'
         grd_evt_file = ff.find(grd_evt_feature)
         grd_evt = grd_evt_file[-1] if grd_evt_file else None
 
-        grd_bspec_feature = 'g_bspec_' + burstid + '*'
+        grd_bspec_feature = '*g_bspec_' + burstid + '*'
         grd_bspec_file = ff.find(grd_bspec_feature)
         grd_bspec = grd_bspec_file[-1] if grd_bspec_file else None
 
-        grd_btime_feature = 'g_btime_' + burstid + '*'
+        grd_btime_feature = '*g_btime_' + burstid + '*'
         grd_btime_file = ff.find(grd_btime_feature)
         grd_btime = grd_btime_file[-1] if grd_btime_file else None
 
@@ -261,19 +263,19 @@ class gecamRetrieve(Retrieve):
 
             grd_evt_local_dir = datapath + '/' + year + '/' + month + '/' + day + '/GECAM_B/GRD_evt'
             ff.local_dir = grd_evt_local_dir
-            grd_evt_feature = 'g_evt_' + year[-2:] + month + day + '_' + hour + '*'
+            grd_evt_feature = '*g_evt_' + year[-2:] + month + day + '_' + hour + '*'
             grd_evt_file = ff.find(grd_evt_feature)
             grd_evt_list.append(grd_evt_file[-1] if grd_evt_file else None)
 
             grd_bspec_local_dir = datapath + '/' + year + '/' + month + '/' + day + '/GECAM_B/GRD_bspec'
             ff.local_dir = grd_bspec_local_dir
-            grd_bspec_feature = 'g_bspec_' + year[-2:] + month + day + '_' + hour + '*'
+            grd_bspec_feature = '*g_bspec_' + year[-2:] + month + day + '_' + hour + '*'
             grd_bspec_file = ff.find(grd_bspec_feature)
             grd_bspec_list.append(grd_bspec_file[-1] if grd_bspec_file else None)
 
             grd_btime_local_dir = datapath + '/' + year + '/' + month + '/' + day + '/GECAM_B/GRD_btime'
             ff.local_dir = grd_btime_local_dir
-            grd_btime_feature = 'g_btime_' + year[-2:] + month + day + '_' + hour + '*'
+            grd_btime_feature = '*g_btime_' + year[-2:] + month + day + '_' + hour + '*'
             grd_btime_file = ff.find(grd_btime_feature)
             grd_btime_list.append(grd_btime_file[-1] if grd_btime_file else None)
 

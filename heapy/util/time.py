@@ -1,3 +1,5 @@
+import numpy as np
+from astropy.io import fits
 from astropy.time import Time, TimeDelta
 
 
@@ -41,6 +43,46 @@ def fermi_utc_to_met(utc, format='isot'):
     met = (now_utc - ref_utc).sec
 
     return met
+
+
+def fermi_utc_goback(utc, poshist_file):
+    
+    poshist = fits.open(poshist_file)[1].data
+    nt = np.size(poshist)
+    sc_time = poshist['SCLK_UTC']
+    sc_quat = np.zeros((nt,4),float)
+    sc_pos = np.zeros((nt,3),float)
+    sc_coords = np.zeros((nt,2),float)
+    try:
+        sc_coords[:,0] = poshist['SC_LON']
+        sc_coords[:,1] = poshist['SC_LAT']
+    except:
+        msg = ''
+        msg += '*** No geographical coordinates available '
+        msg += 'for this file: %s' % poshist_file
+        print(msg)
+
+    sc_quat[:,0] = poshist['QSJ_1']
+    sc_quat[:,1] = poshist['QSJ_2']
+    sc_quat[:,2] = poshist['QSJ_3']
+    sc_quat[:,3] = poshist['QSJ_4']
+    sc_pos[:,0] = poshist['POS_X']
+    sc_pos[:,1] = poshist['POS_Y']
+    sc_pos[:,2] = poshist['POS_Z']
+    
+    G = 6.67428e-11
+    M = 5.9722e24
+    r = (np.sum(sc_pos ** 2.0, 1)) ** (1 / 2.0)
+    r_avg = np.average(r)
+    r_cubed = (r_avg) ** 3.0
+    factor = r_cubed / (G * M)
+    period = 2.0 * np.pi * np.sqrt(factor)
+
+    utc = Time(utc, scale='utc', format='isot')
+    dt = TimeDelta(period * 30, format='sec')
+    goback_utc = (utc - dt).value
+    
+    return goback_utc
 
 
 def gecam_met_to_utc(met):
