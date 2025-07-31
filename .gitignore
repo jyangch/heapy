@@ -44,3 +44,10 @@ Icon?
 
 # macOS-specific temp files
 *.swp
+
+# ignore tests
+tests/*
+
+# include .ipynb in tests
+!tests/**/*.ipynb
+!tests/*.ipynb
