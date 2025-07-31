@@ -1,10 +1,7 @@
 import os
 import re
-import ftplib
 import warnings
 import numpy as np
-import urllib.parse
-from tqdm import tqdm
 import subprocess as sp
 from .data import msg_format
 

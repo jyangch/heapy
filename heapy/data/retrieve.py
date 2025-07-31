@@ -1,10 +1,10 @@
 import os
-import ftplib
+import gzip
+import shutil
 import warnings
 import pandas as pd
-from tqdm import tqdm
-from urllib.parse import urlparse
 from astropy.time import Time, TimeDelta
+from .filefinder import FileFinder
 from ..util.data import msg_format
 
 
@@ -25,10 +25,10 @@ class gbmRetrieve(Retrieve):
 
 
     @classmethod
-    def from_burst(cls, burstid, datapath=None):
+    def from_burst(cls, burstid, datapath=None, skip_tte=False, skip_healpix=False):
         
         if datapath is None:
-            datapath = '/Users/junyang/Documents/fermi/data/gbm/bursts'
+            datapath = '/Users/junyang/Data/fermi/data/gbm/bursts'
             
         dataurl = 'ftp://129.164.179.23/fermi/data/gbm/bursts'
 
@@ -48,35 +48,37 @@ class gbmRetrieve(Retrieve):
         # ctime_pha_dict = {}
         # ctime_rsp_dict = {}
 
-        for det in dets:
-            tte_feature = 'glg_tte_' + det + '_' + burstid + '_v*fit'
-            tte_file = ff.find(tte_feature)
-            tte_dict[det] = tte_file[-1] if tte_file else None
+        if not skip_tte:
+            for det in dets:
+                tte_feature = 'glg_tte_' + det + '_' + burstid + '_v*fit'
+                tte_file = ff.find(tte_feature)
+                tte_dict[det].append(tte_file[-1] if tte_file else None)
 
-            # cspec_feature = 'glg_cspec_' + det + '_' + burstid + '_v*pha'
-            # cspec_file = ff.find(cspec_feature)
-            # cspec_pha_dict[det] = cspec_file[-1] if cspec_file else None
+                # cspec_feature = 'glg_cspec_' + det + '_' + burstid + '_v*pha'
+                # cspec_file = ff.find(cspec_feature)
+                # cspec_pha_dict[det] = cspec_file[-1] if cspec_file else None
 
-            # cspec_feature = 'glg_cspec_' + det + '_' + burstid + '_v*rsp2'
-            # cspec_file = ff.find(cspec_feature)
-            # cspec_rsp_dict[det] = cspec_file[-1] if cspec_file else None
+                # cspec_feature = 'glg_cspec_' + det + '_' + burstid + '_v*rsp2'
+                # cspec_file = ff.find(cspec_feature)
+                # cspec_rsp_dict[det] = cspec_file[-1] if cspec_file else None
 
-            # ctime_feature = 'glg_ctime_' + det + '_' + burstid + '_v*pha'
-            # ctime_file = ff.find(ctime_feature)
-            # ctime_pha_dict[det] = ctime_file[-1] if ctime_file else None
+                # ctime_feature = 'glg_ctime_' + det + '_' + burstid + '_v*pha'
+                # ctime_file = ff.find(ctime_feature)
+                # ctime_pha_dict[det] = ctime_file[-1] if ctime_file else None
 
-            # ctime_feature = 'glg_ctime_' + det + '_' + burstid + '_v*rsp2'
-            # ctime_file = ff.find(ctime_feature)
-            # ctime_rsp_dict[det] = ctime_file[-1] if ctime_file else None
+                # ctime_feature = 'glg_ctime_' + det + '_' + burstid + '_v*rsp2'
+                # ctime_file = ff.find(ctime_feature)
+                # ctime_rsp_dict[det] = ctime_file[-1] if ctime_file else None
             
-        healpix_feature = 'glg_healpix_all_' + burstid + '_v*fit'
-        healpix_file = ff.find(healpix_feature)
-        healpix = healpix_file[-1] if healpix_file else None
+        if not skip_healpix:
+            healpix_feature = 'glg_healpix_all_' + burstid + '_v*fit'
+            healpix_file = ff.find(healpix_feature)
+            healpix = healpix_file[-1] if healpix_file else None
+        else:
+            healpix = None
 
-        rtv_res = {'burstid': burstid, 'datapath': datapath, 'tte': tte_dict, 
-                #    'cspec_pha': cspec_pha_dict, 'cspec_rsp': cspec_rsp_dict, 
-                #    'ctime_pha': ctime_pha_dict, 'ctime_rsp': ctime_rsp_dict, 
-                   'healpix': healpix}
+        rtv_res = {'burstid': burstid, 'datapath': datapath, 
+                   'tte': tte_dict, 'healpix': healpix}
         
         rtv = cls(rtv_res)
         
@@ -87,7 +89,7 @@ class gbmRetrieve(Retrieve):
     def from_utc(cls, utc, t1, t2, datapath=None, skip_tte=False, skip_poshist=False):
         
         if datapath is None:
-            datapath = '/Users/junyang/Documents/fermi/data/gbm/daily'
+            datapath = '/Users/junyang/Data/fermi/data/gbm/daily'
             
         dataurl = 'ftp://129.164.179.23/fermi/data/gbm/daily'
         
@@ -168,7 +170,6 @@ class gbmRetrieve(Retrieve):
                 poshist_list.append(poshist_file[-1] if poshist_file else None)
 
         rtv_res = {'utc': utc.value, 't1': t1.value, 't2': t2.value, 'datapath': datapath, 
-                #    'cspec_pha': cspec_pha_dict, 'ctime_pha': ctime_pha_dict, 
                    'tte': tte_dict, 'poshist': poshist_list}
         
         rtv = cls(rtv_res)
@@ -188,7 +189,7 @@ class gecamRetrieve(Retrieve):
     def from_burst(cls, burstid, datapath=None):
         
         if datapath is None:
-            datapath = '/Users/junyang/Documents/gecam/bursts'
+            datapath = '/Users/junyang/Data/gecam/bursts'
 
         year = '20' + burstid[2:4]
         month = burstid[4:6]
@@ -226,7 +227,7 @@ class gecamRetrieve(Retrieve):
     def from_utc(cls, utc, t1, t2, datapath=None):
         
         if datapath is None:
-            datapath = '/Users/junyang/Documents/gecam/daily'
+            datapath = '/Users/junyang/Data/gecam/daily'
             
         ff = FileFinder(local_dir=datapath)
 
@@ -306,7 +307,7 @@ class gridRetrieve(Retrieve):
     def from_utc(cls, utc, t1, t2, det, datapath=None):
         
         if datapath is None:
-            datapath = '/Users/junyang/Documents/grid/G05'
+            datapath = '/Users/junyang/Data/grid/G05'
             
         ff = FileFinder(local_dir=datapath)
 
@@ -374,7 +375,7 @@ class epRetrieve(Retrieve):
     def from_wxtobs(cls, obsid, srcid, datapath=None): 
         
         if datapath is None:
-            datapath = '/Users/junyang/Documents/EinsteinProbe/WXT'
+            datapath = '/Users/junyang/Data/ep/WXT'
             
         local_dir = datapath + '/' + obsid
         
@@ -427,7 +428,7 @@ class epRetrieve(Retrieve):
     def from_fxtobs(cls, obsid, module, datapath=None): 
         
         if datapath is None:
-            datapath = '/Users/junyang/Documents/EinsteinProbe/FXT'
+            datapath = '/Users/junyang/Data/ep/FXT'
             
         local_dir = datapath + '/' + obsid
         
@@ -457,7 +458,7 @@ class epRetrieve(Retrieve):
     def from_fxtsrc(cls, obsid, module, datapath=None):
         
         if datapath is None:
-            datapath = '/Users/junyang/Documents/EinsteinProbe/FXT'
+            datapath = '/Users/junyang/Data/ep/FXT'
             
         local_dir = datapath + '/' + obsid
         
@@ -506,28 +507,39 @@ class swiftRetrieve(Retrieve):
         
         
     @classmethod
-    def from_xrtobs(cls, obsid, datapath=None): 
+    def from_xrtobs(cls, obsid, mode, datapath=None): 
+        
+        assert mode in ['wt', 'pc'], 'xrt mode only allowed to be wt or pc'
         
         if datapath is None:
-            datapath = '/Users/junyang/Documents/swift'
+            datapath = '/Users/junyang/Data/swift'
             
         local_dir = datapath + '/' + obsid + '/xrt/event'
         
         ff = FileFinder(local_dir=local_dir)
         
-        evt_feature = 'sw*po_cl.evt'
-        evt_file = ff.find(evt_feature)
-        evt = evt_file[-1] if evt_file else None
+        try:
+            evt_feature = f'sw{obsid}x{mode}*po_cl.evt'
+            evt_file = ff.find(evt_feature)
+            evt = evt_file[-1] if evt_file else None
+        except:
+            evtgz_feature = f'sw{obsid}x{mode}*po_cl.evt.gz'
+            evtgz_file = ff.find(evtgz_feature)
+            evtgz = evtgz_file[-1] if evtgz_file else None
+            evt = evtgz[:-3]
+            with gzip.open(evtgz, 'rb') as f_in:
+                with open(evt, 'wb') as f_out:
+                    shutil.copyfileobj(f_in, f_out)
         
-        bkreg_feature = 'sw*bk.reg'
+        bkreg_feature = f'sw{obsid}x{mode}*pobk.reg'
         bkreg_file = ff.find(bkreg_feature)
         bkreg = bkreg_file[-1] if bkreg_file else None
         
-        reg_feature = 'sw*.reg'
+        reg_feature = f'sw{obsid}x{mode}*po.reg'
         reg_file = ff.find(reg_feature)
         reg = reg_file[-1] if reg_file else None
 
-        rtv_res = {'satelite': 'XRT', 'obsid': obsid, 
+        rtv_res = {'satelite': 'XRT', 'obsid': obsid, 'mode': mode,
                    'evt': evt, 'reg': reg, 'bkreg': bkreg}
         
         rtv = cls(rtv_res)
@@ -539,15 +551,24 @@ class swiftRetrieve(Retrieve):
     def from_batobs(cls, obsid, datapath=None):
         
         if datapath is None:
-            datapath = '/Users/junyang/Documents/swift'
+            datapath = '/Users/junyang/Data/swift'
             
         local_dir = datapath + '/' + obsid
         
         ff = FileFinder(local_dir=local_dir + '/bat/event')
-        ufevt_feature = 'sw*bevshsp_uf.evt'
-        ufevt_file = ff.find(ufevt_feature)
-        ufevt = ufevt_file[-1] if ufevt_file else None
-        
+        try:
+            ufevt_feature = 'sw*bevshsp_uf.evt'
+            ufevt_file = ff.find(ufevt_feature)
+            ufevt = ufevt_file[-1] if ufevt_file else None
+        except:
+            ufevtgz_feature = 'sw*bevshsp_uf.evt.gz'
+            ufevtgz_file = ff.find(ufevtgz_feature)
+            ufevtgz = ufevtgz_file[-1] if ufevtgz_file else None
+            ufevt = ufevtgz[:-3]
+            with gzip.open(ufevtgz, 'rb') as f_in:
+                with open(ufevt, 'wb') as f_out:
+                    shutil.copyfileobj(f_in, f_out)
+            
         ff = FileFinder(local_dir=local_dir + '/bat/hk')
         caldb_feature = 'sw*bgocb.hk.gz'
         caldb_file = ff.find(caldb_feature)
@@ -575,196 +596,3 @@ class swiftRetrieve(Retrieve):
         rtv = cls(rtv_res)
         
         return rtv
-        
-
-
-class FileFinder(object):
-    
-    def __init__(self, local_dir, ftp_url=None):
-
-        self._local_dir = os.path.abspath(local_dir)
-        self._ftp_url = urlparse(ftp_url) if ftp_url else None
-        
-        self.local_files = None
-        self.ftp_files = None
-        self.ftp_connection = None
-        
-        
-    @property
-    def local_dir(self):
-        
-        return self._local_dir
-    
-    
-    @local_dir.setter
-    def local_dir(self, new_local_dir):
-        
-        self._local_dir = os.path.abspath(new_local_dir)
-        
-        
-    @property
-    def ftp_url(self):
-        
-        return self._ftp_url
-    
-    
-    @ftp_url.setter
-    def ftp_url(self, new_ftp_url):
-        
-        old_ftp_hostname = self._ftp_url.hostname if self._ftp_url else None
-        
-        self._ftp_url = urlparse(new_ftp_url) if new_ftp_url else None
-        
-        new_ftp_hostname = self._ftp_url.hostname if self._ftp_url else None
-        
-        if old_ftp_hostname and old_ftp_hostname != new_ftp_hostname:
-            
-            if self.ftp_connection:
-                
-                self.ftp_connection.quit()
-                self.ftp_connection = None
-    
-
-    def __del__(self):
-
-        if self.ftp_connection:
-            self.ftp_connection.quit()
-
-
-    def find(self, feature):
-
-        self.local_files = self._get_files_from_local()
-        matching_local_files = self._match_files(self.local_files, feature)
-
-        if matching_local_files:
-            
-            return matching_local_files
-
-        if self.ftp_url:
-            self.ftp_files = self._get_files_from_ftp()
-            matching_ftp_files = self._match_files(self.ftp_files, feature)
-
-            if matching_ftp_files:
-                
-                downloaded_files_in_local = []
-                
-                pbar = tqdm(matching_ftp_files)
-                
-                for ftp_file_to_download in pbar:
-                    
-                    pbar.set_description(f'downloading {os.path.basename(ftp_file_to_download)}')
-                    
-                    local_file_to_write = os.path.join(self.local_dir, os.path.basename(ftp_file_to_download))
-                    
-                    self._download_file_from_ftp(ftp_file_to_download, local_file_to_write)
-                    
-                    downloaded_files_in_local.append(local_file_to_write)
-
-                return downloaded_files_in_local
-
-        warnings.warn(f"No files found matching the feature: {feature}", UserWarning)
-        return None
-
-
-    def _get_files_from_local(self):
-
-        if not os.path.exists(self.local_dir):
-            warnings.warn(f"Directory '{self.local_dir}' does not exist.", UserWarning)
-            return []
-
-        return [os.path.join(self.local_dir, f) for f in os.listdir(self.local_dir) 
-                if os.path.isfile(os.path.join(self.local_dir, f))]
-
-
-    def _get_files_from_ftp(self):
-        
-        self._ensure_ftp_connection()
-
-        ftp_path = self.ftp_url.path
-
-        try:
-            return self.ftp_connection.nlst(ftp_path)
-        except ftplib.all_errors as e:
-            warnings.warn(f"FTP error: {str(e)}", UserWarning)
-            return []
-
-
-    def _download_file_from_ftp(self, ftp_file_path, local_file_path):
-
-        self._ensure_ftp_connection()
-
-        try:
-            with open(local_file_path, 'wb') as local_file:
-                self.ftp_connection.retrbinary(f"RETR {ftp_file_path}", local_file.write)
-        except ftplib.all_errors as e:
-            warnings.warn(f"FTP download error: {str(e)}", UserWarning)
-
-
-    def _ensure_ftp_connection(self):
-
-        if self.ftp_connection is None:
-            
-            ftp_host = self.ftp_url.hostname
-            ftp_user = self.ftp_url.username or 'anonymous'
-            ftp_pass = self.ftp_url.password or ''
-
-            try:
-                self.ftp_connection = ftplib.FTP_TLS(ftp_host)
-                self.ftp_connection.login(user=ftp_user, passwd=ftp_pass)
-                self.ftp_connection.prot_p()
-                print(f"Connected to FTP: {ftp_host}")
-            except ftplib.all_errors as e:
-                warnings.warn(f"FTP connection error: {str(e)}", UserWarning)
-                self.ftp_connection = None
-                
-        else:
-            
-            if not self._is_ftp_connection_alive():
-                print("FTP connection lost, reconnecting...")
-                self.ftp_connection = None
-                self._ensure_ftp_connection()
-
-
-    def _is_ftp_connection_alive(self):
-
-        try:
-            self.ftp_connection.voidcmd("NOOP")
-            return True
-        except (ftplib.error_temp, ftplib.error_perm, ftplib.error_proto, OSError):
-            return False
-
-
-    def _match_files(self, files_in_dir, feature):
-
-        if not files_in_dir:
-            return []
-
-        feature_list = [f for f in feature.split('*') if f]
-
-        starts_with = feature.startswith('*')
-        ends_with = feature.endswith('*')
-        
-        matching_files = []
-
-        for file in files_in_dir:
-            file_name = os.path.basename(file)
-
-            if not starts_with and not file_name.startswith(feature_list[0]):
-                continue
-
-            if not ends_with and not file_name.endswith(feature_list[-1]):
-                continue
-
-            match = True
-            pos = 0
-            for feat in feature_list:
-                pos = file_name.find(feat, pos)
-                if pos == -1:
-                    match = False
-                    break
-                pos += len(feat)
-
-            if match:
-                matching_files.append(file)
-
-        return matching_files

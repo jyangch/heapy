@@ -3,7 +3,6 @@ from astropy.io import fits
 from astropy.time import Time, TimeDelta
 
 
-
 def hxmt_met_to_utc(met):
 
     dt = TimeDelta(met + 441763197.0, format='sec')

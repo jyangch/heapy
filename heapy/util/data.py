@@ -44,7 +44,7 @@ def union(bins):
 
 
 def rebin(bins, 
-          stat,
+          stat, 
           cts, 
           cts_err=None,
           bcts=None, 
@@ -54,7 +54,7 @@ def rebin(bins,
           max_bin=None,
           backscale=None):
     
-    _allowed_stat = ['gstat', 'cstat', 'pgstat']
+    _allowed_stat = ['gstat', 'cstat', 'pgstat', None]
     
     assert stat in _allowed_stat, f'unsupported stat: {stat}'
     
@@ -69,13 +69,13 @@ def rebin(bins,
         assert bcts_err is not None
         
     if cts_err is None:
-        cts_err = np.zeros_like(cts)
+        cts_err = np.zeros_like(cts).astype(float)
         
     if bcts is None:
-        bcts = np.zeros_like(cts)
+        bcts = np.zeros_like(cts).astype(float)
         
     if bcts_err is None:
-        bcts_err = np.zeros_like(cts)
+        bcts_err = np.zeros_like(cts).astype(float)
         
     if min_sigma is None:
         min_sigma = -np.inf
@@ -109,6 +109,8 @@ def rebin(bins,
             sigma = pgsig(cc, cb * backscale, cb_err * backscale)
         elif stat == 'cstat':
             sigma = ppsig(cc, cb * backscale, 1)
+        elif stat is None:
+            sigma = 0
         else:
             raise AttributeError(f'unsupported stat: {stat}')
         
@@ -157,9 +159,30 @@ def multi_rebin(bins,
                 min_evt_list=None, 
                 backscale_list=None):
     
-    _allowed_stat = ['gstat', 'cstat', 'pgstat']
+    _allowed_stat = ['gstat', 'cstat', 'pgstat', None]
     
     multi = len(cts_list)
+
+    if stat_list is None:
+        stat_list = [None] * multi
+
+    if cts_err_list is None:
+        cts_err_list = [None] * multi
+
+    if bcts_list is None:
+        bcts_list = [None] * multi
+
+    if bcts_err_list is None:
+        bcts_err_list = [None] * multi
+
+    if min_sigma_list is None:
+        min_sigma_list = [None] * multi
+
+    if min_evt_list is None:
+        min_evt_list = [None] * multi
+
+    if backscale_list is None:
+        backscale_list = [None] * multi
     
     for n in range(multi):
     
@@ -176,13 +199,13 @@ def multi_rebin(bins,
             assert bcts_err_list[n] is not None
             
         if cts_err_list[n] is None:
-            cts_err_list[n] = np.zeros_like(cts_list[n])
+            cts_err_list[n] = np.zeros_like(cts_list[n]).astype(float)
             
         if bcts_list[n] is None:
-            bcts_list[n] = np.zeros_like(cts_list[n])
+            bcts_list[n] = np.zeros_like(cts_list[n]).astype(float)
             
         if bcts_err_list[n] is None:
-            bcts_err_list[n] = np.zeros_like(cts_list[n])
+            bcts_err_list[n] = np.zeros_like(cts_list[n]).astype(float)
             
         if min_sigma_list[n] is None:
             min_sigma_list[n] = -np.inf
@@ -193,12 +216,12 @@ def multi_rebin(bins,
         if backscale_list[n] is None:
             backscale_list[n] = 1
             
-    new_bins, new_cts_list, new_cts_err_list = [], [[]] * multi, [[]] * multi
-    new_bcts_list, new_bcts_err_list = [[]] * multi, [[]] * multi
+    new_bins, new_cts_list, new_cts_err_list = [], [[] for _ in range(multi)], [[] for _ in range(multi)]
+    new_bcts_list, new_bcts_err_list = [[] for _ in range(multi)], [[] for _ in range(multi)]
     
     j, k = 0, 0
-    cc_list, cb_list = np.zeros(multi), np.zeros(multi)
-    cc_err_list, cb_err_list = np.zeros(multi), np.zeros(multi)
+    cc_list, cb_list = [0] * multi, [0] * multi
+    cc_err_list, cb_err_list = [0] * multi, [0] * multi
     rebin_flag = [False] * multi
     last_flag = [False] * multi
 
@@ -220,6 +243,8 @@ def multi_rebin(bins,
                 sigma = pgsig(cc_list[n], cb_list[n] * backscale_list[n], cb_err_list[n] * backscale_list[n])
             elif stat_list[n] == 'cstat':
                 sigma = ppsig(cc_list[n], cb_list[n] * backscale_list[n], 1)
+            elif stat_list[n] is None:
+                sigma = 0
             else:
                 raise AttributeError(f'unsupported stat: {stat_list[n]}')
             
@@ -240,8 +265,8 @@ def multi_rebin(bins,
                 new_bcts_err_list[n].append(cb_err_list[n])
                 
             rebin_flag = [False] * multi
-            cc_list, cb_list = np.zeros(multi), np.zeros(multi)
-            cc_err_list, cb_err_list = np.zeros(multi), np.zeros(multi)
+            cc_list, cb_list = [0] * multi, [0] * multi
+            cc_err_list, cb_err_list = [0] * multi, [0] * multi
             j = i + 1
             k += 1
             
