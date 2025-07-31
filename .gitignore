@@ -46,8 +46,9 @@ Icon?
 *.swp
 
 # ignore tests
-tests/*
+tests/**
 
 # include .ipynb in tests
 !tests/**/*.ipynb
-!tests/*.ipynb
+!tests/
+!tests/*/
