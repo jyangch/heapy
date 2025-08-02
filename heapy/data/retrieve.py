@@ -389,13 +389,13 @@ class epRetrieve(Retrieve):
         rmf_file = ff.find(rmf_feature)
         rmf = rmf_file[-1] if rmf_file else None
         
-        armreg_feature = 'ep*arm.reg'
-        armreg_file = ff.find(armreg_feature)
-        armreg = armreg_file[-1] if armreg_file else None
-        
         arf_feature = 'ep*' + srcid + '.arf'
         arf_file = ff.find(arf_feature)
         arf = arf_file[-1] if arf_file else None
+        
+        armreg_feature = 'ep*arm.reg'
+        armreg_file = ff.find(armreg_feature)
+        armreg = armreg_file[-1] if armreg_file else None
         
         bkreg_feature = 'ep*' + srcid + 'bk.reg'
         bkreg_file = ff.find(bkreg_feature)
@@ -513,10 +513,10 @@ class swiftRetrieve(Retrieve):
         
         if datapath is None:
             datapath = '/Users/junyang/Data/swift'
-            
-        local_dir = datapath + '/' + obsid + '/xrt/event'
         
-        ff = FileFinder(local_dir=local_dir)
+        local_dir = datapath + '/' + obsid
+        
+        ff = FileFinder(local_dir=local_dir + '/xrt/event')
         
         try:
             evt_feature = f'sw{obsid}x{mode}*po_cl.evt'
@@ -538,9 +538,19 @@ class swiftRetrieve(Retrieve):
         reg_feature = f'sw{obsid}x{mode}*po.reg'
         reg_file = ff.find(reg_feature)
         reg = reg_file[-1] if reg_file else None
+        
+        ff = FileFinder(local_dir=local_dir + '/xrt/hk')
+        xhd_feature = 'sw*xhd.hk.gz'
+        xhd_file = ff.find(xhd_feature)
+        xhd = xhd_file[-1] if xhd_file else None
+        
+        ff = FileFinder(local_dir=local_dir + '/auxil')
+        att_feature = 'sw*sat.fits.gz'
+        att_file = ff.find(att_feature)
+        att = att_file[-1] if att_file else None
 
         rtv_res = {'satelite': 'XRT', 'obsid': obsid, 'mode': mode,
-                   'evt': evt, 'reg': reg, 'bkreg': bkreg}
+                   'evt': evt, 'reg': reg, 'bkreg': bkreg, 'xhd': xhd, 'att': att}
         
         rtv = cls(rtv_res)
         

@@ -11,7 +11,8 @@ from .filter import Filter
 from ..data.retrieve import epRetrieve, swiftRetrieve
 from ..temp.txx import ppTxx
 from ..auto.ppsignal import ppSignal
-from ..util.data import json_dump, rebin
+from ..util.file import copy
+from ..util.data import json_dump, rebin, union
 from ..util.time import ep_met_to_utc, ep_utc_to_met
 from ..util.time import swift_met_to_utc, swift_utc_to_met
 
@@ -19,10 +20,12 @@ from ..util.time import swift_met_to_utc, swift_utc_to_met
 
 class Image(object):
     
+    os.environ["HEADASNOQUERY"] = "1"
+    
     def __init__(self, 
-                 file=None, 
-                 regfile=None, 
-                 bkregfile=None
+                 file, 
+                 regfile, 
+                 bkregfile
                  ):
         
         self._file = file
@@ -100,10 +103,33 @@ class Image(object):
         stdout, stderr = process.communicate(input='\n'.join(commands))
 
         return stdout, stderr
+    
+    
+    def _run_comands(self, commands):
+        
+        process = subprocess.Popen(commands, 
+                                   stdin=subprocess.PIPE, 
+                                   stdout=subprocess.PIPE, 
+                                   stderr=subprocess.PIPE, 
+                                   text=True)
+
+        stdout, stderr = process.communicate()
+
+        return stdout, stderr
         
         
     def _ini_xselect(self):
-            
+        
+        curve_savepath = os.path.dirname(self.file) + '/curve'
+        
+        if os.path.isdir(curve_savepath):
+            shutil.rmtree(curve_savepath)
+                
+        os.makedirs(curve_savepath)
+
+        self.src_curvefile = curve_savepath + '/src.lc'
+        self.bkg_curvefile = curve_savepath + '/bkg.lc'
+
         spectra_savepath = os.path.dirname(self.file) + '/spectra'
         
         if os.path.isdir(spectra_savepath):
@@ -111,8 +137,8 @@ class Image(object):
                 
         os.makedirs(spectra_savepath)
             
-        src_specfile = spectra_savepath + '/src.pi'
-        bkg_specfile = spectra_savepath + '/bkg.pi'
+        self.src_specfile = spectra_savepath + '/src.pi'
+        self.bkg_specfile = spectra_savepath + '/bkg.pi'
         
         events_savepath = os.path.dirname(self.file) + '/events'
         
@@ -121,8 +147,8 @@ class Image(object):
                 
         os.makedirs(events_savepath)
         
-        src_evtfile = events_savepath + '/src.evt'
-        bkg_evtfile = events_savepath + '/bkg.evt'
+        self.src_evtfile = events_savepath + '/src.evt'
+        self.bkg_evtfile = events_savepath + '/bkg.evt'
         
         commands = ['xsel', 
                     'read events', 
@@ -130,37 +156,39 @@ class Image(object):
                     self.file.split('/')[-1], 
                     'yes', 
                     f'filter region {self.regfile}', 
+                    'extract curve',
+                    f'save curve {self.src_curvefile}',
                     'extract spectrum', 
-                    f'save spectrum {src_specfile}', 
+                    f'save spectrum {self.src_specfile}', 
                     'extract events', 
-                    f'save events {src_evtfile}', 
+                    f'save events {self.src_evtfile}', 
                     'no', 
                     'clear events', 
                     'clear region', 
                     f'filter region {self.bkregfile}', 
+                    'extract curve',
+                    f'save curve {self.bkg_curvefile}',
                     'extract spectrum', 
-                    f'save spectrum {bkg_specfile}', 
+                    f'save spectrum {self.bkg_specfile}', 
                     'extract events', 
-                    f'save events {bkg_evtfile}', 
+                    f'save events {self.bkg_evtfile}', 
                     'no']
         
         _, _ = self._run_xselect(commands)
         
-        src_hdu = fits.open(src_specfile)
+        src_hdu = fits.open(self.src_specfile)
         self.src_backscale = src_hdu['SPECTRUM'].header['BACKSCAL']
         src_hdu.close()
         
-        bkg_hdu = fits.open(bkg_specfile)
+        bkg_hdu = fits.open(self.bkg_specfile)
         self.bkg_backscale = bkg_hdu['SPECTRUM'].header['BACKSCAL']
         bkg_hdu.close()
         
         self.backscale = self.src_backscale / self.bkg_backscale
-        
-        self.src_evtfile = src_evtfile
-        self.bkg_evtfile = bkg_evtfile
-        
+
         hdu = fits.open(self.file)
         self._event = table.Table.read(hdu['EVENTS'])
+        self._gti = table.Table.read(hdu['GTI'])
         self._timezero = hdu['EVENTS'].header['TSTART']
         self._filter = Filter(self._event)
         hdu.close()
@@ -194,6 +222,14 @@ class Image(object):
     def bkg_event(self):
         
         return self._bkg_filter.evt
+    
+    
+    def gti(self):
+        
+        tstart = self._gti['START']
+        tstop = self._gti['STOP']
+        
+        return union(np.vstack((tstart, tstop)).T)
         
         
     @property
@@ -494,6 +530,12 @@ class Image(object):
     
     
     @property
+    def lc_exps(self):
+        
+        return self.lc_binsize
+    
+    
+    @property
     def lc_time(self):
         
         return np.mean(self.lc_bin_list, axis=1)
@@ -522,13 +564,13 @@ class Image(object):
     @property
     def lc_src_rate(self):
         
-        return self.lc_src_cts / self.lc_binsize
+        return self.lc_src_cts / self.lc_exps
     
     
     @property
     def lc_src_rate_err(self):
         
-        return self.lc_src_cts_err / self.lc_binsize
+        return self.lc_src_cts_err / self.lc_exps
     
     
     @property
@@ -546,13 +588,13 @@ class Image(object):
     @property
     def lc_bkg_rate(self):
         
-        return self.lc_bkg_cts / self.lc_binsize * self.backscale
+        return self.lc_bkg_cts / self.lc_exps * self.backscale
     
     
     @property
     def lc_bkg_rate_err(self):
         
-        return self.lc_bkg_cts_err / self.lc_binsize * self.backscale
+        return self.lc_bkg_cts_err / self.lc_exps * self.backscale
     
     
     @property
@@ -570,13 +612,13 @@ class Image(object):
     @property
     def lc_net_cts(self):
         
-        return self.lc_net_rate * self.lc_binsize
+        return self.lc_net_rate * self.lc_exps
     
     
     @property
     def lc_net_cts_err(self):
         
-        return self.lc_net_rate_err * self.lc_binsize
+        return self.lc_net_rate_err * self.lc_exps
     
     
     @property
@@ -1005,11 +1047,13 @@ class Image(object):
 class epImage(Image):
     
     def __init__(self, 
-                 file=None, 
-                 regfile=None, 
-                 bkregfile=None, 
+                 file, 
+                 regfile, 
+                 bkregfile, 
                  armregfile=None, 
-                 arm=False
+                 arm=False, 
+                 rmffile=None, 
+                 arffile=None
                  ):
         
         self._file = file
@@ -1017,6 +1061,8 @@ class epImage(Image):
         self._bkregfile = bkregfile
         self._armregfile = armregfile
         self._arm = arm
+        self._rmffile = rmffile
+        self._arffile = arffile
         
         self._ini_xselect()
 
@@ -1030,8 +1076,10 @@ class epImage(Image):
         regfile = rtv.rtv_res['reg']
         bkregfile = rtv.rtv_res['bkreg']
         armregfile = rtv.rtv_res['armreg']
+        rmffile = rtv.rtv_res['rmf']
+        arffile = rtv.rtv_res['arf']
         
-        return cls(file, regfile, bkregfile, armregfile)
+        return cls(file, regfile, bkregfile, armregfile, False, rmffile, arffile)
     
     
     @classmethod
@@ -1049,7 +1097,10 @@ class epImage(Image):
     @property
     def armregfile(self):
         
-        return os.path.abspath(self._armregfile)
+        if self._armregfile is None:
+            return None
+        else:
+            return os.path.abspath(self._armregfile)
     
     
     @armregfile.setter
@@ -1081,6 +1132,36 @@ class epImage(Image):
             return f'"{os.path.abspath(self._bkregfile)} {self.armregfile}"'
         else:
             return f'"{os.path.abspath(self._bkregfile)}"'
+
+
+    @property
+    def rmffile(self):
+        
+        if self._rmffile is None:
+            return None
+        else:
+            return os.path.abspath(self._rmffile)
+    
+    
+    @rmffile.setter
+    def rmffile(self, new_rmffile):
+        
+        self._rmffile = new_rmffile
+        
+        
+    @property
+    def arffile(self):
+        
+        if self._arffile is None:
+            return None
+        else:
+            return os.path.abspath(self._arffile)
+    
+    
+    @arffile.setter
+    def arffile(self, new_arffile):
+        
+        self._arffile = new_arffile
 
 
     @property
@@ -1149,20 +1230,41 @@ class epImage(Image):
             self._psf_fitradius = new_psf_fitradius
         else:
             raise ValueError('psf_fitradius is extected to be int or None')
+        
+        
+    def extract_response(self, savepath='./spectrum'):
+        
+        assert self.rmffile is not None, 'rmffile is not set, cannot extract response'
+        assert self.arffile is not None, 'arffile is not set, cannot extract response'
+        
+        savepath = os.path.abspath(savepath)
+        
+        if not os.path.exists(savepath):
+            os.makedirs(savepath)
+            
+        rsp_rmffile = savepath + '/ep.rmf'
+        rsp_arffile = savepath + '/ep.arf'
+
+        copy(self.rmffile, rsp_rmffile)
+        copy(self.arffile, rsp_arffile)
 
 
 
 class swiftImage(Image):
     
     def __init__(self, 
-                 file=None, 
-                 regfile=None, 
-                 bkregfile=None
+                 file, 
+                 regfile, 
+                 bkregfile, 
+                 attfile, 
+                 xhdfile
                  ):
         
         self._file = file
         self._regfile = regfile
         self._bkregfile = bkregfile
+        self._attfile = attfile
+        self._xhdfile = xhdfile
         
         self._ini_xselect()
 
@@ -1175,10 +1277,37 @@ class swiftImage(Image):
         file = rtv.rtv_res['evt']
         regfile = rtv.rtv_res['reg']
         bkregfile = rtv.rtv_res['bkreg']
+        attfile = rtv.rtv_res['att']
+        xhdfile = rtv.rtv_res['xhd']
+        mode = rtv.rtv_res['mode']
         
-        return cls(file, regfile, bkregfile)
+        return cls(file, regfile, bkregfile, attfile, xhdfile)
     
     
+    @property
+    def attfile(self):
+        
+        return os.path.abspath(self._attfile)
+    
+    
+    @attfile.setter
+    def attfile(self, new_attfile):
+        
+        self._attfile = new_attfile
+        
+        
+    @property
+    def xhdfile(self):
+
+        return os.path.abspath(self._xhdfile)
+
+
+    @xhdfile.setter
+    def xhdfile(self, new_xhdfile):
+
+        self._xhdfile = new_xhdfile
+
+
     @property
     def utcf(self):
         
@@ -1252,3 +1381,147 @@ class swiftImage(Image):
             self._psf_fitradius = new_psf_fitradius
         else:
             raise ValueError('psf_fitradius is extected to be int or None')
+            
+            
+    @property
+    def lc_exps(self):
+        
+        curve_savepath = os.path.dirname(self.file) + '/curve'
+        
+        if not os.path.exists(curve_savepath):
+            os.makedirs(curve_savepath)
+            
+        src_corrfile = curve_savepath + '/src.corr'
+        
+        if not os.path.exists(src_corrfile):
+            
+            src_corr_curvefile = curve_savepath + '/src_corr.lc'
+            src_instrfile = curve_savepath + '/src_srawinstr.img'
+            
+            commands = [f'xrtlccorr clobber=yes', 
+                        'regionfile=None',
+                        f'lcfile={self.src_curvefile}',
+                        f'outfile={src_corr_curvefile}',
+                        f'corrfile={src_corrfile}',
+                        f'attfile={self.attfile}',
+                        f'outinstrfile={src_instrfile}',
+                        f'infile={self.file}',
+                        f'hdfile={self.xhdfile}']
+        
+            _, _ = self._run_comands(commands)
+            
+        hdu = fits.open(src_corrfile)
+        time_10s = np.array(hdu['LCCORRFACT']['TIME'])
+        factor_10s = np.array(hdu['LCCORRFACT']['CORRFACT'])
+        
+        diff = np.abs(self.lc_time[:, None] - time_10s[None, :])
+        self.lc_factor = factor_10s[np.argmin(diff, axis=1)]
+        
+        return self.lc_binsize / self.lc_factor
+        
+        
+    def extract_response(self, savepath='./spectrum', std=False):
+            
+        savepath = os.path.abspath(savepath)
+        
+        if not os.path.exists(savepath):
+            os.makedirs(savepath)
+        
+        lslices = np.array(self.spec_slices)[:, 0]
+        rslices = np.array(self.spec_slices)[:, 1]
+        
+        for l, r in zip(lslices, rslices):
+            scc_start = self.timezero + l
+            scc_stop = self.timezero + r
+            
+            new_l = '{:+.2f}'.format(l).replace('-', 'm').replace('.', 'd').replace('+', 'p')
+            new_r = '{:+.2f}'.format(r).replace('-', 'm').replace('.', 'd').replace('+', 'p')
+            
+            file_name = '_'.join([new_l, new_r])
+            
+            exposure_savepath = savepath + '/exposure'
+            
+            if not os.path.exists(exposure_savepath):
+                os.makedirs(exposure_savepath)
+            
+            evtfile = exposure_savepath + f'/{file_name}.evt'
+            
+            if os.path.exists(evtfile):
+                os.remove(evtfile)
+                
+            commands = ['xsel', 
+                        'read event', 
+                        os.path.dirname(self.file), 
+                        self.file.split('/')[-1], 
+                        'yes', 
+                        'filter time scc', 
+                        f'{scc_start}, {scc_stop}', 
+                        'x', 
+                        'extract event copyall=yes', 
+                        f'save event {evtfile}', 
+                        'no']
+        
+            stdout, stderr = self._run_xselect(commands)
+            
+            if std: 
+                print(stdout)
+                print(stderr)
+
+            expfile = exposure_savepath + f'/{file_name}_ex.img'
+
+            commands = [f'xrtexpomap clobber=yes', 
+                        f'infile={evtfile}',
+                        f'attfile={self.attfile}',
+                        f'hdfile={self.xhdfile}',
+                        f'outdir={exposure_savepath}/',
+                        f'stemout={file_name}']
+            
+            stdout, stderr = self._run_comands(commands)
+            
+            if std: 
+                print(stdout)
+                print(stderr)
+                
+            src_specfile = savepath + f'/{file_name}.src'
+            
+            if not os.path.exists(src_specfile):
+                self.extract_spectrum(savepath=savepath, std=std)
+
+            rsp_arffile = savepath + f'/{file_name}.arf'
+
+            commands = [f'xrtmkarf clobber=yes', 
+                        f'expofile={expfile}',
+                        f'phafile={src_specfile}',
+                        'psfflag=yes',
+                        f'outfile={rsp_arffile}',
+                        'srcx=-1',
+                        'srcy=-1']
+            
+            stdout, stderr = self._run_comands(commands)
+            
+            if std: 
+                print(stdout)
+                print(stderr)
+                
+            rsp_rmffile = savepath + f'/{file_name}.rmf'
+            date_time = swift_met_to_utc((scc_start + scc_stop) / 2)
+            date = date_time.split('T')[0]
+            time = date_time.split('T')[1]
+
+            commands = ['quzcif',
+                        'mission=SWIFT',
+                        'instrument=XRT',
+                        'detector=-',
+                        'filter=-',
+                        'codename=matrix',
+                        f'date={date}',
+                        f'time={time}',
+                        'expr=datamode.eq.windowed.and.grade.eq.G0:2.and.XRTVSUB.eq.6']
+            
+            stdout, stderr = self._run_comands(commands)
+            
+            copy(stdout.split()[0], rsp_rmffile)
+            
+            if std: 
+                print(stdout)
+                print(stderr)

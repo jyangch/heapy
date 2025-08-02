@@ -16,7 +16,7 @@ from ..data.retrieve import gbmRetrieve, gecamRetrieve, gridRetrieve
 from ..temp.txx import pgTxx
 from ..auto.polybase import PolyBase
 from ..util.file import copy, remove
-from ..util.data import msg_format, json_dump, rebin
+from ..util.data import msg_format, json_dump, rebin, union
 from ..util.time import fermi_met_to_utc, gecam_met_to_utc, grid_met_to_utc
 
 
@@ -73,7 +73,7 @@ class Event(object):
     @property
     def file(self):
         
-        return self._file
+        return os.path.abspath(self._file)
     
     
     @file.setter
@@ -90,12 +90,14 @@ class Event(object):
         return self._filter.evt
     
     
-    @property
     def gti(self):
         
-        return self._gti
-    
-    
+        tstart = self._gti['START']
+        tstop = self._gti['STOP']
+
+        return union(np.vstack((tstart, tstop)).T)
+
+
     @property
     def ebound(self):
         
@@ -1187,9 +1189,12 @@ class gbmTTE(Event):
     @property
     def posfile(self):
         
-        return self._posfile
-    
-    
+        if self._posfile is None:
+            return None
+        else:
+            return os.path.abspath(self._posfile)
+
+
     @posfile.setter
     def posfile(self, new_posfile):
         
@@ -1261,6 +1266,8 @@ class gbmTTE(Event):
         
         
     def extract_response(self, ra, dec, savepath='./spectrum'):
+        
+        assert self.posfile is not None, 'posfile is not set, cannot extract response'
         
         savepath = os.path.abspath(savepath)
         
