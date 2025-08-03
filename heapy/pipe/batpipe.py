@@ -20,8 +20,7 @@ class batPipe(object):
                  caldbfile=None, 
                  detmaskfile=None,
                  attfile=None,
-                 auxfile=None,
-                 skip_general=False
+                 auxfile=None
                  ):
         
         self._ufevtfile = ufevtfile
@@ -29,14 +28,12 @@ class batPipe(object):
         self._detmaskfile = detmaskfile
         self._attfile = attfile
         self._auxfile = auxfile
-
-        self.skip_general = skip_general
         
         self._general_processing()
         
         
     @classmethod
-    def from_batobs(cls, obsid, datapath=None, skip_general=False):
+    def from_batobs(cls, obsid, datapath=None):
         
         rtv = swiftRetrieve.from_batobs(obsid, datapath)
 
@@ -46,7 +43,7 @@ class batPipe(object):
         attfile = rtv.rtv_res['att']
         auxfile = rtv.rtv_res['aux']
         
-        return cls(ufevtfile, caldbfile, detmaskfile, attfile, auxfile, skip_general)
+        return cls(ufevtfile, caldbfile, detmaskfile, attfile, auxfile)
     
     
     @property
@@ -204,19 +201,13 @@ class batPipe(object):
 
         self.dpifile = self.general_savepath + '/grb.dpi'
         self.maskfile = self.general_savepath + '/grb.mask'
-        
-        if os.path.exists(self.dpifile) and os.path.exists(self.maskfile):
-            skip = self.skip_general
-        else:
-            skip = False
 
-        if not skip:
-
-            if os.path.isdir(self.general_savepath):
-                shutil.rmtree(self.general_savepath)
-                    
-            os.makedirs(self.general_savepath)
+        if not (os.path.exists(self.dpifile) and os.path.exists(self.maskfile)):
             
+            if os.path.exists(self.general_savepath):
+                os.rmdir(self.general_savepath)
+            os.makedirs(self.general_savepath)
+                
             self.bateconvert()
             self.batbinevt()
             self.bathotpix()
@@ -751,4 +742,4 @@ class batPipe(object):
         
         for l, r in zip(lslices, rslices):
 
-            self.batbinevt_spectrum(l, r, savepath=savepath, std=std)
+            self.batdrmgen(l, r, savepath=savepath, std=std)

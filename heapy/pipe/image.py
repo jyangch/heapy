@@ -32,6 +32,8 @@ class Image(object):
         self._regfile = regfile
         self._bkregfile = bkregfile
         
+        self.prefix = ''
+        
         self._ini_xselect()
 
 
@@ -105,7 +107,7 @@ class Image(object):
         return stdout, stderr
     
     
-    def _run_comands(self, commands):
+    def _run_commands(self, commands):
         
         process = subprocess.Popen(commands, 
                                    stdin=subprocess.PIPE, 
@@ -120,36 +122,33 @@ class Image(object):
         
     def _ini_xselect(self):
         
-        curve_savepath = os.path.dirname(self.file) + '/curve'
-        
-        if os.path.isdir(curve_savepath):
-            shutil.rmtree(curve_savepath)
-                
-        os.makedirs(curve_savepath)
+        curve_savepath = os.path.dirname(self.file) + f'/{self.prefix}curve'
 
         self.src_curvefile = curve_savepath + '/src.lc'
         self.bkg_curvefile = curve_savepath + '/bkg.lc'
 
-        spectra_savepath = os.path.dirname(self.file) + '/spectra'
-        
-        if os.path.isdir(spectra_savepath):
-            shutil.rmtree(spectra_savepath)
-                
-        os.makedirs(spectra_savepath)
+        spectra_savepath = os.path.dirname(self.file) + f'/{self.prefix}spectra'
             
         self.src_specfile = spectra_savepath + '/src.pi'
         self.bkg_specfile = spectra_savepath + '/bkg.pi'
-        
-        events_savepath = os.path.dirname(self.file) + '/events'
-        
-        if os.path.isdir(events_savepath):
-            shutil.rmtree(events_savepath)
-                
-        os.makedirs(events_savepath)
-        
+
+        events_savepath = os.path.dirname(self.file) + f'/{self.prefix}events'
+
         self.src_evtfile = events_savepath + '/src.evt'
         self.bkg_evtfile = events_savepath + '/bkg.evt'
-        
+
+        if os.path.exists(curve_savepath):
+            shutil.rmtree(curve_savepath)
+        os.makedirs(curve_savepath)
+            
+        if os.path.exists(spectra_savepath):
+            shutil.rmtree(spectra_savepath)
+        os.makedirs(spectra_savepath)
+
+        if os.path.exists(events_savepath):
+            shutil.rmtree(events_savepath)
+        os.makedirs(events_savepath)
+
         commands = ['xsel', 
                     'read events', 
                     os.path.dirname(self.file), 
@@ -224,12 +223,13 @@ class Image(object):
         return self._bkg_filter.evt
     
     
+    @property
     def gti(self):
-        
-        tstart = self._gti['START']
-        tstop = self._gti['STOP']
-        
-        return union(np.vstack((tstart, tstop)).T)
+
+        tstart = self._gti['START'] - self.timezero
+        tstop = self._gti['STOP'] - self.timezero
+
+        return np.array(union(np.vstack((tstart, tstop)).T))
         
         
     @property
@@ -527,12 +527,31 @@ class Image(object):
         lbins, rbins = self.lc_bins[:-1], self.lc_bins[1:]
         
         return np.vstack((lbins, rbins)).T
-    
-    
+
+
+    @property
+    def lc_mask(self):
+
+        return np.any((self.lc_bin_list[:, None, 0] >= self.gti[:, 0]) & 
+                      (self.lc_bin_list[:, None, 1] <= self.gti[:, 1]), axis=1)
+        
+        
+    @property
+    def lc_mask_bin_list(self):
+        
+        return self.lc_bin_list[self.lc_mask]
+
+
     @property
     def lc_exps(self):
         
         return self.lc_binsize
+    
+    
+    @property
+    def lc_mask_exps(self):
+        
+        return self.lc_exps[self.lc_mask]
     
     
     @property
@@ -542,11 +561,23 @@ class Image(object):
     
     
     @property
+    def lc_mask_time(self):
+        
+        return self.lc_time[self.lc_mask]
+    
+    
+    @property
     def lc_time_err(self):
         
         lbins, rbins = self.lc_bins[:-1], self.lc_bins[1:]
         
         return (rbins - lbins) / 2
+    
+    
+    @property
+    def lc_mask_time_err(self):
+        
+        return self.lc_time_err[self.lc_mask]
 
 
     @property
@@ -556,15 +587,33 @@ class Image(object):
     
     
     @property
+    def lc_mask_src_cts(self):
+        
+        return self.lc_src_cts[self.lc_mask]
+    
+    
+    @property
     def lc_src_cts_err(self):
         
         return np.sqrt(self.lc_src_cts)
     
     
     @property
+    def lc_mask_src_cts_err(self):
+
+        return self.lc_src_cts_err[self.lc_mask]
+
+
+    @property
     def lc_src_rate(self):
         
         return self.lc_src_cts / self.lc_exps
+    
+    
+    @property
+    def lc_mask_src_rate(self):
+        
+        return self.lc_src_rate[self.lc_mask]
     
     
     @property
@@ -574,15 +623,33 @@ class Image(object):
     
     
     @property
+    def lc_mask_src_rate_err(self):
+        
+        return self.lc_src_rate_err[self.lc_mask]
+    
+    
+    @property
     def lc_bkg_cts(self):
         
         return np.histogram(self.lc_bkg_ts, bins=self.lc_bins)[0]
     
     
     @property
+    def lc_mask_bkg_cts(self):
+        
+        return self.lc_bkg_cts[self.lc_mask]
+    
+    
+    @property
     def lc_bkg_cts_err(self):
         
         return np.sqrt(self.lc_bkg_cts)
+    
+    
+    @property
+    def lc_mask_bkg_cts_err(self):
+        
+        return self.lc_bkg_cts_err[self.lc_mask]
         
         
     @property
@@ -592,9 +659,21 @@ class Image(object):
     
     
     @property
+    def lc_mask_bkg_rate(self):
+        
+        return self.lc_bkg_rate[self.lc_mask]
+    
+    
+    @property
     def lc_bkg_rate_err(self):
         
         return self.lc_bkg_cts_err / self.lc_exps * self.backscale
+    
+    
+    @property
+    def lc_mask_bkg_rate_err(self):
+        
+        return self.lc_bkg_rate_err[self.lc_mask]
     
     
     @property
@@ -604,9 +683,21 @@ class Image(object):
     
     
     @property
+    def lc_mask_net_rate(self):
+        
+        return self.lc_net_rate[self.lc_mask]
+    
+    
+    @property
     def lc_net_rate_err(self):
         
         return np.sqrt(self.lc_src_rate_err ** 2 + self.lc_bkg_rate_err ** 2)
+    
+    
+    @property
+    def lc_mask_net_rate_err(self):
+        
+        return self.lc_net_rate_err[self.lc_mask]
     
     
     @property
@@ -616,9 +707,21 @@ class Image(object):
     
     
     @property
+    def lc_mask_net_cts(self):
+        
+        return self.lc_net_cts[self.lc_mask]
+    
+    
+    @property
     def lc_net_cts_err(self):
         
         return self.lc_net_rate_err * self.lc_exps
+    
+    
+    @property
+    def lc_mask_net_cts_err(self):
+        
+        return self.lc_net_cts_err[self.lc_mask]
     
     
     @property
@@ -666,51 +769,51 @@ class Image(object):
         if sig: self.lc_ps.save(savepath=savepath + '/ppsignal')
         
         fig = go.Figure()
-        src = go.Scatter(x=self.lc_time, 
-                         y=self.lc_src_rate, 
+        src = go.Scatter(x=self.lc_mask_time, 
+                         y=self.lc_mask_src_rate, 
                          mode='markers', 
                          name='src counts rate', 
                          showlegend=True, 
                          error_x=dict(
                              type='data',
-                             array=self.lc_time_err, 
+                             array=self.lc_mask_time_err, 
                              thickness=1.5,
                              width=0), 
                          error_y=dict(
                              type='data',
-                             array=self.lc_src_rate_err,
+                             array=self.lc_mask_src_rate_err,
                              thickness=1.5,
                              width=0), 
                          marker=dict(symbol='circle', size=3))
-        bkg = go.Scatter(x=self.lc_time, 
-                         y=self.lc_bkg_rate, 
+        bkg = go.Scatter(x=self.lc_mask_time, 
+                         y=self.lc_mask_bkg_rate, 
                          mode='markers', 
                          name='bkg counts rate', 
                          showlegend=True, 
                          error_x=dict(
                              type='data',
-                             array=self.lc_time_err, 
+                             array=self.lc_mask_time_err,
                              thickness=1.5,
                              width=0), 
                          error_y=dict(
                              type='data',
-                             array=self.lc_bkg_rate_err,
+                             array=self.lc_mask_bkg_rate_err,
                              thickness=1.5,
                              width=0), 
                          marker=dict(symbol='circle', size=3))
-        net = go.Scatter(x=self.lc_time, 
-                         y=self.lc_net_rate, 
+        net = go.Scatter(x=self.lc_mask_time, 
+                         y=self.lc_mask_net_rate, 
                          mode='markers', 
                          name='net counts rate', 
                          showlegend=True, 
                          error_x=dict(
                              type='data',
-                             array=self.lc_time_err, 
+                             array=self.lc_mask_time_err, 
                              thickness=1.5,
                              width=0), 
                          error_y=dict(
                              type='data',
-                             array=self.lc_net_rate_err,
+                             array=self.lc_mask_net_rate_err,
                              thickness=1.5,
                              width=0), 
                          marker=dict(symbol='circle', size=3))
@@ -719,7 +822,7 @@ class Image(object):
         fig.add_trace(bkg)
         fig.add_trace(net)
 
-        fig.update_xaxes(title_text=f'Time since {self.timezero_utc} (s)')
+        fig.update_xaxes(title_text=f'Time since {self.timezero_utc} (s)', range=self.lc_t1t2)
         fig.update_yaxes(title_text=f'Counts per second (binsize={self.lc_binsize} s)')
         fig.update_layout(template='plotly_white', height=600, width=800)
         fig.update_layout(legend=dict(x=1, y=1, xanchor='right', yanchor='bottom'))
@@ -737,7 +840,7 @@ class Image(object):
         
         fig.add_trace(net)
         
-        fig.update_xaxes(title_text=f'Time since {self.timezero_utc} (s)')
+        fig.update_xaxes(title_text=f'Time since {self.timezero_utc} (s)', range=self.lc_t1t2)
         fig.update_yaxes(title_text=f'Cumulated counts (binsize={self.lc_binsize} s)')
         fig.update_layout(template='plotly_white', height=600, width=800)
         fig.update_layout(legend=dict(x=1, y=1, xanchor='right', yanchor='bottom'))
@@ -822,24 +925,26 @@ class Image(object):
         json_dump(fig.to_dict(), savepath + '/rebin_lc.json')
         
         
-    def check_pileup(self, savepath='./psf', std=False, show=False):
+    def check_pileup(self, std=False, show=False):
         
-        savepath = os.path.abspath(savepath)
-        
-        if not os.path.exists(savepath):
-            os.makedirs(savepath)
+        psf_savepath = os.path.dirname(self.file) + f'/psf'
+
+        psf_savepath = os.path.abspath(psf_savepath)
+
+        if not os.path.exists(psf_savepath):
+            os.makedirs(psf_savepath)
         
         try:
             imagefile = self.imagefile
         except:
             imagefile = self.file
 
-        qdpfile = savepath + '/psf.qdp'
+        qdpfile = psf_savepath + '/psf.qdp'
         
         if os.path.exists(qdpfile):
             os.remove(qdpfile)
             
-        modfile = savepath + '/psf.mod'
+        modfile = psf_savepath + '/psf.mod'
         
         if os.path.exists(modfile):
             os.remove(modfile)
@@ -963,8 +1068,8 @@ class Image(object):
         fig.update_layout(legend=dict(x=1, y=1, xanchor='right', yanchor='bottom'))
         
         if show: fig.show()
-        fig.write_html(savepath + '/psf.html')
-        json_dump(fig.to_dict(), savepath + '/psf.json')
+        fig.write_html(psf_savepath + '/psf.html')
+        json_dump(fig.to_dict(), psf_savepath + '/psf.json')
 
 
     @property
@@ -1063,6 +1168,8 @@ class epImage(Image):
         self._arm = arm
         self._rmffile = rmffile
         self._arffile = arffile
+        
+        self.prefix = ''
         
         self._ini_xselect()
 
@@ -1257,7 +1364,8 @@ class swiftImage(Image):
                  regfile, 
                  bkregfile, 
                  attfile, 
-                 xhdfile
+                 xhdfile,
+                 mode
                  ):
         
         self._file = file
@@ -1265,6 +1373,9 @@ class swiftImage(Image):
         self._bkregfile = bkregfile
         self._attfile = attfile
         self._xhdfile = xhdfile
+        self._mode = mode
+        
+        self.prefix = f'{mode}_'
         
         self._ini_xselect()
 
@@ -1281,7 +1392,7 @@ class swiftImage(Image):
         xhdfile = rtv.rtv_res['xhd']
         mode = rtv.rtv_res['mode']
         
-        return cls(file, regfile, bkregfile, attfile, xhdfile)
+        return cls(file, regfile, bkregfile, attfile, xhdfile, mode)
     
     
     @property
@@ -1306,6 +1417,12 @@ class swiftImage(Image):
     def xhdfile(self, new_xhdfile):
 
         self._xhdfile = new_xhdfile
+        
+    
+    @property
+    def mode(self):
+        
+        return self._mode
 
 
     @property
@@ -1385,12 +1502,9 @@ class swiftImage(Image):
             
     @property
     def lc_exps(self):
-        
-        curve_savepath = os.path.dirname(self.file) + '/curve'
-        
-        if not os.path.exists(curve_savepath):
-            os.makedirs(curve_savepath)
-            
+
+        curve_savepath = os.path.dirname(self.file) + f'/{self.prefix}curve'
+
         src_corrfile = curve_savepath + '/src.corr'
         
         if not os.path.exists(src_corrfile):
@@ -1398,7 +1512,8 @@ class swiftImage(Image):
             src_corr_curvefile = curve_savepath + '/src_corr.lc'
             src_instrfile = curve_savepath + '/src_srawinstr.img'
             
-            commands = [f'xrtlccorr clobber=yes', 
+            commands = ['xrtlccorr',
+                        'clobber=yes',
                         'regionfile=None',
                         f'lcfile={self.src_curvefile}',
                         f'outfile={src_corr_curvefile}',
@@ -1408,11 +1523,15 @@ class swiftImage(Image):
                         f'infile={self.file}',
                         f'hdfile={self.xhdfile}']
         
-            _, _ = self._run_comands(commands)
-            
+            stdout, stderr  = self._run_commands(commands)
+
+            if not os.path.exists(src_corrfile):
+                print(stdout)
+                print(stderr)
+
         hdu = fits.open(src_corrfile)
-        time_10s = np.array(hdu['LCCORRFACT']['TIME'])
-        factor_10s = np.array(hdu['LCCORRFACT']['CORRFACT'])
+        time_10s = np.array(hdu['LCCORRFACT'].data['TIME'])
+        factor_10s = np.array(hdu['LCCORRFACT'].data['CORRFACT'])
         
         diff = np.abs(self.lc_time[:, None] - time_10s[None, :])
         self.lc_factor = factor_10s[np.argmin(diff, axis=1)]
@@ -1469,14 +1588,15 @@ class swiftImage(Image):
 
             expfile = exposure_savepath + f'/{file_name}_ex.img'
 
-            commands = [f'xrtexpomap clobber=yes', 
+            commands = ['xrtexpomap', 
+                        'clobber=yes', 
                         f'infile={evtfile}',
                         f'attfile={self.attfile}',
                         f'hdfile={self.xhdfile}',
                         f'outdir={exposure_savepath}/',
                         f'stemout={file_name}']
             
-            stdout, stderr = self._run_comands(commands)
+            stdout, stderr = self._run_commands(commands)
             
             if std: 
                 print(stdout)
@@ -1489,7 +1609,8 @@ class swiftImage(Image):
 
             rsp_arffile = savepath + f'/{file_name}.arf'
 
-            commands = [f'xrtmkarf clobber=yes', 
+            commands = ['xrtmkarf', 
+                        'clobber=yes', 
                         f'expofile={expfile}',
                         f'phafile={src_specfile}',
                         'psfflag=yes',
@@ -1497,14 +1618,14 @@ class swiftImage(Image):
                         'srcx=-1',
                         'srcy=-1']
             
-            stdout, stderr = self._run_comands(commands)
+            stdout, stderr = self._run_commands(commands)
             
             if std: 
                 print(stdout)
                 print(stderr)
                 
             rsp_rmffile = savepath + f'/{file_name}.rmf'
-            date_time = swift_met_to_utc((scc_start + scc_stop) / 2)
+            date_time = swift_met_to_utc((scc_start + scc_stop) / 2, self.utcf)
             date = date_time.split('T')[0]
             time = date_time.split('T')[1]
 
@@ -1518,7 +1639,7 @@ class swiftImage(Image):
                         f'time={time}',
                         'expr=datamode.eq.windowed.and.grade.eq.G0:2.and.XRTVSUB.eq.6']
             
-            stdout, stderr = self._run_comands(commands)
+            stdout, stderr = self._run_commands(commands)
             
             copy(stdout.split()[0], rsp_rmffile)
             

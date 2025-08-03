@@ -517,16 +517,13 @@ class swiftRetrieve(Retrieve):
         local_dir = datapath + '/' + obsid
         
         ff = FileFinder(local_dir=local_dir + '/xrt/event')
+
+        evtgz_feature = f'sw{obsid}x{mode}*po_cl.evt.gz'
+        evtgz_file = ff.find(evtgz_feature)
+        evtgz = evtgz_file[-1] if evtgz_file else None
+        evt = evtgz[:-3]
         
-        try:
-            evt_feature = f'sw{obsid}x{mode}*po_cl.evt'
-            evt_file = ff.find(evt_feature)
-            evt = evt_file[-1] if evt_file else None
-        except:
-            evtgz_feature = f'sw{obsid}x{mode}*po_cl.evt.gz'
-            evtgz_file = ff.find(evtgz_feature)
-            evtgz = evtgz_file[-1] if evtgz_file else None
-            evt = evtgz[:-3]
+        if not os.path.exists(evt):
             with gzip.open(evtgz, 'rb') as f_in:
                 with open(evt, 'wb') as f_out:
                     shutil.copyfileobj(f_in, f_out)
@@ -545,7 +542,7 @@ class swiftRetrieve(Retrieve):
         xhd = xhd_file[-1] if xhd_file else None
         
         ff = FileFinder(local_dir=local_dir + '/auxil')
-        att_feature = 'sw*sat.fits.gz'
+        att_feature = 'sw*pat.fits.gz'
         att_file = ff.find(att_feature)
         att = att_file[-1] if att_file else None
 
@@ -566,15 +563,12 @@ class swiftRetrieve(Retrieve):
         local_dir = datapath + '/' + obsid
         
         ff = FileFinder(local_dir=local_dir + '/bat/event')
-        try:
-            ufevt_feature = 'sw*bevshsp_uf.evt'
-            ufevt_file = ff.find(ufevt_feature)
-            ufevt = ufevt_file[-1] if ufevt_file else None
-        except:
-            ufevtgz_feature = 'sw*bevshsp_uf.evt.gz'
-            ufevtgz_file = ff.find(ufevtgz_feature)
-            ufevtgz = ufevtgz_file[-1] if ufevtgz_file else None
-            ufevt = ufevtgz[:-3]
+        ufevtgz_feature = 'sw*bevshsp_uf.evt.gz'
+        ufevtgz_file = ff.find(ufevtgz_feature)
+        ufevtgz = ufevtgz_file[-1] if ufevtgz_file else None
+        ufevt = ufevtgz[:-3]
+        
+        if not os.path.exists(ufevt):
             with gzip.open(ufevtgz, 'rb') as f_in:
                 with open(ufevt, 'wb') as f_out:
                     shutil.copyfileobj(f_in, f_out)
