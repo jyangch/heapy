@@ -1,16 +1,22 @@
+from pathlib import Path
 from setuptools import setup, find_packages
 
 
 _info_ = {}
 with open("heapy/__info__.py", "r") as f:
     exec(f.read(), _info_)
+    
+    
+readme_path = Path(__file__).parent / "README.md"
+long_description = readme_path.read_text(encoding="utf-8")
 
 
 setup(
     name="heapyx",
     version=_info_['__version__'],
-    description="Astronomical data analysis tool",
-    long_description="A unified toolkit for timing and spectral analysis of X-ray and gamma-ray transient data",
+    description="High-energy (X-ray and gamma-ray) astronomical data analysis tools",
+    long_description=long_description,
+    long_description_content_type="text/markdown",
     author="Jun Yang",
     author_email="jyang@smail.nju.edu.cn",
     url="https://github.com/jyangch/heapy",
