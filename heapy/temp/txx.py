@@ -92,10 +92,10 @@ class pgTxx(PolyBase):
             return False
         
         if pstart is not None:
-            self.pstart[0] = pstart
+            self.pstart = np.array([pstart])
             
         if pstop is not None:
-            self.pstop[-1] = pstop
+            self.pstop = np.array([pstop])
 
         if lbkg is None:
             lbkg = np.inf

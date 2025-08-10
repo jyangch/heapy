@@ -73,7 +73,7 @@ class Event(object):
     @property
     def file(self):
         
-        return os.path.abspath(self._file)
+        return self._file
     
     
     @file.setter
@@ -1192,7 +1192,7 @@ class gbmTTE(Event):
         if self._posfile is None:
             return None
         else:
-            return os.path.abspath(self._posfile)
+            return self._posfile
 
 
     @posfile.setter
