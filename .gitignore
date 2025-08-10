@@ -45,10 +45,10 @@ Icon?
 # macOS-specific temp files
 *.swp
 
-# ignore tests
-tests/**
+# ignore examples
+examples/**
 
-# include .ipynb in tests
-!tests/**/*.ipynb
-!tests/
-!tests/*/
+# include .ipynb in examples
+!examples/**/*.ipynb
+!examples/
+!examples/*/
