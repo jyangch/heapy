@@ -8,7 +8,7 @@
 
 ## Prerequisites
 
-### `HEASoft`
+### HEASoft
 
 Heapy will invoke certain software and commands from HEASoft, such as `xselect` and `ximage`. Please ensure that [`HEASoft`](https://heasarc.gsfc.nasa.gov/docs/software/heasoft/#install) is correctly installed on your system, and that the [`Calibration Database`](https://heasarc.gsfc.nasa.gov/docs/heasarc/caldb/install.html) (CALDB) for the mission (e.g., `Swift`)  you are processing is also properly installed.
 
