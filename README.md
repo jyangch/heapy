@@ -2,7 +2,7 @@
 
 ### A unified toolkit for timing and spectral analysis of X-ray and gamma-ray transient data.
 
-[![PyPI - Version](https://img.shields.io/pypi/v/heapy?color=blue&logo=PyPI&logoColor=white&style=for-the-badge)](https://pypi.org/project/heapy/)
+[![PyPI - Version](https://img.shields.io/pypi/v/heapyx?color=blue&logo=PyPI&logoColor=white&style=for-the-badge)](https://pypi.org/project/heapyx/)
 [![License: GPL v3](https://img.shields.io/github/license/jyangch/heapy?color=blue&logo=open-source-initiative&logoColor=white&style=for-the-badge)](https://www.gnu.org/licenses/gpl-3.0)
 
 

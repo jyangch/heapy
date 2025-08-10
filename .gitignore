@@ -45,6 +45,11 @@ Icon?
 # macOS-specific temp files
 *.swp
 
+# distribute files
+*.egg-info/
+build/
+dist/
+
 # ignore examples
 examples/**
 

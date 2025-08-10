@@ -7,7 +7,7 @@ with open("heapy/__info__.py", "r") as f:
 
 
 setup(
-    name="heapy",
+    name="heapyx",
     version=_info_['__version__'],
     description="Astronomical data analysis tool",
     long_description="A unified toolkit for timing and spectral analysis of X-ray and gamma-ray transient data",
