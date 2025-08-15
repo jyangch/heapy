@@ -18,8 +18,8 @@ _Heapy_ obtains the orbital location and pointing information of `Fermi` by invo
 
 If you are using macOS with an Apple silicon chip, you may encounter difficulties compiling older versions of `matplotlib` (e.g., <= 3.2.1) when installing `gbm_data_tools`. One possible workaround is to first install a newer version of `matplotlib` (for example, version 3.8.4) and then install `gbm_data_tools` without performing dependency checks, using the following command:
 ```bash
-$ pip3 install matplotlib==3.8.4
-$ pip3 install --no-deps <path_to_tar>/gbm_data_tools-1.1.1.tar
+$ pip install matplotlib==3.8.4
+$ pip install --no-deps <path_to_tar>/gbm_data_tools-1.1.1.tar
 ```
 
 ### Fermi GBM Response Generator
