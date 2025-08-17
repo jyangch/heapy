@@ -1331,7 +1331,11 @@
         "xaxis": {
             "title": {
                 "text": "Time since 2024-02-19T06:21:42.000 (s)"
-            }
+            },
+            "range": [
+                -200,
+                300
+            ]
         },
         "yaxis": {
             "title": {

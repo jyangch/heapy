@@ -16,8 +16,10 @@ from ..data.retrieve import gbmRetrieve, gecamRetrieve, gridRetrieve
 from ..temp.txx import pgTxx
 from ..auto.polybase import PolyBase
 from ..util.file import copy, remove
+from ..util.time import grid_met_to_utc, grid_utc_to_met
+from ..util.time import fermi_met_to_utc, fermi_utc_to_met
+from ..util.time import gecam_met_to_utc, gecam_utc_to_met
 from ..util.data import msg_format, json_dump, rebin, union
-from ..util.time import fermi_met_to_utc, gecam_met_to_utc, grid_met_to_utc
 
 
 
@@ -131,10 +133,7 @@ class Event(object):
     @timezero.setter
     def timezero(self, new_timezero):
         
-        if isinstance(new_timezero, float):
-            self._timezero = new_timezero
-        else:
-            raise ValueError('not expected type for timezero')
+        self._timezero = new_timezero
         
         
     @property
@@ -1230,6 +1229,25 @@ class gbmTTE(Event):
     def pos_t1t2_list(self):
         
         return self._pos_t1t2_list
+    
+    
+    @property
+    def timezero(self):
+        
+        return self._timezero
+
+
+    @timezero.setter
+    def timezero(self, new_timezero):
+        
+        if isinstance(new_timezero, float):
+            self._timezero = new_timezero
+            
+        elif isinstance(new_timezero, str):
+            self._timezero = fermi_utc_to_met(new_timezero)
+            
+        else:
+            raise ValueError('not expected type for timezero')
 
 
     @property
@@ -1429,6 +1447,25 @@ class gecamEVT(Event):
     def instrument(self):
         
         return 'GRD'
+    
+    
+    @property
+    def timezero(self):
+        
+        return self._timezero
+
+
+    @timezero.setter
+    def timezero(self, new_timezero):
+        
+        if isinstance(new_timezero, float):
+            self._timezero = new_timezero
+            
+        elif isinstance(new_timezero, str):
+            self._timezero = gecam_utc_to_met(new_timezero)
+            
+        else:
+            raise ValueError('not expected type for timezero')
         
         
     @property
@@ -1580,6 +1617,25 @@ class gridTTE(Event):
     def instrument(self):
         
         return 'GRID'
+    
+    
+    @property
+    def timezero(self):
+        
+        return self._timezero
+
+
+    @timezero.setter
+    def timezero(self, new_timezero):
+        
+        if isinstance(new_timezero, float):
+            self._timezero = new_timezero
+            
+        elif isinstance(new_timezero, str):
+            self._timezero = grid_utc_to_met(new_timezero)
+            
+        else:
+            raise ValueError('not expected type for timezero')
         
         
     @property
@@ -1692,6 +1748,25 @@ class gridgroundTTE(Event):
     def instrument(self):
         
         return 'GRID'
+    
+    
+    @property
+    def timezero(self):
+        
+        return self._timezero
+
+
+    @timezero.setter
+    def timezero(self, new_timezero):
+        
+        if isinstance(new_timezero, float):
+            self._timezero = new_timezero
+            
+        elif isinstance(new_timezero, str):
+            self._timezero = grid_utc_to_met(new_timezero)
+            
+        else:
+            raise ValueError('not expected type for timezero')
         
         
     @property
