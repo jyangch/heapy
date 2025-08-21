@@ -41,6 +41,12 @@ setup(
     ],
     packages=find_packages(exclude=["examples*"]),
     include_package_data=True,
+    package_data={
+        "heapy": [
+            "docs/*",
+            "docs/**/*",
+        ]
+    },
     project_urls={
         "Source Code": "https://github.com/jyangch/heapy"
     }
