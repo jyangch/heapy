@@ -39,7 +39,7 @@ setup(
         "plotly>=5.22.0",
         "pybaselines>=1.1.0"
     ],
-    packages=find_packages(exclude=["examples*", "docs*"]),
+    packages=find_packages(exclude=["examples*"]),
     include_package_data=True,
     project_urls={
         "Source Code": "https://github.com/jyangch/heapy"
