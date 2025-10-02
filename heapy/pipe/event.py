@@ -742,7 +742,7 @@ class Event(object):
 
         
     def extract_rebin_curve(self, trange=None, stat='pgstat', min_sigma=None, min_evt=None, max_bin=None, 
-                            savepath='./curve', loglog=False, show=False):
+                            savepath='./curve', loglog=False, step=False, show=False):
         
         savepath = os.path.abspath(savepath)
         
@@ -777,6 +777,9 @@ class Event(object):
         self.lc_net_rerate = self.lc_net_rects / self.lc_reexps
         self.lc_net_rerate_err = self.lc_net_rects_err / self.lc_reexps
         
+        self.lc_retime_step = self.lc_rebin_list.flatten()
+        self.lc_net_rerate_step = np.repeat(self.lc_net_rerate, 2)
+        
         fig = go.Figure()
         net = go.Scatter(x=self.lc_retime, 
                          y=self.lc_net_rerate, 
@@ -793,8 +796,16 @@ class Event(object):
                              array=self.lc_net_rerate_err,
                              thickness=1.5,
                              width=0), 
-                         marker=dict(symbol='circle', size=3))
+                         marker=dict(color='#636EFA', symbol='circle', size=3))
         fig.add_trace(net)
+        
+        if step:
+            net_step = go.Scatter(x=self.lc_retime_step, 
+                                  y=self.lc_net_rerate_step, 
+                                  mode='lines', 
+                                  showlegend=False, 
+                                  line=dict(width=1.5, color='#636EFA'))
+            fig.add_trace(net_step)
         
         if loglog: 
             fig.update_xaxes(title_text=f'Time since {self.timezero_utc} (s)', type='log')
