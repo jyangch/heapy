@@ -45,9 +45,13 @@ class Polynomial(object):
 
     def val(self, x):
         x = np.array(x)
+        
+        if min(x) < min(self.x):
+            msg = "External interpolation may be imprecise: %f < %f" % (min(x), min(self.x))
+            warnings.warn(msg, InterpWarning, stacklevel=2)
 
-        if min(x) < min(self.x) or max(x) > max(self.x):
-            msg = "External interpolation may be imprecise"
+        if max(x) > max(self.x):
+            msg = "External interpolation may be imprecise: %f > %f" % (max(x), max(self.x))
             warnings.warn(msg, InterpWarning, stacklevel=2)
 
         assert self.ls_res is not None, 'you should first perform fitting'

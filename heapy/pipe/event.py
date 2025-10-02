@@ -4,6 +4,7 @@ import numpy as np
 from astropy import units
 from astropy import table
 from astropy.io import fits
+import plotly.express as px
 from astropy.time import Time
 import plotly.graph_objs as go
 from gbm_drm_gen.drmgen_tte import DRMGenTTE
@@ -24,6 +25,12 @@ from ..util.data import msg_format, json_dump, rebin, union
 
 
 class Event(object):
+    
+    colors = px.colors.qualitative.Plotly \
+        + px.colors.qualitative.D3 \
+            + px.colors.qualitative.G10 \
+                + px.colors.qualitative.T10 \
+                    + px.colors.qualitative.Alphabet
     
     def __init__(self, file):
         
@@ -762,6 +769,8 @@ class Event(object):
                     backscale=1)
                 
         self.lc_retime = np.mean(self.lc_rebin_list, axis=1)
+        self.lc_rebinsize = self.lc_rebin_list[:, 1] - self.lc_rebin_list[:, 0]
+        self.lc_retime_err = self.lc_rebinsize / 2
         self.lc_reexps = self.exposure(self.lc_rebin_list, dead=False)
         self.lc_net_rects = self.lc_src_rects - self.lc_bkg_rebcts
         self.lc_net_rects_err = np.sqrt(self.lc_src_rects_err ** 2 + self.lc_bkg_rebcts_err ** 2)
@@ -774,12 +783,17 @@ class Event(object):
                          mode='lines+markers', 
                          name='net lightcurve', 
                          showlegend=True, 
+                         error_x=dict(
+                             type='data',
+                             array=self.lc_retime_err, 
+                             thickness=1.5,
+                             width=0), 
                          error_y=dict(
                              type='data',
                              array=self.lc_net_rerate_err,
                              thickness=1.5,
                              width=0), 
-                         marker=dict(symbol='cross-thin', size=0))
+                         marker=dict(symbol='circle', size=3))
         fig.add_trace(net)
         
         if loglog: 
@@ -864,7 +878,7 @@ class Event(object):
             pha_hdu.writeto(savepath + f'/{file_name}')
             
             
-    def _extract_bkg_phaii(self, spec_slices, show=False):
+    def _extract_bkg_phaii(self, spec_slices, show=False, showall=None):
         
         num_slices = len(spec_slices)
         num_channels = len(self.channel)
@@ -910,6 +924,29 @@ class Event(object):
             
             brate_i, _ = bs_i.poly.val(interp_time)
             
+            if showall:
+                fig = go.Figure()
+                src = go.Scatter(x=bs_i.time, 
+                                 y=bs_i.rate, 
+                                 mode='lines', 
+                                 name='lightcurve', 
+                                 showlegend=True)
+                bkg = go.Scatter(x=interp_time, 
+                                 y=brate_i, 
+                                 mode='lines', 
+                                 name='background', 
+                                 showlegend=True)
+
+                fig.add_trace(src)
+                fig.add_trace(bkg)
+                
+                fig.update_xaxes(title_text=f'Time since {self.timezero_utc} (s)')
+                fig.update_yaxes(title_text=f'Counts per second')
+                fig.update_layout(template='plotly_white', height=600, width=800)
+                fig.update_layout(legend=dict(x=1, y=1, xanchor='right', yanchor='bottom'))
+                
+                fig.show()
+
             brate_sum = brate_sum + brate_i
             
             for j, (l, r) in enumerate(zip(lslices, rslices)):
@@ -937,6 +974,13 @@ class Event(object):
                          name='summing background', 
                          showlegend=True)
         
+        lslices = np.array(self.spec_slices)[:, 0]
+        rslices = np.array(self.spec_slices)[:, 1]
+
+        for i, slice in enumerate(self.spec_slices):
+            fig.add_vrect(x0=slice[0], x1=slice[1], fillcolor=Event.colors[i], 
+                          opacity=0.3, line_width=0)
+
         fig.add_trace(src)
         fig.add_trace(tot)
         fig.add_trace(sum)

@@ -1,6 +1,32 @@
 {
     "data": [
         {
+            "error_x": {
+                "array": [
+                    107.0,
+                    1.0,
+                    3.0,
+                    4.0,
+                    2.0,
+                    2.0,
+                    3.0,
+                    3.0,
+                    3.0,
+                    3.0,
+                    3.0,
+                    3.0,
+                    4.0,
+                    4.0,
+                    6.0,
+                    9.0,
+                    6.0,
+                    8.0,
+                    76.0
+                ],
+                "thickness": 1.5,
+                "type": "data",
+                "width": 0
+            },
             "error_y": {
                 "array": [
                     0.017111801174675173,
@@ -28,10 +54,10 @@
                 "width": 0
             },
             "marker": {
-                "size": 0,
-                "symbol": "cross-thin"
+                "size": 3,
+                "symbol": "circle"
             },
-            "mode": "lines+markers",
+            "mode": "markers",
             "name": "net lightcurve",
             "showlegend": true,
             "x": [

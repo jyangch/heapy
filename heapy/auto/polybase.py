@@ -86,8 +86,11 @@ class PolyBase(object):
             edges_ = bayesian_blocks(self.time[pos], self.cts[pos], fitness='events', p0=0.05)
         else:
             edges_ = bayesian_blocks(self.ts, fitness='events', p0=0.05)
+            
+        edges_[0] = max(edges_[0], self.time[0])
+        edges_[-1] = min(edges_[-1], self.time[-1])
 
-        edges = [self.time[0], edges_[0], edges_[-1], self.time[-1]]
+        edges = [edges_[0], edges_[-1]]
         for i in range(1, len(edges_) - 1, 1):
             flag1 = (edges_[i] - edges_[i-1]) > np.min(self.binsize) / 1.8
             flag2 = (edges_[i+1] - edges_[i]) > np.min(self.binsize) / 1.8

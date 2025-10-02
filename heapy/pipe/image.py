@@ -892,6 +892,7 @@ class Image(object):
                 
         self.lc_retime = np.mean(self.lc_rebin_list, axis=1)
         self.lc_rebinsize = self.lc_rebin_list[:, 1] - self.lc_rebin_list[:, 0]
+        self.lc_retime_err = self.lc_rebinsize / 2
         self.lc_net_rects = self.lc_src_rects - self.lc_bkg_rebcts * self.backscale
         self.lc_net_rects_err = np.sqrt(self.lc_src_rects_err ** 2 + (self.lc_bkg_rebcts_err * self.backscale) ** 2)
         self.lc_net_rerate = self.lc_net_rects / self.lc_rebinsize
@@ -900,15 +901,20 @@ class Image(object):
         fig = go.Figure()
         net = go.Scatter(x=self.lc_retime, 
                          y=self.lc_net_rerate, 
-                         mode='lines+markers', 
+                         mode='markers', 
                          name='net lightcurve', 
                          showlegend=True, 
+                         error_x=dict(
+                             type='data',
+                             array=self.lc_retime_err, 
+                             thickness=1.5,
+                             width=0), 
                          error_y=dict(
                              type='data',
                              array=self.lc_net_rerate_err,
                              thickness=1.5,
                              width=0), 
-                         marker=dict(symbol='cross-thin', size=0))
+                         marker=dict(symbol='circle', size=3))
         fig.add_trace(net)
         
         if loglog: 
