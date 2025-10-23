@@ -5,26 +5,19 @@ import numpy as np
 
 class Polynomial(object):
 
-    def __init__(self):
-        pass
+    def __init__(self, method='2pass'):
+        
+        self.method = method
 
 
     @classmethod
     def set_method(cls, method='2pass'):
         if method == '2pass':
             pass
-#             print(
-# '''
-# +-----------------+-----------+
-# | polyfit method  |   2pass   |
-# +-----------------+-----------+
-# ''')
         else:
             raise ValueError('invalid method')
         
-        cls_ = cls()
-        cls_.method = method
-        return cls_
+        return cls(method=method)
 
 
     def fit(self, x, y, deg=None, dx=None):
@@ -72,14 +65,9 @@ class Polynomial(object):
         rate = self.y
 
         if self.deg is None:
-            if len(time) <= 15:
-                self.deg = 0
-            elif 15 < len(time) <= 30:
-                self.deg = 1
-            elif 30 < len(time) <= 60:
-                self.deg = 2
-            else:
-                self.deg = 3
+            self.deg_list = [0, 1, 2, 3, 4]
+        else:
+            self.deg_list = [self.deg]
 
         if self.dx is None:
             dt = time[1] - time[0]
@@ -90,20 +78,31 @@ class Polynomial(object):
 
         variance = rate / dt
         zero = (variance <= 0)
+    
         weight = np.piecewise(variance,
                               condlist=[zero, ~zero],
-                              funclist=[lambda var: 1.0, lambda var: 1.0])  # uniform weight
-
-        for ipass in range(2):
-            self.ls_res = self.ls_polyfit(time, rate, self.deg, w=weight, cov=True)
-            self.mo, self.se = self.ls_polyval(time, coeff=self.ls_res['coeff'], covar=self.ls_res['covar'])
-
-            if ipass == 0:
-                variance = self.mo / dt
-                zero = (variance <= 0)
-                weight = np.piecewise(variance,
-                                      condlist=[zero, ~zero],
-                                      funclist=[lambda var: 0.0, lambda var: np.sqrt(1 / var)])
+                              funclist=[lambda var: 0.0, lambda var: np.sqrt(1 / var)])
+        weight = np.mean(weight) * np.ones_like(rate)  # uniform weight
+        
+        self.bic = np.inf
+        self.bic_list = []
+        for deg in self.deg_list:
+            for ipass in range(2):
+                ls_res = self.ls_polyfit(time, rate, deg, w=weight, cov=True)
+                mo, se = self.ls_polyval(time, coeff=ls_res['coeff'], covar=ls_res['covar'])
+                
+                if ipass == 0:
+                    variance = mo / dt
+                    zero = (variance <= 0)
+                    weight = np.piecewise(variance,
+                                          condlist=[zero, ~zero],
+                                          funclist=[lambda var: 0.0, lambda var: np.sqrt(1 / var)])
+                    
+            self.bic_list.append(ls_res['bic'])
+                    
+            if ls_res['bic'] < self.bic:
+                self.bic = ls_res['bic']
+                self.ls_res = ls_res
 
 
     @staticmethod
@@ -231,8 +230,13 @@ class Polynomial(object):
         if rank != order:
             msg = "Polyfit may be poorly conditioned"
             warnings.warn(msg, RankWarning, stacklevel=2)
+            
+        resids = resids[0]
+        aic = resids + 2 * order
+        bic = resids + order * np.log(len(x))
 
-        res = {'coeff': coeff, 'chi2': resids, 'rank': rank, 'svs': svs, 'rcond': rcond, 'dof': dof}
+        res = {'coeff': coeff, 'chi2': resids, 'rank': rank, 'svs': svs, 'rcond': rcond, 
+               'order': order,'dof': dof, 'aic': aic, 'bic': bic}
 
         if cov:
             # M^\beta (i.e. covar) = (X^TWX)^{-1} = (X'^TX)^{-1}
