@@ -783,7 +783,7 @@ class Event(object):
         fig = go.Figure()
         net = go.Scatter(x=self.lc_retime, 
                          y=self.lc_net_rerate, 
-                         mode='lines+markers', 
+                         mode='markers', 
                          name='net lightcurve', 
                          showlegend=True, 
                          error_x=dict(
@@ -889,7 +889,7 @@ class Event(object):
             pha_hdu.writeto(savepath + f'/{file_name}')
             
             
-    def _extract_bkg_phaii(self, spec_slices, show=False, showall=None):
+    def _extract_bkg_phaii(self, spec_slices, show=False, showall=False):
         
         num_slices = len(spec_slices)
         num_channels = len(self.channel)
