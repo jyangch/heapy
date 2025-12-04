@@ -3,6 +3,7 @@ import pandas as pd
 from astropy import table
 from astropy.io import fits
 from daily_search.zjh_location import zjh_loc
+
 from ..pipe.event import gbmTTE
 from ..data.retrieve import gbmRetrieve
 

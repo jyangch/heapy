@@ -1,11 +1,12 @@
 import os
-import shutil
 import subprocess
 import numpy as np
 from astropy.io import fits
 import plotly.graph_objs as go
+
 from ..data.retrieve import swiftRetrieve
 from ..temp.txx import ggTxx
+from ..auto.ggsignal import ggSignal
 from ..util.data import json_dump, rebin
 from ..util.time import swift_met_to_utc, swift_utc_to_met
 
@@ -112,6 +113,26 @@ class batPipe(object):
     def auxfile(self, new_auxfile):
         
         self._auxfile = new_auxfile
+        
+        
+    @property
+    def ra(self):
+        
+        hdu = fits.open(self.ufevtfile)
+        val = hdu['EVENTS'].header['RA_OBJ']
+        hdu.close()
+        
+        return val
+    
+    
+    @property
+    def dec(self):
+        
+        hdu = fits.open(self.ufevtfile)
+        val = hdu['EVENTS'].header['DEC_OBJ']
+        hdu.close()
+        
+        return val
 
 
     def _run_comands(self, commands):
@@ -127,7 +148,7 @@ class batPipe(object):
         return stdout, stderr
     
     
-    def bateconvert(self, std=False):
+    def _bateconvert(self, std=False):
         
         commands = ['bateconvert', 
                     f'infile={self.ufevtfile}',
@@ -143,7 +164,7 @@ class batPipe(object):
             print(stderr)
     
     
-    def batbinevt(self, std=False):
+    def _batbinevt(self, std=False):
         
         commands = ['batbinevt',
                     'weighted=no',
@@ -162,7 +183,7 @@ class batPipe(object):
             print(stderr)
     
     
-    def bathotpix(self, std=False):
+    def _bathotpix(self, std=False):
         
         commands = ['bathotpix',
                     f'detmask={self.detmaskfile}',
@@ -176,17 +197,14 @@ class batPipe(object):
             print(stderr)
     
     
-    def batmaskwtevt(self, std=False):
-        
-        ra = fits.open(self.ufevtfile)['EVENTS'].header['RA_OBJ']
-        dec = fits.open(self.ufevtfile)['EVENTS'].header['DEC_OBJ']
+    def _batmaskwtevt(self, std=False):
         
         commands = ['batmaskwtevt',
                     f'detmask={self.maskfile}',
                     f'infile={self.ufevtfile}',
                     f'attitude={self.attfile}',
-                    f'ra={ra}', 
-                    f'dec={dec}']
+                    f'ra={self.ra}', 
+                    f'dec={self.dec}']
         
         stdout, stderr = self._run_comands(commands)
         
@@ -208,18 +226,13 @@ class batPipe(object):
                 os.rmdir(self.general_savepath)
             os.makedirs(self.general_savepath)
                 
-            self.bateconvert()
-            self.batbinevt()
-            self.bathotpix()
-            self.batmaskwtevt()
+            self._bateconvert()
+            self._batbinevt()
+            self._bathotpix()
+            self._batmaskwtevt()
     
     
-    def batbinevt_image(self, savepath, std=False):
-        
-        self.dpi4file = savepath + '/grb_4.dpi'
-        
-        if os.path.exists(self.dpi4file):
-            os.remove(self.dpi4file)
+    def _batbinevt_image(self, std=False):
         
         commands = ['batbinevt', 
                     f'detmask={self.maskfile}', 
@@ -240,12 +253,7 @@ class batPipe(object):
             print(stderr)
     
     
-    def batfftimage(self, savepath, std=False):
-        
-        self.img4file = savepath + '/grb_4.img'
-        
-        if os.path.exists(self.img4file):
-            os.remove(self.img4file)
+    def _batfftimage(self, std=False):
         
         commands = ['batfftimage', 
                     f'detmask={self.maskfile}',
@@ -258,17 +266,22 @@ class batPipe(object):
         if std: 
             print(stdout)
             print(stderr)
-            
-            
-    def extract_image(self, savepath='./image', std=False):
+
+
+    def extract_image(self, std=False):
         
-        savepath = os.path.abspath(savepath)
+        self.dpi4file = self.general_savepath + '/grb_4.dpi'
         
-        if not os.path.exists(savepath):
-            os.makedirs(savepath)
+        if os.path.exists(self.dpi4file):
+            os.remove(self.dpi4file)
         
-        self.batbinevt_image(savepath=savepath, std=std)
-        self.batfftimage(savepath=savepath, std=std)
+        self.img4file = self.general_savepath + '/grb_4.img'
+        
+        if os.path.exists(self.img4file):
+            os.remove(self.img4file)
+        
+        self._batbinevt_image(std=std)
+        self._batfftimage(std=std)
         
         
     @property
@@ -435,51 +448,133 @@ class batPipe(object):
             self._lc_binsize = new_lc_binsize
         else:
             raise ValueError('lc_binsize is extected to be int, float or None')
+        
+        
+    @property
+    def lc_tstart(self):
+        
+        return self.lc_t1t2[0] + self.timezero + self.lc_binsize / 2
+    
+    
+    @property
+    def lc_tstop(self):
+        
+        return self.lc_t1t2[1] + self.timezero + self.lc_binsize / 2
+    
+    
+    @property
+    def lc_ebin(self):
+        
+        return f'{self.energy_filter[0]}-{self.energy_filter[1]}'
     
 
-    def batbinevt_curve(self, savepath, std=False):
-        
-        self.lcfile = savepath + '/grb.lc'
-        
-        if os.path.exists(self.lcfile):
-            os.remove(self.lcfile)
-        
-        tstart = self.lc_t1t2[0] + self.timezero
-        tstop = self.lc_t1t2[1] + self.timezero
-        ebin = f'{self.energy_filter[0]}-{self.energy_filter[1]}'
+    def _batbinevt_curve(self, std=False):
         
         commands = ['batbinevt',
                     f'detmask={self.maskfile}',
-                    f'tstart={tstart}',
-                    f'tstop={tstop}',
+                    f'tstart={self.lc_tstart}',
+                    f'tstop={self.lc_tstop}',
                     f'infile={self.ufevtfile}',
                     f'outfile={self.lcfile}',
                     'outtype=lc',
                     f'timedel={self.lc_binsize}',
                     'timebinalg=uniform',
-                    f'energybins={ebin}']
+                    f'energybins={self.lc_ebin}']
         
         stdout, stderr = self._run_comands(commands)
         
         if std: 
             print(stdout)
             print(stderr)
+            
+            
+    def _extract_curve(self, std=False):
+        
+        self.lcfile = self.general_savepath + '/grb.lc'
+        
+        if os.path.exists(self.lcfile):
+            os.remove(self.lcfile)
+            
+        self._batbinevt_curve(std=std)
+        
+        lc_hdu = fits.open(self.lcfile)
+        self.lc_time = np.array(lc_hdu['RATE'].data['TIME']) - self.timezero
+        self.lc_net_rate = np.array(lc_hdu['RATE'].data['RATE'])
+        self.lc_net_rate_err = np.array(lc_hdu['RATE'].data['ERROR'])
+        self.ngoodpix = lc_hdu['RATE'].header['NGOODPIX']
+        lc_hdu.close()
+        
+        lbins, rbins = self.lc_time - self.lc_binsize / 2, self.lc_time + self.lc_binsize / 2
+        self.lc_bin_list = np.vstack((lbins, rbins)).T
+        self.lc_bins = np.append(self.lc_time - self.lc_binsize / 2, self.lc_time[-1] + self.lc_binsize / 2)
+        
+        self.lc_net_crate = np.cumsum(self.lc_net_rate)
+        self.lc_net_cts = self.lc_net_rate * self.lc_binsize
+        self.lc_net_cts_err = self.lc_net_rate_err * self.lc_binsize
+        
+        
+    @property
+    def gs_p0(self):
+        
+        try:
+            self._gs_p0
+        except AttributeError:
+            return 0.05
+        else:
+            return self._gs_p0
 
 
-    def extract_curve(self, savepath='./curve', std=False, show=False):
+    @gs_p0.setter
+    def gs_p0(self, new_gs_p0):
+        
+        if isinstance(new_gs_p0, (float, int)):
+            self._gs_p0 = new_gs_p0
+        else:
+            raise ValueError('gs_p0 is extected to be float or int')
+    
+    
+    @property
+    def gs_sigma(self):
+        
+        try:
+            self._gs_sigma
+        except AttributeError:
+            return 3
+        else:
+            return self._gs_sigma
+
+
+    @gs_sigma.setter
+    def gs_sigma(self, new_gs_sigma):
+        
+        if isinstance(new_gs_sigma, (int, float)):
+            self._gs_sigma = new_gs_sigma
+        else:
+            raise ValueError('gs_sigma is extected to be int or float')
+    
+    
+    @property
+    def lc_gs(self):
+        
+        self._extract_curve()
+        
+        lc_gs = ggSignal(self.lc_net_cts, self.lc_net_cts_err, self.lc_bins)
+        lc_gs.loop(p0=self.gs_p0, sigma=self.gs_sigma)
+        
+        return lc_gs
+
+
+    def extract_curve(self, savepath='./curve', sig=True, std=False, show=False):
         
         savepath = os.path.abspath(savepath)
         
         if not os.path.exists(savepath):
             os.makedirs(savepath)
         
-        self.batbinevt_curve(savepath=savepath, std=std)
-        
-        lc_hdu = fits.open(self.lcfile)
-        self.lc_time = np.array(lc_hdu['RATE'].data['TIME']) - self.timezero
-        self.lc_net_rate = np.array(lc_hdu['RATE'].data['RATE'])
-        self.lc_net_rate_err = np.array(lc_hdu['RATE'].data['ERROR'])
-        self.lc_net_crate = np.cumsum(self.lc_net_rate)
+        if sig:
+            self.lc_gs.save(savepath=savepath + '/ggsignal')
+        else:
+            self._extract_curve(std=std)
         
         fig = go.Figure()
         net = go.Scatter(x=self.lc_time, 
@@ -521,23 +616,19 @@ class batPipe(object):
         json_dump(fig.to_dict(), savepath + '/cum_lc.json')
         
         
-    def calculate_txx(self, xx=0.9, pstart=None, pstop=None, lbkg=None, rbkg=None, 
-                      savepath='./duration', std=False):
+    def calculate_txx(self, mp=True, xx=0.9, pstart=None, pstop=None, 
+                      lbkg=None, rbkg=None, savepath='./curve/duration', std=False):
         
         savepath = os.path.abspath(savepath)
         
         if not os.path.exists(savepath):
             os.makedirs(savepath)
         
-        self.batbinevt_curve(savepath=savepath, std=std)
+        self._extract_curve(std=std)
         
-        lc_hdu = fits.open(self.lcfile)
-        self.lc_time = np.array(lc_hdu['RATE'].data['TIME']) - self.timezero
-        self.lc_net_cts = np.array(lc_hdu['RATE'].data['RATE']) * self.lc_binsize
-        self.lc_net_cts_err = np.array(lc_hdu['RATE'].data['ERROR']) * self.lc_binsize
-        
-        txx = ggTxx(self.lc_time, self.lc_net_cts, self.lc_net_cts_err)
-        txx.accumcts(xx=xx, pstart=pstart, pstop=pstop, lbkg=lbkg, rbkg=rbkg)
+        txx = ggTxx(self.lc_net_cts, self.lc_net_cts_err, self.lc_bins)
+        txx.find_pulse(p0=self.gs_p0, sigma=self.gs_sigma, mp=mp)
+        txx.calculate(xx=xx, pstart=pstart, pstop=pstop, lbkg=lbkg, rbkg=rbkg)
         txx.save(savepath=savepath)
 
 
@@ -549,18 +640,7 @@ class batPipe(object):
         if not os.path.exists(savepath):
             os.makedirs(savepath)
         
-        self.batbinevt_curve(savepath=savepath, std=std)
-        
-        lc_hdu = fits.open(self.lcfile)
-        self.lc_time = np.array(lc_hdu['RATE'].data['TIME']) - self.timezero
-        self.lc_net_rate = np.array(lc_hdu['RATE'].data['RATE'])
-        self.lc_net_rate_err = np.array(lc_hdu['RATE'].data['ERROR'])
-        
-        lbins, rbins = self.lc_time - self.lc_binsize / 2, self.lc_time + self.lc_binsize / 2
-        self.lc_bin_list = np.vstack((lbins, rbins)).T
-        
-        self.lc_net_cts = self.lc_net_rate * self.lc_binsize
-        self.lc_net_cts_err = self.lc_net_rate_err * self.lc_binsize
+        self._extract_curve(std=std)
         
         if trange is not None:
             idx = (self.lc_bin_list[:, 0] >= trange[0]) * (self.lc_bin_list[:, 1] <= trange[1])
@@ -634,27 +714,14 @@ class batPipe(object):
             raise ValueError('not expected spec_slices type')
         
         
-    def batbinevt_spectrum(self, l, r, savepath, std=False):
-        
-        tstart = self.timezero + l
-        tstop = self.timezero + r
-        
-        new_l = '{:+.2f}'.format(l).replace('-', 'm').replace('.', 'd').replace('+', 'p')
-        new_r = '{:+.2f}'.format(r).replace('-', 'm').replace('.', 'd').replace('+', 'p')
-        
-        file_name = '_'.join([new_l, new_r])
-        
-        specfile = savepath + f'/{file_name}.pha'
-        
-        if os.path.exists(specfile):
-            os.remove(specfile)
+    def batbinevt_spectrum(self, std=False):
     
         commands = ['batbinevt',
                     f'detmask={self.maskfile}',
-                    f'tstart={tstart}',
-                    f'tstop={tstop}',
+                    f'tstart={self.spec_tstart}',
+                    f'tstop={self.spec_tstop}',
                     f'infile={self.ufevtfile}',
-                    f'outfile={specfile}',
+                    f'outfile={self.specfile}',
                     'outtype=pha',
                     'timedel=0',
                     'timebinalg=uniform',
@@ -667,7 +734,7 @@ class batPipe(object):
             print(stderr)
             
         commands = ['batphasyserr',
-                    f'infile={specfile}',
+                    f'infile={self.specfile}',
                     'syserrfile=CALDB']
     
         stdout, stderr = self._run_comands(commands)
@@ -677,7 +744,7 @@ class batPipe(object):
             print(stderr)
             
         commands = ['batupdatephakw',
-                    f'infile={specfile}',
+                    f'infile={self.specfile}',
                     f'auxfile={self.auxfile}']
     
         stdout, stderr = self._run_comands(commands)
@@ -687,26 +754,11 @@ class batPipe(object):
             print(stderr)
             
             
-    def batdrmgen(self, l, r, savepath, std=False):
-        
-        new_l = '{:+.2f}'.format(l).replace('-', 'm').replace('.', 'd').replace('+', 'p')
-        new_r = '{:+.2f}'.format(r).replace('-', 'm').replace('.', 'd').replace('+', 'p')
-        
-        file_name = '_'.join([new_l, new_r])
-        
-        specfile = savepath + f'/{file_name}.pha'
-        
-        if not os.path.exists(specfile):
-            self.batbinevt_spectrum(l, r, savepath=savepath, std=std)
-        
-        respfile = savepath + f'/{file_name}.rsp'
-        
-        if os.path.exists(respfile):
-            os.remove(respfile)
+    def batdrmgen(self, std=False):
             
         commands = ['batdrmgen',
-                    f'infile={specfile}',
-                    f'outfile={respfile}']
+                    f'infile={self.specfile}',
+                    f'outfile={self.respfile}']
     
         stdout, stderr = self._run_comands(commands)
         
@@ -727,7 +779,20 @@ class batPipe(object):
         
         for l, r in zip(lslices, rslices):
             
-            self.batbinevt_spectrum(l, r, savepath=savepath, std=std)
+            self.spec_tstart = self.timezero + l
+            self.spec_tstop = self.timezero + r
+            
+            new_l = '{:+.2f}'.format(l).replace('-', 'm').replace('.', 'd').replace('+', 'p')
+            new_r = '{:+.2f}'.format(r).replace('-', 'm').replace('.', 'd').replace('+', 'p')
+            
+            file_name = '_'.join([new_l, new_r])
+            
+            self.specfile = savepath + f'/{file_name}.pha'
+            
+            if os.path.exists(self.specfile):
+                os.remove(self.specfile)
+            
+            self.batbinevt_spectrum(std=std)
             
             
     def extract_response(self, savepath='./spectrum', std=False):
@@ -741,5 +806,23 @@ class batPipe(object):
         rslices = np.array(self.spec_slices)[:, 1]
         
         for l, r in zip(lslices, rslices):
+            
+            self.spec_tstart = self.timezero + l
+            self.spec_tstop = self.timezero + r
+            
+            new_l = '{:+.2f}'.format(l).replace('-', 'm').replace('.', 'd').replace('+', 'p')
+            new_r = '{:+.2f}'.format(r).replace('-', 'm').replace('.', 'd').replace('+', 'p')
+            
+            file_name = '_'.join([new_l, new_r])
+            
+            self.specfile = savepath + f'/{file_name}.pha'
+            
+            if not os.path.exists(self.specfile):
+                self.batbinevt_spectrum(std=std)
+            
+            self.respfile = savepath + f'/{file_name}.rsp'
+            
+            if os.path.exists(self.respfile):
+                os.remove(self.respfile)
 
-            self.batdrmgen(l, r, savepath=savepath, std=std)
+            self.batdrmgen(std=std)

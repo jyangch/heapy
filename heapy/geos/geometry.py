@@ -4,6 +4,7 @@ from gbm.data import PosHist
 import matplotlib.pyplot as plt
 from gbm.plot.lib import sky_point
 from gbm.plot import SkyPlot, EarthPlot
+
 from ..data.retrieve import gbmRetrieve
 
 

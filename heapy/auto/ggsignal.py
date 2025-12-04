@@ -5,31 +5,21 @@ import matplotlib.pyplot as plt
 from matplotlib import rcParams
 from astropy.stats import bayesian_blocks
 
-from ..util.significance import ppsig
-from ..util.data import msg_format, json_dump
+from ..util.data import json_dump
 
 
 
-class ppSignal(object):
+class ggSignal(object):
     
     """
-    NOTE: only apply to possion data with possion background
+    NOTE: only apply to gaussian data
     """
 
-    def __init__(self, ts, bts, bins, backscale=1, exp=None):
-        
-        self.ts = np.array(ts).astype(float)
-        self.bts = np.array(bts).astype(float)
-        self.bins = np.array(bins).astype(float)
-        self.backscale = backscale
+    def __init__(self, cts, cts_err, bins, exp=None):
 
-        cts, _ = np.histogram(self.ts, bins=self.bins)
-        self.cts = np.array(cts).astype(int)
-        self.cts_err = np.sqrt(self.cts)
-        
-        bcts, _ = np.histogram(self.bts, bins=self.bins)
-        self.bcts = np.array(bcts).astype(int)
-        self.bcts_err = np.sqrt(self.bcts)
+        self.cts = np.array(cts)
+        self.cts_err = np.array(cts_err)
+        self.bins = np.array(bins).astype(float)
 
         self.lbins = self.bins[:-1]
         self.rbins = self.bins[1:]
@@ -47,20 +37,10 @@ class ppSignal(object):
         self.time = (self.lbins + self.rbins) / 2
         self.rate = self.cts / self.exp
         self.rate_err = self.cts_err / self.exp
-        
-        self.bak = self.bcts * self.backscale / self.exp
-        self.bak_err = self.bcts_err * self.backscale / self.exp
 
-        self.net = self.rate - self.bak
-        self.net_err = np.sqrt(self.rate_err**2 + self.bak_err**2)
-        
-        self.ncts = self.net * self.exp
-        self.ncts_err = self.net_err * self.exp
-
-        self.ini_res = {'cts': self.cts, 'bcts': self.bcts, 
+        self.ini_res = {'cts': self.cts, 'cts_err': self.cts_err,
                         'time': self.time, 'rate': self.rate, 
-                        'bak': self.bak, 'exp': self.exp, 
-                        'backscale': self.backscale, 'bins': self.bins}
+                        'exp': self.exp, 'bins': self.bins}
 
         # bblock method
         self.block_res = None
@@ -70,41 +50,11 @@ class ppSignal(object):
 
         # fetsig method
         self.sort_res = None
-
-
-    @classmethod
-    def frombin(cls, cts, bcts, bins, backscale=1, exp=None):
-        
-        cts = np.array(cts)
-        bcts = np.array(bcts)
-        bins = np.array(bins)
-
-        if bins.size != (cts.size + 1):
-            raise TypeError("expected size(bins) = size(cts)+1")
-        
-        msg = 'rebuilt the time list, but may not accurate'
-        warnings.warn(msg_format(msg), UserWarning, stacklevel=2)
-        
-        ts = np.array([])
-        bts = np.array([])
-        
-        for t1, t2, n in zip(bins[:-1], bins[1:], cts):
-            ts = np.append(ts, np.random.random(size=int(n)) * (t2 - t1) + t1)
-            
-        for t1, t2, n in zip(bins[:-1], bins[1:], bcts):
-            bts = np.append(bts, np.random.random(size=int(n)) * (t2 - t1) + t1)
-
-        cls_ = cls(ts, bts, bins, backscale=backscale, exp=exp)
-        return cls_
     
     
     def bblock(self, p0=0.05):
         
-        if len(self.ts) <= 1e4:
-            edges_ = bayesian_blocks(self.ts, fitness='events', p0=p0)
-        else:
-            pos = np.where(self.cts > 0)[0]
-            edges_ = bayesian_blocks(self.time[pos], self.cts[pos], fitness='events', p0=p0)
+        edges_ = bayesian_blocks(self.time, self.rate, self.rate_err, fitness='measures', p0=p0)
             
         edges_[0] = max(edges_[0], self.time[0])
         edges_[-1] = min(edges_[-1], self.time[-1])
@@ -126,36 +76,39 @@ class ppSignal(object):
         
         if self.block_res is None: self.bblock()
         
-        self.re_cts, _ = np.histogram(self.ts, bins=self.edges)
-        self.re_bcts, _ = np.histogram(self.bts, bins=self.edges)
+        self.re_cts, self.re_cts_err = [], []
+        for t1, t2 in zip(self.edges[:-1], self.edges[1:]):
+            self.re_cts.append(np.sum(self.cts[(self.time >= t1) & (self.time < t2)]))
+            self.re_cts_err.append(np.sqrt(np.sum(self.cts_err[(self.time >= t1) & (self.time < t2)]**2)))
+        self.re_cts = np.array(self.re_cts)
+        self.re_cts_err = np.array(self.re_cts_err)
 
         self.snr = np.zeros_like(self.binsize)
         for i in range(len(self.binsize)):
             cts_i = self.cts[i]
-            bcts_i = self.bcts[i]
+            cts_err_i = self.cts_err[i]
             
-            if bcts_i < 0 or cts_i < 0:
+            if cts_err_i <= 0:
                 snr_i = -5      # bad events
             else:
-                snr_i = ppsig(cts_i, bcts_i, self.backscale)
+                snr_i = cts_i / cts_err_i
 
             self.snr[i] = snr_i
             
         self.re_snr = np.zeros_like(self.re_binsize)
         for i in range(len(self.re_binsize)):
             cts_i = self.re_cts[i]
-            bcts_i = self.re_bcts[i]
+            cts_err_i = self.re_cts_err[i]
 
-            if bcts_i < 0 or cts_i < 0:
+            if cts_err_i <= 0:
                 snr_i = -5      # bad events
             else:
-                snr_i = ppsig(cts_i, bcts_i, self.backscale)
+                snr_i = cts_i / cts_err_i
 
             self.re_snr[i] = snr_i
 
         self.snr_res = {'snr': self.snr, 're_snr': self.re_snr, 
-                        'cts': self.cts, 'bcts': self.bcts, 
-                        're_cts': self.re_cts, 're_bcts': self.re_bcts}
+                        're_cts': self.re_cts, 're_cts_err': self.re_cts_err}
         
         
     def sorting(self, sigma=3):
@@ -244,7 +197,6 @@ class ppSignal(object):
         ax.plot(self.time, self.rate, lw=1.0, c='b', label='Light curve')
         ax.plot(self.edges, np.append(self.re_cts/self.re_binsize, [(self.re_cts/self.re_binsize)[-1]]), 
                 lw=1.0, c='c', drawstyle='steps-post', label='Bayesian block')
-        ax.plot(self.time, self.bak, lw=1.0, c='r', label='Background')
         ax.set_xlim([min(self.time), max(self.time)])
         ax.set_xlabel('Time')
         ax.set_ylabel('Rate')
@@ -260,7 +212,7 @@ class ppSignal(object):
         plt.close(fig)
 
         fig, ax = plt.subplots(1, 1, figsize=(8, 5))
-        p1, = ax.plot(self.time, self.net, lw=1.0, c='k', label='Net light curve')
+        p1, = ax.plot(self.time, self.rate, lw=1.0, c='k', label='light curve')
         ax.set_xlim([min(self.time), max(self.time)])
         ax.set_xlabel('Time')
         ax.set_ylabel('Rate')
@@ -280,8 +232,8 @@ class ppSignal(object):
         ax1.set_xlim([min(self.time), max(self.time)])
         ax1.set_ylabel('SNR')
         
-        ratio = np.max(self.net) / np.max(self.re_snr)
-        ax_ylim = [1.5 * np.min(self.net), 1.1 * np.max(self.net)]
+        ratio = np.max(self.rate) / np.max(self.re_snr)
+        ax_ylim = [1.5 * np.min(self.rate), 1.1 * np.max(self.rate)]
         ax1_ylim = [lim / ratio for lim in ax_ylim]
         ax.set_ylim(ax_ylim)
         ax1.set_ylim(ax1_ylim)
@@ -298,7 +250,6 @@ class ppSignal(object):
             if i in self.re_bad_idx: colors.append('k')
         ax.bar((self.edges[:-1]+self.edges[1:])/2, self.re_cts/self.re_binsize, bottom=0, width=self.re_binsize, color=colors)
         ax.plot(self.time, self.rate, lw=1.0, c='b', label='Light curve')
-        ax.plot(self.time, self.bak, lw=1.0, c='r', label='Background')
         ax.set_xlim([min(self.time), max(self.time)])
         ax.set_xlabel('Time')
         ax.set_ylabel('Rate')

@@ -7,6 +7,7 @@ from astropy.io import fits
 import plotly.graph_objs as go
 from plotly.subplots import make_subplots
 docs_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + '/docs'
+
 from .filter import Filter
 from ..data.retrieve import epRetrieve, swiftRetrieve
 from ..temp.txx import ppTxx
@@ -731,6 +732,26 @@ class Image(object):
     
     
     @property
+    def ps_p0(self):
+        
+        try:
+            self._ps_p0
+        except AttributeError:
+            return 0.05
+        else:
+            return self._ps_p0
+
+
+    @ps_p0.setter
+    def ps_p0(self, new_ps_p0):
+        
+        if isinstance(new_ps_p0, (float, int)):
+            self._ps_p0 = new_ps_p0
+        else:
+            raise ValueError('ps_p0 is extected to be float or int')
+    
+    
+    @property
     def ps_sigma(self):
         
         try:
@@ -754,7 +775,7 @@ class Image(object):
     def lc_ps(self):
         
         lc_ps = ppSignal(self.src_ts, self.bkg_ts, self.lc_bins, backscale=self.backscale)
-        lc_ps.loop(sigma=self.ps_sigma)
+        lc_ps.loop(p0=self.ps_p0, sigma=self.ps_sigma)
         
         return lc_ps
         
@@ -858,8 +879,8 @@ class Image(object):
             os.makedirs(savepath)
         
         txx = ppTxx(self.src_ts, self.bkg_ts, self.lc_bins, self.backscale)
-        txx.findpulse(sigma=self.ps_sigma, mp=mp)
-        txx.accumcts(xx=xx, pstart=pstart, pstop=pstop, lbkg=lbkg, rbkg=rbkg)
+        txx.find_pulse(p0=self.ps_p0, sigma=self.ps_sigma, mp=mp)
+        txx.calculate(xx=xx, pstart=pstart, pstop=pstop, lbkg=lbkg, rbkg=rbkg)
         txx.save(savepath=savepath)
         
         

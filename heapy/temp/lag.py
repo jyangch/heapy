@@ -7,6 +7,7 @@ from matplotlib import rcParams
 from scipy.optimize import curve_fit
 from scipy.interpolate import CubicSpline
 from astropy.stats import sigma_clip, mad_std
+
 from ..util.data import json_dump
 
 
@@ -69,12 +70,12 @@ class Lag(CCF):
                  xcts, 
                  ycts, 
                  dt,
-                 xcts_se=None,
-                 ycts_se=None,
+                 xcts_err=None,
+                 ycts_err=None,
                  xbcts=None,
                  ybcts=None,
-                 xbcts_se=None,
-                 ybcts_se=None,
+                 xbcts_err=None,
+                 ybcts_err=None,
                  xtype='pg', 
                  ytype='pg', 
                  mc=True, 
@@ -94,6 +95,7 @@ class Lag(CCF):
         
         self.mc = mc
         self.nmc = nmc
+        self.nsample = len(self.xcts)
         
         if self.mc:
         
@@ -101,103 +103,103 @@ class Lag(CCF):
             self.ytype = ytype
             
             if xtype == 'pg':
-                if xcts_se is None:
-                    self.xcts_se = np.sqrt(xcts)
+                if xcts_err is None:
+                    self.xcts_err = np.sqrt(xcts)
                 else:
-                    self.xcts_se = xcts_se
+                    self.xcts_err = xcts_err
                     
                 if xbcts is None:
                     raise ValueError('unknown xbcts')
                 else:
                     self.xbcts = xbcts
                     
-                if xbcts_se is None:
-                    raise ValueError('unknown xbcts_se')
+                if xbcts_err is None:
+                    raise ValueError('unknown xbcts_err')
                 else:
-                    self.xbcts_se = xbcts_se
+                    self.xbcts_err = xbcts_err
             
             elif xtype == 'pp':
-                if xcts_se is None:
-                    self.xcts_se = np.sqrt(xcts)
+                if xcts_err is None:
+                    self.xcts_err = np.sqrt(xcts)
                 else:
-                    self.xcts_se = xcts_se
+                    self.xcts_err = xcts_err
                     
                 if xbcts is None:
                     raise ValueError('unknown xbcts')
                 else:
                     self.xbcts = xbcts
                     
-                if xbcts_se is None:
-                    self.xbcts_se = np.sqrt(xbcts)
+                if xbcts_err is None:
+                    self.xbcts_err = np.sqrt(xbcts)
                 else:
-                    self.xbcts_se = xbcts_se
+                    self.xbcts_err = xbcts_err
                     
             elif xtype == 'gg':
-                if xcts_se is None:
-                    raise ValueError('unknown xcts_se')
+                if xcts_err is None:
+                    raise ValueError('unknown xcts_err')
                 else:
-                    self.xcts_se = xcts_se
+                    self.xcts_err = xcts_err
                     
                 if xbcts is None:
                     self.xbcts = np.zeros_like(xcts)
                 else:
                     self.xbcts = xbcts
                     
-                if xbcts_se is None:
-                    self.xbcts_se = np.zeros_like(xcts)
+                if xbcts_err is None:
+                    self.xbcts_err = np.zeros_like(xcts)
                 else:
-                    self.xbcts_se = xbcts_se
+                    self.xbcts_err = xbcts_err
                     
             else:
                 raise ValueError('unknown xtype')
                 
             if ytype == 'pg':
-                if ycts_se is None:
-                    self.ycts_se = np.sqrt(ycts)
+                if ycts_err is None:
+                    self.ycts_err = np.sqrt(ycts)
                 else:
-                    self.ycts_se = ycts_se
+                    self.ycts_err = ycts_err
                     
                 if ybcts is None:
                     raise ValueError('unknown ybcts')
                 else:
                     self.ybcts = ybcts
                     
-                if ybcts_se is None:
-                    raise ValueError('unknown ybcts_se')
+                if ybcts_err is None:
+                    raise ValueError('unknown ybcts_err')
                 else:
-                    self.ybcts_se = ybcts_se
+                    self.ybcts_err = ybcts_err
             
             elif ytype == 'pp':
-                if ycts_se is None:
-                    self.ycts_se = np.sqrt(ycts)
+                if ycts_err is None:
+                    self.ycts_err = np.sqrt(ycts)
                 else:
-                    self.ycts_se = ycts_se
+                    self.ycts_err = ycts_err
                     
                 if ybcts is None:
                     raise ValueError('unknown ybcts')
                 else:
                     self.ybcts = ybcts
                     
-                if ybcts_se is None:
-                    self.ybcts_se = np.sqrt(ybcts)
+                if ybcts_err is None:
+                    self.ybcts_err = np.sqrt(ybcts)
                 else:
-                    self.ybcts_se = ybcts_se
+                    self.ybcts_err = ybcts_err
                     
             elif ytype == 'gg':
-                if ycts_se is None:
-                    raise ValueError('unknown ycts_se')
+                if ycts_err is None:
+                    raise ValueError('unknown ycts_err')
                 else:
-                    self.ycts_se = ycts_se
+                    self.ycts_err = ycts_err
                     
                 if ybcts is None:
                     self.ybcts = np.zeros_like(ycts)
                 else:
                     self.ybcts = ybcts
                     
-                if ybcts_se is None:
-                    self.ybcts_se = np.zeros_like(ycts)
+                if ybcts_err is None:
+                    self.ybcts_err = np.zeros_like(ycts)
                 else:
-                    self.ybcts_se = ybcts_se
+                    self.ybcts_err = ybcts_err
                     
             else:
                 raise ValueError('unknown ytype')
@@ -205,10 +207,7 @@ class Lag(CCF):
             self.xncts = self.xcts - self.xbcts
             self.yncts = self.ycts - self.ybcts
             
-            self.mc_xncts = [self.xncts]
-            self.mc_yncts = [self.yncts]
-            
-            self._mc_simulation(self.nmc)
+            self._mc_simulation()
             
         else:
             self.xncts = xcts
@@ -233,37 +232,35 @@ class Lag(CCF):
         return gaussian_l * (x <= mu) + gaussian_r * (x > mu)
 
 
-    def _mc_simulation(self, nmc):
+    def _mc_simulation(self):
         
-        self.nmc = int(nmc)
-        self.N = len(self.xcts)
-        for _ in range(self.nmc):
-            if self.xtype == 'pg':
-                xmc = np.random.poisson(lam=self.xcts) \
-                    - (self.xbcts_se * np.random.randn(self.N) + self.xbcts)
-            elif self.xtype == 'pp':
-                xmc = np.random.poisson(lam=self.xcts) \
-                    - np.random.poisson(lam=self.xbcts)
-            elif self.xtype == 'gg':
-                xmc = (self.xcts + self.xcts_se * np.random.randn(self.N)) \
-                    - (self.xbcts + self.xbcts_se * np.random.randn(self.N))
-            else:
-                raise TypeError("invalid xtype")
+        if self.xtype == 'pg':
+            xsrc_sample = np.random.poisson(lam=self.xcts, size=(self.nmc, self.nsample))
+            xbkg_sample = np.random.normal(loc=self.xbcts, scale=self.xbcts_err, size=(self.nmc, self.nsample))
+        elif self.xtype == 'pp':
+            xsrc_sample = np.random.poisson(lam=self.xcts, size=(self.nmc, self.nsample))
+            xbkg_sample = np.random.poisson(lam=self.xbcts, size=(self.nmc, self.nsample))
+        elif self.xtype == 'gg':
+            xsrc_sample = np.random.normal(loc=self.xcts, scale=self.xcts_err, size=(self.nmc, self.nsample))
+            xbkg_sample = np.random.normal(loc=self.xbcts, scale=self.xbcts_err, size=(self.nmc, self.nsample))
+        else:
+            raise TypeError("invalid xtype")
+        
+        self.mc_xncts = np.vstack([self.xncts, xsrc_sample - xbkg_sample])
+        
+        if self.ytype == 'pg':
+            ysrc_sample = np.random.poisson(lam=self.ycts, size=(self.nmc, self.nsample))
+            ybkg_sample = np.random.normal(loc=self.ybcts, scale=self.ybcts_err, size=(self.nmc, self.nsample))
+        elif self.ytype == 'pp':
+            ysrc_sample = np.random.poisson(lam=self.ycts, size=(self.nmc, self.nsample))
+            ybkg_sample = np.random.poisson(lam=self.ybcts, size=(self.nmc, self.nsample))
+        elif self.ytype == 'gg':
+            ysrc_sample = np.random.normal(loc=self.ycts, scale=self.ycts_err, size=(self.nmc, self.nsample))
+            ybkg_sample = np.random.normal(loc=self.ybcts, scale=self.ybcts_err, size=(self.nmc, self.nsample))
+        else:
+            raise TypeError("invalid ytype")
 
-            if self.ytype == 'pg':
-                ymc = np.random.poisson(lam=self.ycts) \
-                    - (self.ybcts_se * np.random.randn(self.N) + self.ybcts)
-            elif self.ytype == 'pp':
-                ymc = np.random.poisson(lam=self.ycts) \
-                    - np.random.poisson(lam=self.ybcts)
-            elif self.ytype == 'gg':
-                ymc = (self.ycts + self.ycts_se * np.random.randn(self.N)) \
-                    - (self.ybcts + self.ybcts_se * np.random.randn(self.N))
-            else:
-                raise TypeError("invalid ytype")
-            
-            self.mc_xncts.append(xmc)
-            self.mc_yncts.append(ymc)
+        self.mc_yncts = np.vstack([self.yncts, ysrc_sample - ybkg_sample])
 
 
     def calculate(self, width=3, method='polyfit'):
