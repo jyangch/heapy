@@ -4,6 +4,7 @@ import shutil
 import warnings
 import pandas as pd
 from astropy.time import Time, TimeDelta
+
 from .filefinder import FileFinder
 from ..util.data import msg_format
 

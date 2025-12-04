@@ -12,6 +12,7 @@ from astropy.units import UnitsWarning
 warnings.simplefilter('ignore', UnitsWarning)
 from astropy.utils.metadata import MergeConflictWarning
 warnings.simplefilter('ignore', MergeConflictWarning)
+
 from .filter import Filter
 from ..data.retrieve import gbmRetrieve, gecamRetrieve, gridRetrieve
 from ..temp.txx import pgTxx
@@ -338,29 +339,6 @@ class Event(object):
             self._spec_t1t2 = new_spec_t1t2
         else:
             raise ValueError('spec_t1t2 is extected to be list or None')
-        
-        
-    @property
-    def ignore_t1t2(self):
-        
-        try:
-            self._ignore_t1t2
-        except AttributeError:
-            return None
-        else:
-            if self._ignore_t1t2 is not None:
-                return self._ignore_t1t2
-            else:
-                return None
-
-
-    @ignore_t1t2.setter
-    def ignore_t1t2(self, new_ignore_t1t2):
-        
-        if isinstance(new_ignore_t1t2, (list, type(None))):
-            self._ignore_t1t2 = new_ignore_t1t2
-        else:
-            raise ValueError('ignore_t1t2 is extected to be list or None')
     
     
     @property
@@ -473,7 +451,7 @@ class Event(object):
                 return binsize
 
 
-    def exposure(self, bin_list, dead=True):
+    def calc_exposure(self, bin_list, dead=True):
         
         ts = self._ts
         dtime = self._dtime
@@ -508,7 +486,7 @@ class Event(object):
     @property
     def lc_exps(self):
         
-        return self.exposure(self.lc_bin_list, dead=False)
+        return self.calc_exposure(self.lc_bin_list, dead=False)
     
     
     @property
@@ -550,6 +528,49 @@ class Event(object):
     
     
     @property
+    def bs_ignore(self):
+        
+        try:
+            self._bs_ignore
+        except AttributeError:
+            return None
+        else:
+            if self._bs_ignore is not None:
+                return self._bs_ignore
+            else:
+                return None
+
+
+    @bs_ignore.setter
+    def bs_ignore(self, new_bs_ignore):
+        
+        if isinstance(new_bs_ignore, (list, type(None))):
+            self._bs_ignore = new_bs_ignore
+        else:
+            raise ValueError('bs_ignore is extected to be list or None')
+
+
+    @property
+    def bs_p0(self):
+        
+        try:
+            self._bs_p0
+        except AttributeError:
+            return 0.05
+        else:
+            return self._bs_p0
+
+
+    @bs_p0.setter
+    def bs_p0(self, new_bs_p0):
+        
+        if isinstance(new_bs_p0, (float, int)):
+            self._bs_p0 = new_bs_p0
+        else:
+            raise ValueError('bs_p0 is extected to be float or int')
+    
+    
+    @property
     def bs_sigma(self):
         
         try:
@@ -587,18 +608,27 @@ class Event(object):
             self._bs_deg = new_bs_deg
         else:
             raise ValueError('bs_deg is extected to be int or None')
-    
-    
+        
+        
+    def calc_autobs(self):
+        
+        self._lc_bs = PolyBase(self.lc_ts, self.lc_bins, self.lc_exps, self.bs_ignore)
+        self._lc_bs.loop(p0=self.bs_p0, sigma=self.bs_sigma, deg=self.bs_deg)
+        self._lc_bs.loop(p0=self.bs_p0, sigma=self.bs_sigma, deg=self.bs_deg)
+
+
     @property
     def lc_bs(self):
         
-        lc_bs = PolyBase(self.lc_ts, self.lc_bins, self.lc_exps, self.ignore_t1t2)
-        lc_bs.loop(sigma=self.bs_sigma, deg=self.bs_deg)
-        lc_bs.loop(sigma=self.bs_sigma, deg=self.bs_deg)
-        
-        return lc_bs
-    
-    
+        try:
+            self._lc_bs
+        except AttributeError:
+            self.calc_autobs()
+            return self._lc_bs
+        else:
+            return self._lc_bs
+
+
     @property
     def lc_bkg_rate(self):
         
@@ -735,9 +765,9 @@ class Event(object):
         if not os.path.exists(savepath):
             os.makedirs(savepath)
         
-        txx = pgTxx(self.lc_ts, self.lc_bins, self.lc_exps, self.ignore_t1t2)
-        txx.findpulse(sigma=self.bs_sigma, deg=self.bs_deg, mp=mp)
-        txx.accumcts(xx=xx, pstart=pstart, pstop=pstop, lbkg=lbkg, rbkg=rbkg)
+        txx = pgTxx(self.lc_ts, self.lc_bins, self.lc_exps, self.bs_ignore)
+        txx.find_pulse(p0=self.bs_p0, sigma=self.bs_sigma, deg=self.bs_deg, mp=mp)
+        txx.calculate(xx=xx, pstart=pstart, pstop=pstop, lbkg=lbkg, rbkg=rbkg)
         txx.save(savepath=savepath)
 
         
@@ -771,7 +801,7 @@ class Event(object):
         self.lc_retime = np.mean(self.lc_rebin_list, axis=1)
         self.lc_rebinsize = self.lc_rebin_list[:, 1] - self.lc_rebin_list[:, 0]
         self.lc_retime_err = self.lc_rebinsize / 2
-        self.lc_reexps = self.exposure(self.lc_rebin_list, dead=False)
+        self.lc_reexps = self.calc_exposure(self.lc_rebin_list, dead=False)
         self.lc_net_rects = self.lc_src_rects - self.lc_bkg_rebcts
         self.lc_net_rects_err = np.sqrt(self.lc_src_rects_err ** 2 + self.lc_bkg_rebcts_err ** 2)
         self.lc_net_rerate = self.lc_net_rects / self.lc_reexps
@@ -871,7 +901,7 @@ class Event(object):
         if not os.path.exists(savepath):
             os.makedirs(savepath)
                 
-        exps = self.exposure(self.spec_slices)
+        exps = self.calc_exposure(self.spec_slices)
             
         lslices = np.array(self.spec_slices)[:, 0]
         rslices = np.array(self.spec_slices)[:, 1]
@@ -907,15 +937,16 @@ class Event(object):
         interp_range = [max([interp_low, np.mean(bins[:2])]), min([interp_upp, np.mean(bins[-2:])])]
         interp_time = np.linspace(interp_range[0], interp_range[-1], 100)
         
-        bs = PolyBase(self.spec_ts, bins, ignore=self.ignore_t1t2)
-        bs.loop(sigma=self.bs_sigma, deg=self.bs_deg)
-        bs.loop(sigma=self.bs_sigma, deg=self.bs_deg)
-        
+        bs = PolyBase(self.spec_ts, bins, ignore=self.bs_ignore)
+        bs.loop(p0=self.bs_p0, sigma=self.bs_sigma, deg=self.bs_deg)
+        bs.loop(p0=self.bs_p0, sigma=self.bs_sigma, deg=self.bs_deg)
+
         ignore = bs.ignore
         brate, _ = bs.poly.val(interp_time)
         
         brate_sum = np.zeros_like(brate)
         
+        min_binsize = self.spec_binsize
         max_binsize = int(self.spec_interval / 10 * 10) / 10
         
         for i, ch in enumerate(self.channel):
@@ -923,15 +954,15 @@ class Event(object):
             ts_i = self.spec_ts[index]
             
             binsize_i = Event._poisson_binsize(len(ts_i), self.spec_interval, 0.99)
-            
-            if binsize_i < 1: binsize_i = 1
+
+            if binsize_i < min_binsize: binsize_i = min_binsize
             elif binsize_i < max_binsize: binsize_i = int(binsize_i * 10) / 10
             else: binsize_i = max_binsize
 
             bins_i = np.arange(self.spec_t1t2[0], self.spec_t1t2[1] + 1e-5, binsize_i)
             
             bs_i = PolyBase(ts_i, bins_i, ignore=ignore)
-            bs_i.polyfit(deg=self.bs_deg)
+            bs_i.polyfit(deg=bs.poly_res['deg'])
             
             brate_i, _ = bs_i.poly.val(interp_time)
             
@@ -1015,7 +1046,7 @@ class Event(object):
         if not os.path.exists(savepath):
             os.makedirs(savepath)
             
-        exps = self.exposure(self.spec_slices)
+        exps = self.calc_exposure(self.spec_slices)
             
         lslices = np.array(self.spec_slices)[:, 0]
         rslices = np.array(self.spec_slices)[:, 1]

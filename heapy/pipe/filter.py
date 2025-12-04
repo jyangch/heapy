@@ -1,5 +1,6 @@
 from astropy import table
 from astropy.io import fits
+
 from ..util.data import msg_format
 
 
