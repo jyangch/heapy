@@ -7,8 +7,8 @@ from astropy.stats import bayesian_blocks
 
 from .baseline import Baseline
 from .polynomial import Polynomial
+from ..util.data import union, json_dump
 from ..util.significance import pgsig, ppsig
-from ..util.data import union, msg_format, json_dump
 
 
 
@@ -74,7 +74,7 @@ class PolyBase(object):
             raise TypeError("expected size(bins) = size(cts)+1")
         
         msg = 'rebuilt the time list, but may not accurate'
-        warnings.warn(msg_format(msg), UserWarning, stacklevel=2)
+        warnings.warn(msg, UserWarning, stacklevel=2)
         ts = np.array([])
         for t1, t2, n in zip(bins[:-1], bins[1:], cts):
             ts = np.append(ts, np.random.random(size=int(n)) * (t2 - t1) + t1)

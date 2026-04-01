@@ -12,28 +12,26 @@ from scipy.interpolate import interp1d, UnivariateSpline
 class Baseline(object):
 
     def __init__(self):
+        
         pass
 
 
     @classmethod
     def set_method(cls, method='drpls'):
+        
         if method == 'drpls':
             pass
-#             print(
-# '''
-# +-----------------+-----------+
-# | baseline method |   drpls   |
-# +-----------------+-----------+
-# ''')
         else:
             raise ValueError('invalid method')
         
         cls_ = cls()
         cls_.method = method
+        
         return cls_
 
 
     def fit(self, x, y, w=None, lam=None, nk=None):
+        
         self.x = np.array(x).astype(float)
         self.y = np.array(y).astype(float)
 
@@ -45,10 +43,10 @@ class Baseline(object):
             nk = 2 * len(x) - 200
 
         if self.method == 'snip':
-            mo = self.snip(y, x, w=w)           # for same binsize
+            mo = self.snip(y, x, w=w)
 
         elif self.method == 'isnip':
-            mo = self.isnip(y, x, w=w)          # for same binsize
+            mo = self.isnip(y, x, w=w)
 
         elif self.method == 'drpls':
             mo = pybaselines.whittaker.drpls(y, lam=lam, eta=0.5, weights=w)[0]
@@ -69,6 +67,7 @@ class Baseline(object):
 
 
     def val(self, x):
+        
         x = np.array(x)
 
         if min(x) < min(self.x) or max(x) > max(self.x):
@@ -85,20 +84,24 @@ class Baseline(object):
 
     @staticmethod
     def speyediff(N, d, format='csc'):
+        
         assert not (d < 0)
+        
         shape = (N - d, N)
         diagonals = np.zeros(2 * d + 1)
-        diagonals[d] = 1.
+        diagonals[d] = 1.0
         for i in range(d):
             diff = diagonals[:-1] - diagonals[1:]
             diagonals = diff
         offsets = np.arange(d + 1)
         spmat = sparse.diags(diagonals, offsets, shape, format=format)
+        
         return spmat
 
 
     @staticmethod
     def whittaker_smooth(self, y, lmbd, d, w):
+        
         y = np.array(y)
         m = len(y)
         y = np.mat(y)
@@ -107,11 +110,13 @@ class Baseline(object):
         W = sparse.diags(w, 0, shape=(m, m))
         coefmat = W + lmbd * D.conj().T.dot(D)
         z = spsolve(coefmat, W * y.T)
+        
         return coefmat, z
 
 
     @staticmethod
     def get_smooth(self, y, w=None, d=None, lmbd=None):
+        
         y = np.array(y)
         m = len(y)
         if w is None:
@@ -141,6 +146,7 @@ class Baseline(object):
         #pr: peak ratio
         #for same binsize
         #--------------------------
+        
         y, x = np.array(y), np.array(x)
         m = len(y)
         if w is None:
@@ -206,6 +212,7 @@ class Baseline(object):
 
 
     def isnip(self, y, x, w=None, d=None, lmbd=None, inte=None, pr=None, hwi=None, it=None):
+        
         #--------------------------
         #lmbd: smooth hardness
         #it: iterations
@@ -291,7 +298,9 @@ class Baseline(object):
 
 
 class InterpWarning(UserWarning):
+    
     """
     Issued by self.val for External interpolation.
     """
+    
     pass

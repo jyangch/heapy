@@ -5,8 +5,8 @@ import matplotlib.pyplot as plt
 from matplotlib import rcParams
 from astropy.stats import bayesian_blocks
 
+from ..util.data import json_dump
 from ..util.significance import ppsig
-from ..util.data import msg_format, json_dump
 
 
 
@@ -83,7 +83,7 @@ class ppSignal(object):
             raise TypeError("expected size(bins) = size(cts)+1")
         
         msg = 'rebuilt the time list, but may not accurate'
-        warnings.warn(msg_format(msg), UserWarning, stacklevel=2)
+        warnings.warn(msg, UserWarning, stacklevel=2)
         
         ts = np.array([])
         bts = np.array([])
@@ -115,6 +115,7 @@ class ppSignal(object):
             flag2 = (edges_[i+1] - edges_[i]) > np.min(self.binsize) / 1.8
             if flag1 and flag2:
                 edges.append(edges_[i])
+
         self.edges = np.unique(edges)
         self.nblock = len(self.edges) - 1
         self.re_binsize = self.edges[1:] - self.edges[:-1]

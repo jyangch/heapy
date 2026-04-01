@@ -10,7 +10,7 @@ from astropy.stats import sigma_clip, mad_std
 from ..auto.polybase import PolyBase
 from ..auto.ppsignal import ppSignal
 from ..auto.ggsignal import ggSignal
-from ..util.data import asym_gaus_gen, msg_format, json_dump
+from ..util.data import generate_asymmetric_gaussian, json_dump
 
 
 
@@ -76,7 +76,7 @@ class pgTxx(PolyBase):
         if (not mp) and (len(pstart) > 0):
             if len(pstart) > 1:
                 msg = 'multi-pulse will be combined into one'
-                warnings.warn(msg_format(msg), UserWarning, stacklevel=2)
+                warnings.warn(msg, UserWarning, stacklevel=2)
             pstart = [pstart[0]]
             pstop = [pstop[-1]]
         
@@ -117,7 +117,7 @@ class pgTxx(PolyBase):
 
         if len(self.pstart) == 0:
             msg = 'there is no pulse'
-            warnings.warn(msg_format(msg), UserWarning, stacklevel=2)
+            warnings.warn(msg, UserWarning, stacklevel=2)
             return False
 
         if lbkg is None:
@@ -226,7 +226,7 @@ class pgTxx(PolyBase):
         
         if len(self.pstart) == 0:
             msg = 'there is no pulse'
-            warnings.warn(msg_format(msg), UserWarning, stacklevel=2)
+            warnings.warn(msg, UserWarning, stacklevel=2)
             return False
         
         if not os.path.exists(savepath):
@@ -347,7 +347,7 @@ class ppTxx(ppSignal):
         if (not mp) and (len(pstart) > 0):
             if len(pstart) > 1:
                 msg = 'multi-pulse will be combined into one'
-                warnings.warn(msg_format(msg), UserWarning, stacklevel=2)
+                warnings.warn(msg, UserWarning, stacklevel=2)
             pstart = [pstart[0]]
             pstop = [pstop[-1]]
         
@@ -388,7 +388,7 @@ class ppTxx(ppSignal):
 
         if len(self.pstart) == 0:
             msg = 'there is no pulse'
-            warnings.warn(msg_format(msg), UserWarning, stacklevel=2)
+            warnings.warn(msg, UserWarning, stacklevel=2)
             return False
 
         if lbkg is None:
@@ -484,7 +484,7 @@ class ppTxx(ppSignal):
         
         if len(self.pstart) == 0:
             msg = 'there is no pulse'
-            warnings.warn(msg_format(msg), UserWarning, stacklevel=2)
+            warnings.warn(msg, UserWarning, stacklevel=2)
             return False
         
         if not os.path.exists(savepath):
@@ -610,7 +610,7 @@ class ggTxx(ggSignal):
         if (not mp) and (len(pstart) > 0):
             if len(pstart) > 1:
                 msg = 'multi-pulse will be combined into one'
-                warnings.warn(msg_format(msg), UserWarning, stacklevel=2)
+                warnings.warn(msg, UserWarning, stacklevel=2)
             pstart = [pstart[0]]
             pstop = [pstop[-1]]
         
@@ -650,7 +650,7 @@ class ggTxx(ggSignal):
 
         if len(self.pstart) == 0:
             msg = 'there is no pulse'
-            warnings.warn(msg_format(msg), UserWarning, stacklevel=2)
+            warnings.warn(msg, UserWarning, stacklevel=2)
             return False
 
         if lbkg is None:
@@ -868,8 +868,8 @@ def accumcts(time, ccts, pstart, pstop, xx, simple_err=False):
             txx1_le_i, txx1_he_i = txx1_i - txx1_lo_i, txx1_hi_i - txx1_i
             txx2_le_i, txx2_he_i = txx2_i - txx2_lo_i, txx2_hi_i - txx2_i
 
-            txx1_i_sam = asym_gaus_gen(txx1_i, txx1_le_i, txx1_he_i, 1000)
-            txx2_i_sam = asym_gaus_gen(txx2_i, txx2_le_i, txx2_he_i, 1000)
+            txx1_i_sam = generate_asymmetric_gaussian(txx1_i, txx1_le_i, txx1_he_i, 1000)
+            txx2_i_sam = generate_asymmetric_gaussian(txx2_i, txx2_le_i, txx2_he_i, 1000)
             txx_lo_i, txx_hi_i = np.percentile(txx2_i_sam - txx1_i_sam, [16, 84])
             txx_le_i, txx_he_i = txx_i - txx_lo_i, txx_hi_i - txx_i
 
