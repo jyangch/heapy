@@ -1,45 +1,149 @@
 import json
+import warnings
 import numpy as np
+from pathlib import Path
+from itertools import zip_longest
+from datetime import datetime, date
 
 from .significance import pgsig, ppsig
 
 
-def intersection(A, B):
+def transpose_2d_matrix(data):
+    """
+    Transpose a 2D list (matrix).
     
-    A1 = np.array([i[-1] for i in A])
-    B1 = np.array([i[-1] for i in B])
-    A = np.array(A)[np.argsort(A1)]
-    B = np.array(B)[np.argsort(B1)]
+    Parameters:
+    data (list of list): A 2D list to be transposed.
+    
+    Returns:
+    list of list: The transposed 2D list.
+    """
+
+    if not data or not data[0]:
+        return data
+
+    return list(map(list, zip(*data)))
+
+
+def pad_2d_matrix(data, fillvalue='-'):
+    """
+    Pad a 2D list (matrix) with a specified fill value 
+    to ensure all rows have the same length.
+
+    Parameters:
+    data (list of list): A 2D list to be padded.
+    fillvalue: The value to use for padding shorter rows. Default is '-'.
+    
+    Returns:
+    list of list: The padded 2D list, or False if the input is not a 2D list.
+    """
+
+    if not data or not isinstance(data[0], (list, np.ndarray, tuple)):
+        msg = 'Input "data" must be a 2-D list or array.'
+        warnings.warn(msg, UserWarning, stacklevel=2)
+        return False
+
+    try:
+        transposed = zip_longest(*data, fillvalue=fillvalue)
+        padded_data = list(map(list, zip(*transposed)))
+        return padded_data
+    except Exception as e:
+        warnings.warn(f"Padding failed: {e}", UserWarning, stacklevel=2)
+        return False
+    
+    
+def pop_2d_matrix(data, popvalue='-'):
+    """
+    Remove all occurrences of a specified value from a 2D list (matrix).
+    
+    Parameters:
+    data (list of list): A 2D list from which to remove the specified value.
+    popvalue: The value to be removed from the 2D list. Default is '-'.
+    
+    Returns:
+    list of list: The 2D list with the specified value removed, 
+    or False if the input is not a 2D list.
+    """
+
+    if not data or not isinstance(data[0], (list, np.ndarray, tuple)):
+        msg = 'Input "data" must be a 2-D list or array-like structure.'
+        warnings.warn(msg, UserWarning, stacklevel=2)
+        return False
+
+    try:
+        return [[item for item in row if item != popvalue] for row in data]
+    except Exception as e:
+        warnings.warn(f"Popping failed: {e}", UserWarning, stacklevel=2)
+        return False
+
+
+def intersection(A, B):
+    """
+    Compute the intersection of two lists of intervals A and B.
+    
+    Parameters:
+    ----------
+    A : list of intervals [[a1_start, a1_end], [a2_start, a2_end], ...]
+    B : list of intervals [[b1_start, b1_end], [b2_start, b2_end], ...]
+    
+    Returns:
+    -------
+    list of intervals representing the intersection of A and B
+    """
+    
+    if not A or not B:
+        return []
+    
+    arr_a = np.array(A)
+    arr_b = np.array(B)
+    
+    arr_a = arr_a[np.argsort(arr_a[:, -1])]
+    arr_b = arr_b[np.argsort(arr_b[:, -1])]
 
     i, j = 0, 0
     res = []
-    while i < len(A) and j < len(B):
-        a1, a2 = A[i][0], A[i][1]
-        b1, b2 = B[j][0], B[j][1]
-        if b2 > a1 and a2 > b1:
-            res.append([max(a1, b1), min(a2, b2)])
-        if b2 < a2: j += 1
-        else: i += 1
+    while i < len(arr_a) and j < len(arr_b):
+        a_start, a_end = arr_a[i, 0], arr_a[i, 1]
+        b_start, b_end = arr_b[j, 0], arr_b[j, 1]
+
+        low = max(a_start, b_start)
+        high = min(a_end, b_end)
         
+        if low < high:
+            res.append([low, high])
+
+        if a_end < b_end:
+            i += 1
+        else:
+            j += 1
+            
     return res
 
 
 def union(bins):
+    """
+    Compute the union of a list of intervals.
     
-    if len(bins) == 0:
+    Parameters:
+    ----------
+    bins : list of intervals [[start1, end1], [start2, end2], ...]
+    
+    Returns:
+    -------
+    list of intervals representing the union of the input intervals
+    """
+    
+    if bins is None or len(bins) == 0:
         return []
     
-    bins1 = np.array([bin[0] for bin in bins])
-    bins = np.array(bins)[np.argsort(bins1)]
-    bins = bins.tolist()
-
-    res = [bins[0]]
-    for i in range(1, len(bins)):
-        a1, a2 = res[-1][0], res[-1][1]
-        b1, b2 = bins[i][0], bins[i][1]
-        if b2 >= a1 and a2 >= b1:
-            res[-1] = [min(a1, b1), max(a2, b2)]
-        else: res.append(bins[i])
+    sorted_bins = sorted(bins, key=lambda x: x[0])
+    
+    res = []
+    for current in sorted_bins:
+        if not res or current[0] > res[-1][1]:
+            res.append(list(current[:2]))
+        else:
+            res[-1][1] = max(res[-1][1], current[1])
 
     return res
 
@@ -54,7 +158,46 @@ def rebin(bins,
           min_evt=None, 
           max_bin=None,
           backscale=None):
-    
+    """
+    Rebin the input data based on the specified statistical criteria.
+
+    Parameters:
+    ----------
+    bins : list of intervals [[start1, end1], [start2, end2], ...]
+        The input bins to be rebinned.
+    stat : str
+        The statistical method to use ('gstat', 'cstat', 'pgstat', or None).
+    cts : array-like
+        The counts for each bin.
+    cts_err : array-like, optional
+        The errors for the counts. Required if stat is 'gstat'.
+    bcts : array-like, optional
+        The background counts. Required if stat is 'cstat' or 'pgstat'.
+    bcts_err : array-like, optional
+        The errors for the background counts. Required if stat is 'pgstat'.
+    min_sigma : float, optional
+        The minimum sigma threshold for rebinning. Default is -inf.
+    min_evt : int, optional
+        The minimum event threshold for rebinning. Default is 0.
+    max_bin : int, optional
+        The maximum number of bins to combine. Default is inf.
+    backscale : float, optional
+        The backscale factor for background counts. Default is 1.
+
+    Returns:
+    -------
+    new_bins : np.ndarray
+        The rebinned intervals.
+    new_cts : np.ndarray
+        The rebinned counts.
+    new_cts_err : np.ndarray
+        The errors for the rebinned counts.
+    new_bcts : np.ndarray
+        The rebinned background counts.
+    new_bcts_err : np.ndarray
+        The errors for the rebinned background counts.
+    """
+
     _allowed_stat = ['gstat', 'cstat', 'pgstat', None]
     
     assert stat in _allowed_stat, f'unsupported stat: {stat}'
@@ -70,13 +213,13 @@ def rebin(bins,
         assert bcts_err is not None
         
     if cts_err is None:
-        cts_err = np.zeros_like(cts).astype(float)
+        cts_err = np.zeros_like(cts, dtype=float)
         
     if bcts is None:
-        bcts = np.zeros_like(cts).astype(float)
+        bcts = np.zeros_like(cts, dtype=float)
         
     if bcts_err is None:
-        bcts_err = np.zeros_like(cts).astype(float)
+        bcts_err = np.zeros_like(cts, dtype=float)
         
     if min_sigma is None:
         min_sigma = -np.inf
@@ -159,7 +302,45 @@ def multi_rebin(bins,
                 min_sigma_list=None, 
                 min_evt_list=None, 
                 backscale_list=None):
+    """
+    Rebin the input data for multiple sets of counts and background counts 
+    based on the specified statistical criteria.
     
+    Parameters
+    ----------
+    bins : np.ndarray
+        The input bins.
+    stat_list : list
+        The list of statistical methods for each set of counts.
+    cts_list : list
+        The list of counts arrays.
+    cts_err_list : list, optional
+        The list of errors for the counts arrays.
+    bcts_list : list, optional
+        The list of background counts arrays.
+    bcts_err_list : list, optional
+        The list of errors for the background counts arrays.
+    min_sigma_list : list, optional
+        The list of minimum sigma values for each set of counts.
+    min_evt_list : list, optional
+        The list of minimum event values for each set of counts.
+    backscale_list : list, optional
+        The list of backscale values for each set of counts.
+
+    Returns
+    -------
+    new_bins : np.ndarray
+        The rebinned intervals.
+    new_cts_list : list of np.ndarray
+        The list of rebinned counts arrays.
+    new_cts_err_list : list of np.ndarray
+        The list of errors for the rebinned counts arrays.
+    new_bcts_list : list of np.ndarray
+        The list of rebinned background counts arrays.
+    new_bcts_err_list : list of np.ndarray
+        The list of errors for the rebinned background counts arrays.
+    """
+
     _allowed_stat = ['gstat', 'cstat', 'pgstat', None]
     
     multi = len(cts_list)
@@ -200,13 +381,13 @@ def multi_rebin(bins,
             assert bcts_err_list[n] is not None
             
         if cts_err_list[n] is None:
-            cts_err_list[n] = np.zeros_like(cts_list[n]).astype(float)
+            cts_err_list[n] = np.zeros_like(cts_list[n], dtype=float)
             
         if bcts_list[n] is None:
-            bcts_list[n] = np.zeros_like(cts_list[n]).astype(float)
+            bcts_list[n] = np.zeros_like(cts_list[n], dtype=float)
             
         if bcts_err_list[n] is None:
-            bcts_err_list[n] = np.zeros_like(cts_list[n]).astype(float)
+            bcts_err_list[n] = np.zeros_like(cts_list[n], dtype=float)
             
         if min_sigma_list[n] is None:
             min_sigma_list[n] = -np.inf
@@ -295,102 +476,275 @@ def multi_rebin(bins,
     return new_bins, new_cts_list, new_cts_err_list, new_bcts_list, new_bcts_err_list
 
 
+def split_bool_mask(mask, times, selection_value=False):
+    """
+    Convert a boolean mask into a list of time intervals 
+    where the mask is selection_value.
+    
+    Parameters:
+    ----------
+    mask : np.array(dtype=bool)
+    times : np.array
+    selection_value : bool
+    
+    Returns:
+    -------
+    list of tuples (t_start, t_stop) where mask is selection_value
+    """
+    
+    if len(mask) == 0:
+        return []
+
+    if np.all(mask == selection_value):
+        return [(times[0], times[-1])]
+    if np.all(mask != selection_value):
+        return []
+
+    changes = np.diff(mask.astype(int))
+    idx = np.where(changes != 0)[0] + 1
+
+    boundaries = np.concatenate(([0], idx, [len(mask)]))
+    
+    segs = []
+    for i in range(len(boundaries) - 1):
+        start_idx = boundaries[i]
+        if mask[start_idx] == selection_value:
+            t_start = times[start_idx]
+            t_stop = times[boundaries[i+1] - 1]
+            segs.append((t_start, t_stop))
+            
+    return segs
+
+
 def scale_of_one(seq, seq_min=None):
+    """
+    Scale a sequence to the range [0, 1].
     
-    seq_max = max(seq)
-    if seq_min is None:
-        seq_min = min(seq)
-    if seq_max == seq_min:
-        scale_seq = seq - seq_min
-    else:
-        scale_seq = (seq - seq_min) / (seq_max - seq_min)
+    Parameters:
+    ----------
+    seq : array-like
+    seq_min : float, optional
+        Minimum value to use for scaling. 
+        If None, the minimum of seq will be used.
         
-    return scale_seq
+    Returns:
+    -------
+    np.ndarray
+        Scaled sequence with values in the range [0, 1]
+    """
+
+    seq = np.asanyarray(seq)
+
+    s_max = seq.max()
+    s_min = seq.min() if seq_min is None else seq_min
+    
+    s_range = s_max - s_min
+
+    if s_range == 0:
+        return np.zeros_like(seq, dtype=float)
+    
+    return (seq - s_min) / s_range
 
 
-def err_latex(value, low, upp):
-    value = np.float128(value)
-    low = np.float128(low)
-    upp = np.float128(upp)
+def format_err_latex(value, low, upp, precision=2):
+    """
+    Format a value with asymmetric errors into a LaTeX string.
+    
+    Parameters:
+    ----------
+    value : float
+        The central value.
+    low : float
+        The lower error (value - low).
+    upp : float
+        The upper error (upp - value).
+    precision : int, optional
+        Number of decimal places to include in the output. Default is 2.
+        
+    Returns:
+    -------
+    str
+        A LaTeX-formatted string representing the value with asymmetric errors
+    """
 
-    value_str = '%.2e' % value
-    e_index = value_str.find('e')
-    if e_index == -1:
-        print('value is not infinite: %s'%value)
-        expr = '$%s_{-%s}^{+%s}$'%(value_str, value_str, value_str)
+    v, l, u = map(np.longdouble, [value, low, upp])
+    
+    if v == 0:
+        return f"${0:.{precision}f}_{{-{l:.{precision}f}}}^{{+{u:.{precision}f}}}$"
+    
+    exponent = int(np.floor(np.log10(np.abs(v))))
+    factor = 10.0 ** exponent
+    
+    v_s, l_s, u_s = v / factor, l / factor, u / factor
+    
+    fmt = f".{precision}f"
+    return (f"${v_s:{fmt}}_{{-{l_s:{fmt}}}}^{{+{u_s:{fmt}}}}"
+            f"\\times 10^{{{exponent}}}$")
+
+
+def escape_latex_chars(text):
+    """
+    Add backslashes before special characters in a string for LaTeX formatting.
+    
+    Parameters:
+    ----------
+    text : str
+        The input string to be formatted.
+        
+    Returns:
+    -------
+    str
+        The input string with backslashes added before 
+        special characters for LaTeX formatting
+    """
+    
+    if not isinstance(text, str):
+        return text
+    
+    return text.replace('_', r'\_').replace('^', r'\^')
+
+
+def get_items_by_idx(data, indices):
+    """
+    Retrieve items from a sequence (list, tuple, or numpy array) based on a list of indices.
+    
+    Parameters:
+    ----------
+    data : list, tuple, or np.ndarray
+        The input sequence from which to retrieve items.
+    indices : list, tuple, or np.ndarray
+        The indices of the items to retrieve from the data sequence.
+        
+    Returns:
+    -------
+    list
+        A list of items from the data sequence corresponding to the provided indices.
+    """
+
+    if not isinstance(data, (list, tuple, np.ndarray)):
+        raise TypeError(f"Expected data to be a sequence, got {type(data)}")
+    if not isinstance(indices, (list, tuple, np.ndarray)):
+        raise TypeError(f"Expected indices to be a sequence, got {type(indices)}")
+
+    try:
+        return np.asanyarray(data)[np.asanyarray(indices)].tolist()
+    except IndexError:
+        raise [data[i] for i in indices]
+
+
+def generate_asymmetric_gaussian(mean, std_left, std_right, size):
+    """
+    Generate samples from an asymmetric Gaussian distribution.
+    
+    Parameters:
+    ----------
+    mean : float
+        The mean of the distribution.
+    std_left : float
+        The standard deviation for the left side of the distribution (values less than the mean).
+    std_right : float
+        The standard deviation for the right side of the distribution (values greater than the mean).
+    size : int
+        The number of samples to generate.
+        
+    Returns:
+    -------
+    np.ndarray
+        An array of samples drawn from the specified asymmetric Gaussian distribution.
+    """
+
+    samples = np.random.randn(size)
+
+    mask_left = samples <= 0
+    mask_right = samples > 0
+    
+    samples[mask_left] *= std_left
+    samples[mask_right] *= std_right
+    
+    return samples + mean
+
+
+def format_boxed_message(msg, min_width=30):
+    """
+    Format a message as a boxed string with borders.
+
+    Parameters:
+    ----------
+    msg : str, list, or tuple
+        The message to be formatted. Can be a single string or a list/tuple of strings.
+    min_width : int, optional
+        The minimum width of the boxed message. Default is 30.
+
+    Returns:
+    -------
+    str
+        The formatted boxed message as a string
+    """
+
+    if isinstance(msg, str):
+        lines = [line.strip() for line in msg.split('\n') if line.strip()]
+    elif isinstance(msg, (list, tuple)):
+        lines = [str(line).strip() for line in msg if str(line).strip()]
     else:
-        v = value_str[:e_index]
-        times = int(value_str[(e_index + 1):])
-        l = '%.2f'%(low/(10**times))
-        u = '%.2f'%(upp/(10**times))
-        expr = '$'+v+'_{-'+l+'}^{+'+u+r'}\times10^{%d}$'%times
-    return expr
+        lines = [str(msg)]
 
+    if not lines:
+        return ""
 
-def add_slash(string_):
-    list_ = list(string_)
-    strint__ = ''
-    for i in list_:
-        if i == '_':
-            strint__ = strint__ + r'\_'
-        elif i == '^':
-            strint__ = strint__ + r'\^'
-        else:
-            strint__ = strint__ + i
-    return strint__
-
-
-def listidx(list, idx):
-    assert type(list) is list, '"list" should be a list!'
-    assert type(idx) is list, '"idx" should be a list!'
-    list_ = [list[i] for i in idx]
-    return list_
-
-
-def asym_gaus_gen(mean, std1, std2, size):
+    content_width = max(max(len(line) for line in lines) + 2, min_width)
     
-    sam = np.random.randn(size)
-    sam[sam <= 0] = sam[sam <= 0] * std1
-    sam[sam > 0] = sam[sam > 0] * std2
-    sam = sam + mean
-    
-    return sam
+    horizontal_border = f"+{'-' * content_width}+"
 
-
-def msg_format(msg):
+    formatted_lines = [f"| {line.ljust(content_width - 2)} |" for line in lines]
     
-    msg_ = ''
-    uppline = '\n+' + '-' * 48 + '+\n'
-    lowline = '+' + '-' * 48 + '+'
-    if type(msg) is list:
-        msg_ += ('\n'.join(msg) + '\n')
-    elif type(msg) is str:
-        for mi in msg.split('\n'):
-            mi = mi.strip()
-            if mi != '':
-                msg_ += (' ' + mi + '\n')
-    msg_format = uppline + msg_ + lowline
+    formatted_msg = "\n".join([
+        "",
+        horizontal_border,
+        *formatted_lines,
+        horizontal_border])
     
-    return msg_format
+    return formatted_msg
 
 
 class JsonEncoder(json.JSONEncoder):
-
+    """
+    Custom JSON encoder that can handle numpy data types and datetime objects.
+    """
+    
     def default(self, obj):
-        if isinstance(obj, np.integer):
-            return int(obj)
-        elif isinstance(obj, np.floating):
+        if isinstance(obj, (np.integer, np.bool_)):
+            return int(obj) if isinstance(obj, np.integer) else bool(obj)
+            
+        if isinstance(obj, np.floating):
             return float(obj)
-        elif isinstance(obj, np.ndarray):
-            return obj.tolist()
-        elif isinstance(obj, np.bool_):
-            return bool(obj)
-        elif isinstance(obj, set):
-            return list(obj)
-        else:
-            return super(JsonEncoder, self).default(obj)
-        
-        
-def json_dump(data, filepath):
-    with open(filepath, 'w') as f:
-        json.dump(data, f, indent=4, cls=JsonEncoder)
+
+        if isinstance(obj, (np.ndarray, set)):
+            return obj.tolist() if isinstance(obj, np.ndarray) else list(obj)
+
+        if isinstance(obj, (datetime, date)):
+            return obj.isoformat()
+
+        return super().default(obj)
+
+
+def json_dump(data, filepath, indent=4, ensure_ascii=False):
+    """
+    Dump data to a JSON file with support for numpy data types and datetime objects.
+    
+    Parameters:
+    ----------
+    data : any
+        The data to be dumped to JSON. Can include numpy data types and datetime objects.
+    filepath : str or Path
+        The path to the JSON file where the data will be saved.
+    indent : int, optional
+        The number of spaces to use for indentation in the JSON file. Default is 4.
+    ensure_ascii : bool, optional
+        Whether to escape non-ASCII characters in the JSON output. Default is False. 
+    """
+    
+    path = Path(filepath)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    with open(path, 'w', encoding='utf-8') as f:
+        json.dump(data, f, indent=indent, ensure_ascii=ensure_ascii, cls=JsonEncoder)

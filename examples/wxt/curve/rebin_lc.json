@@ -2,59 +2,19 @@
     "data": [
         {
             "error_x": {
-                "array": [
-                    108.0,
-                    3.0,
-                    4.0,
-                    2.0,
-                    1.0,
-                    2.0,
-                    2.0,
-                    3.0,
-                    3.0,
-                    2.0,
-                    1.0,
-                    2.0,
-                    2.0,
-                    2.0,
-                    4.0,
-                    4.0,
-                    6.0,
-                    9.0,
-                    6.0,
-                    5.0,
-                    4.0,
-                    75.0
-                ],
+                "array": {
+                    "dtype": "f8",
+                    "bdata": "AAAAAAAAW0AAAAAAAAAIQAAAAAAAABBAAAAAAAAAAEAAAAAAAADwPwAAAAAAAABAAAAAAAAAAEAAAAAAAAAIQAAAAAAAAAhAAAAAAAAAAEAAAAAAAADwPwAAAAAAAABAAAAAAAAAAEAAAAAAAAAAQAAAAAAAABBAAAAAAAAAEEAAAAAAAAAYQAAAAAAAACJAAAAAAAAAGEAAAAAAAAAUQAAAAAAAABBAAAAAAACASEAAAAAAAABTQA=="
+                },
                 "thickness": 1.5,
                 "type": "data",
                 "width": 0
             },
             "error_y": {
-                "array": [
-                    0.020925992560604657,
-                    0.4736496705553675,
-                    0.35523725291652564,
-                    0.6640572392846421,
-                    1.0008676278725226,
-                    0.5008672521353189,
-                    0.6624213209071533,
-                    0.4424869187849502,
-                    0.4424869187849501,
-                    0.5613412623215538,
-                    0.8660254037844386,
-                    0.5,
-                    0.5601803338143689,
-                    0.5605675771244448,
-                    0.3076003970439328,
-                    0.3065403742827301,
-                    0.20506693136262188,
-                    0.1365544277658438,
-                    0.20506693136262188,
-                    0.20034690085412757,
-                    0.2504336260676594,
-                    0.02339935950525459
-                ],
+                "array": {
+                    "dtype": "f8",
+                    "bdata": "Oo68lp9tlT99+TK1RlDePx475gc1vNY/Zcms9/Q/5T+9ZhXGjQPwP+XfccIaB+A/3wSvMo4y5T/ztEWntFHcP/G0Rae0Udw/MyBy84H24T+qTFjoerbrPwAAAAAAAOA/4AqzTv/s4T9/UV5qK/DhP2KUYpO5r9M/z6qchFue0z/YxdgZoj/KP+xrsJCdesE/2MXYGaI/yj/V/4Kd96TJP+TfccIaB9A/A+FM1bqyoD/KRxqDbnGUPw=="
+                },
                 "thickness": 1.5,
                 "type": "data",
                 "width": 0
@@ -67,54 +27,14 @@
             "mode": "markers",
             "name": "net lightcurve",
             "showlegend": true,
-            "x": [
-                -92.0,
-                19.0,
-                26.0,
-                32.0,
-                35.0,
-                38.0,
-                42.0,
-                47.0,
-                53.0,
-                58.0,
-                61.0,
-                64.0,
-                68.0,
-                72.0,
-                78.0,
-                86.0,
-                96.0,
-                111.0,
-                126.0,
-                137.0,
-                146.0,
-                225.0
-            ],
-            "y": [
-                0.0686735462335389,
-                1.1805600694916356,
-                0.8854200521187267,
-                1.5833382576272388,
-                1.9583345644068098,
-                0.9583345644068098,
-                1.6875018466102145,
-                1.0694473169492227,
-                1.0694473169492227,
-                1.125003693220429,
-                1.5,
-                1.0,
-                1.1875018466102145,
-                1.1666691288136195,
-                0.6666691288136194,
-                0.7291672822034049,
-                0.44444608587574624,
-                0.30555637627120646,
-                0.44444608587574624,
-                0.3833338257627239,
-                0.4791672822034049,
-                0.05444519950284329
-            ],
+            "x": {
+                "dtype": "f8",
+                "bdata": "AAAAAAAAV8AAAAAAAAAzQAAAAAAAADpAAAAAAAAAQEAAAAAAAIBBQAAAAAAAAENAAAAAAAAARUAAAAAAAIBHQAAAAAAAgEpAAAAAAAAATUAAAAAAAIBOQAAAAAAAAFBAAAAAAAAAUUAAAAAAAABSQAAAAAAAgFNAAAAAAACAVUAAAAAAAABYQAAAAAAAwFtAAAAAAACAX0AAAAAAACBhQAAAAAAAQGJAAAAAAADgaEAAAAAAAEB0QA=="
+            },
+            "y": {
+                "dtype": "f8",
+                "bdata": "hWMs65aUsT+J4Zb0kuPyP01S4m5cVew/2zswf1pV+T/3DsyfVlX/P+4dmD+tqu4/chay7wEA+z9AeDHKdBzxP0B4Mcp0HPE/5Cxk3wMA8j8AAAAAAAD4PwAAAAAAAPA/chay7wEA8z/uHZg/raryP9s7MH9aVeU/9w7Mn1ZV5z95+ur+zXHcP5LSylQ8jtM/efrq/s1x3D9YfkaZiojYP+4dmD+tqt4/NTTDVtVfsz/414rHHeWlPw=="
+            },
             "type": "scatter"
         },
         {
@@ -124,98 +44,14 @@
             },
             "mode": "lines",
             "showlegend": false,
-            "x": [
-                -200.0,
-                16.0,
-                16.0,
-                22.0,
-                22.0,
-                30.0,
-                30.0,
-                34.0,
-                34.0,
-                36.0,
-                36.0,
-                40.0,
-                40.0,
-                44.0,
-                44.0,
-                50.0,
-                50.0,
-                56.0,
-                56.0,
-                60.0,
-                60.0,
-                62.0,
-                62.0,
-                66.0,
-                66.0,
-                70.0,
-                70.0,
-                74.0,
-                74.0,
-                82.0,
-                82.0,
-                90.0,
-                90.0,
-                102.0,
-                102.0,
-                120.0,
-                120.0,
-                132.0,
-                132.0,
-                142.0,
-                142.0,
-                150.0,
-                150.0,
-                300.0
-            ],
-            "y": [
-                0.0686735462335389,
-                0.0686735462335389,
-                1.1805600694916356,
-                1.1805600694916356,
-                0.8854200521187267,
-                0.8854200521187267,
-                1.5833382576272388,
-                1.5833382576272388,
-                1.9583345644068098,
-                1.9583345644068098,
-                0.9583345644068098,
-                0.9583345644068098,
-                1.6875018466102145,
-                1.6875018466102145,
-                1.0694473169492227,
-                1.0694473169492227,
-                1.0694473169492227,
-                1.0694473169492227,
-                1.125003693220429,
-                1.125003693220429,
-                1.5,
-                1.5,
-                1.0,
-                1.0,
-                1.1875018466102145,
-                1.1875018466102145,
-                1.1666691288136195,
-                1.1666691288136195,
-                0.6666691288136194,
-                0.6666691288136194,
-                0.7291672822034049,
-                0.7291672822034049,
-                0.44444608587574624,
-                0.44444608587574624,
-                0.30555637627120646,
-                0.30555637627120646,
-                0.44444608587574624,
-                0.44444608587574624,
-                0.3833338257627239,
-                0.3833338257627239,
-                0.4791672822034049,
-                0.4791672822034049,
-                0.05444519950284329,
-                0.05444519950284329
-            ],
+            "x": {
+                "dtype": "f8",
+                "bdata": "AAAAAAAAacAAAAAAAAAwQAAAAAAAADBAAAAAAAAANkAAAAAAAAA2QAAAAAAAAD5AAAAAAAAAPkAAAAAAAABBQAAAAAAAAEFAAAAAAAAAQkAAAAAAAABCQAAAAAAAAERAAAAAAAAAREAAAAAAAABGQAAAAAAAAEZAAAAAAAAASUAAAAAAAABJQAAAAAAAAExAAAAAAAAATEAAAAAAAABOQAAAAAAAAE5AAAAAAAAAT0AAAAAAAABPQAAAAAAAgFBAAAAAAACAUEAAAAAAAIBRQAAAAAAAgFFAAAAAAACAUkAAAAAAAIBSQAAAAAAAgFRAAAAAAACAVEAAAAAAAIBWQAAAAAAAgFZAAAAAAACAWUAAAAAAAIBZQAAAAAAAAF5AAAAAAAAAXkAAAAAAAIBgQAAAAAAAgGBAAAAAAADAYUAAAAAAAMBhQAAAAAAAwGJAAAAAAADAYkAAAAAAAABvQAAAAAAAAG9AAAAAAAAAeUA="
+            },
+            "y": {
+                "dtype": "f8",
+                "bdata": "hWMs65aUsT+FYyzrlpSxP4nhlvSS4/I/ieGW9JLj8j9NUuJuXFXsP01S4m5cVew/2zswf1pV+T/bOzB/WlX5P/cOzJ9WVf8/9w7Mn1ZV/z/uHZg/raruP+4dmD+tqu4/chay7wEA+z9yFrLvAQD7P0B4Mcp0HPE/QHgxynQc8T9AeDHKdBzxP0B4Mcp0HPE/5Cxk3wMA8j/kLGTfAwDyPwAAAAAAAPg/AAAAAAAA+D8AAAAAAADwPwAAAAAAAPA/chay7wEA8z9yFrLvAQDzP+4dmD+tqvI/7h2YP62q8j/bOzB/WlXlP9s7MH9aVeU/9w7Mn1ZV5z/3DsyfVlXnP3n66v7Ncdw/efrq/s1x3D+S0spUPI7TP5LSylQ8jtM/efrq/s1x3D95+ur+zXHcP1h+RpmKiNg/WH5GmYqI2D/uHZg/rareP+4dmD+tqt4/NTTDVtVfsz81NMNW1V+zP/jXiscd5aU/+NeKxx3lpT8="
+            },
             "type": "scatter"
         }
     ],
@@ -346,57 +182,6 @@
                             ]
                         ],
                         "type": "contour"
-                    }
-                ],
-                "heatmapgl": [
-                    {
-                        "colorbar": {
-                            "outlinewidth": 0,
-                            "ticks": ""
-                        },
-                        "colorscale": [
-                            [
-                                0.0,
-                                "#0d0887"
-                            ],
-                            [
-                                0.1111111111111111,
-                                "#46039f"
-                            ],
-                            [
-                                0.2222222222222222,
-                                "#7201a8"
-                            ],
-                            [
-                                0.3333333333333333,
-                                "#9c179e"
-                            ],
-                            [
-                                0.4444444444444444,
-                                "#bd3786"
-                            ],
-                            [
-                                0.5555555555555556,
-                                "#d8576b"
-                            ],
-                            [
-                                0.6666666666666666,
-                                "#ed7953"
-                            ],
-                            [
-                                0.7777777777777778,
-                                "#fb9f3a"
-                            ],
-                            [
-                                0.8888888888888888,
-                                "#fdca26"
-                            ],
-                            [
-                                1.0,
-                                "#f0f921"
-                            ]
-                        ],
-                        "type": "heatmapgl"
                     }
                 ],
                 "heatmap": [
@@ -649,6 +434,17 @@
                             }
                         },
                         "type": "scattermapbox"
+                    }
+                ],
+                "scattermap": [
+                    {
+                        "marker": {
+                            "colorbar": {
+                                "outlinewidth": 0,
+                                "ticks": ""
+                            }
+                        },
+                        "type": "scattermap"
                     }
                 ],
                 "scatterpolargl": [

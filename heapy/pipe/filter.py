@@ -1,8 +1,6 @@
 from astropy import table
 from astropy.io import fits
 
-from ..util.data import msg_format
-
 
 
 class Filter(object):
@@ -10,7 +8,7 @@ class Filter(object):
     def __init__(self, event):
         
         msg = 'evt is not the type of astropy.tabel.Table'
-        assert isinstance(event, table.Table), msg_format(msg)
+        assert isinstance(event, table.Table), msg
         
         self._evt = event
         self.evt = self._evt.copy()
@@ -55,7 +53,7 @@ class Filter(object):
             print(self.evt.info)
         else:
             msg = '%s is not one of tags' % tag
-            assert tag in self.tags, msg_format(msg)
+            assert tag in self.tags, msg
             
             print(self.evt[tag].info)
             

@@ -6,7 +6,6 @@ import pandas as pd
 from astropy.time import Time, TimeDelta
 
 from .filefinder import FileFinder
-from ..util.data import msg_format
 
 
 
@@ -115,7 +114,7 @@ class gbmRetrieve(Retrieve):
 
         if len(dates_perH) > 2:
             msg = 'the time range is too long'
-            warnings.warn(msg_format(msg), UserWarning, stacklevel=2)
+            warnings.warn(msg, UserWarning, stacklevel=2)
 
         poshist_list = []
         dets = ['n0','n1','n2','n3','n4','n5','n6','n7','n8','n9','na','nb','b0','b1']
@@ -250,7 +249,7 @@ class gecamRetrieve(Retrieve):
 
         if len(dates_perH) > 2:
             msg = 'the time range is too long'
-            warnings.warn(msg_format(msg), UserWarning, stacklevel=2)
+            warnings.warn(msg, UserWarning, stacklevel=2)
 
         grd_evt_list = []
         grd_bspec_list = []
@@ -330,12 +329,10 @@ class gridRetrieve(Retrieve):
 
         if len(dates_perD) > 2:
             msg = 'the time range is too long'
-            warnings.warn(msg_format(msg), UserWarning, stacklevel=2)
+            warnings.warn(msg, UserWarning, stacklevel=2)
             
         dets = ['%d' % i for i in range(0, 4)]
-        msg = 'invalid detector: %s' % det
-        assert det in dets, msg_format(msg)
-
+        assert det in dets, 'invalid detector: %s' % det
         tte_list = []
         rsp_list = []
 
@@ -435,20 +432,42 @@ class epRetrieve(Retrieve):
         
         ff = FileFinder(local_dir=local_dir)
         
-        evt_feature = f'fxt_{module}_*_cl_*.fits'
+        evt_feature = f'fxt_{module}_*_cl*.fits'
         evt_file = ff.find(evt_feature)
         evt = evt_file[-1] if evt_file else None
         
-        reg_feature = f'fxt_{module}_*.reg'
+        src_rmf_feature = f'fxt_{module}_*_src*.rmf'
+        src_rmf_file = ff.find(src_rmf_feature)
+        src_rmf = src_rmf_file[-1] if src_rmf_file else None
+        
+        if src_rmf is not None:
+            rmf = src_rmf
+        else:
+            rmf_feature = f'fxt_{module}_*.rmf'
+            rmf_file = ff.find(rmf_feature)
+            rmf = rmf_file[-1] if rmf_file else None
+        
+        src_arf_feature = f'fxt_{module}_*_src*.arf'
+        src_arf_file = ff.find(src_arf_feature)
+        src_arf = src_arf_file[-1] if src_arf_file else None
+        
+        if src_arf is not None:
+            arf = src_arf
+        else:
+            arf_feature = f'fxt_{module}_*.arf'
+            arf_file = ff.find(arf_feature)
+            arf = arf_file[-1] if arf_file else None
+        
+        reg_feature = f'fxt_{module}_*_src*.reg'
         reg_file = ff.find(reg_feature)
         reg = reg_file[-1] if reg_file else None
         
-        bkreg_feature = f'fxt_{module}_*bk.reg'
+        bkreg_feature = f'fxt_{module}_*_bkg*.reg'
         bkreg_file = ff.find(bkreg_feature)
         bkreg = bkreg_file[-1] if bkreg_file else None
         
         rtv_res = {'satelite': 'FXT', 'obsid': obsid, 'module': module, 
-                   'evt': evt, 'reg': reg, 'bkreg': bkreg}
+                   'evt': evt, 'rmf': rmf, 'arf': arf, 'reg': reg, 'bkreg': bkreg}
         
         rtv = cls(rtv_res)
         

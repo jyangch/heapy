@@ -17,11 +17,11 @@ from .filter import Filter
 from ..data.retrieve import gbmRetrieve, gecamRetrieve, gridRetrieve
 from ..temp.txx import pgTxx
 from ..auto.polybase import PolyBase
-from ..util.file import copy, remove
+from ..util.file import copy_file, remove_file
+from ..util.data import json_dump, rebin, union
 from ..util.time import grid_met_to_utc, grid_utc_to_met
 from ..util.time import fermi_met_to_utc, fermi_utc_to_met
 from ..util.time import gecam_met_to_utc, gecam_utc_to_met
-from ..util.data import msg_format, json_dump, rebin, union
 
 
 
@@ -771,7 +771,7 @@ class Event(object):
         txx.save(savepath=savepath)
 
         
-    def extract_rebin_curve(self, trange=None, stat='pgstat', min_sigma=None, min_evt=None, max_bin=None, 
+    def extract_rebin_curve(self, tranges=None, stat='pgstat', min_sigma=None, min_evt=None, max_bin=None, 
                             savepath='./curve', loglog=False, step=False, show=False):
         
         savepath = os.path.abspath(savepath)
@@ -779,13 +779,22 @@ class Event(object):
         if not os.path.exists(savepath):
             os.makedirs(savepath)
             
-        if trange is not None:
-            idx = (self.lc_bin_list[:, 0] >= trange[0]) * (self.lc_bin_list[:, 1] <= trange[1])
+        if tranges is not None:
+            if isinstance(tranges, list) and not isinstance(tranges[0], list):
+                tranges = [tranges]
+            elif isinstance(tranges, list) and isinstance(tranges[0], list):
+                tranges = tranges
+            else:
+                raise ValueError('trange is expected to be a list')
         else:
-            idx = np.ones(len(self.lc_bin_list), dtype=bool)
-        
-        self.lc_rebin_list, self.lc_src_rects, self.lc_src_rects_err, \
-            self.lc_bkg_rebcts, self.lc_bkg_rebcts_err = \
+            tranges = [[np.min(self.lc_bin_list[:, 0]), np.max(self.lc_bin_list[:, 1])]]
+            
+        lc_rebin_list, lc_src_rects, lc_src_rects_err, lc_bkg_rebcts, lc_bkg_rebcts_err = [], [], [], [], []
+            
+        for trange in tranges:
+            idx = (self.lc_bin_list[:, 0] >= trange[0]) * (self.lc_bin_list[:, 1] <= trange[1])
+            
+            new_bins, new_cts, new_cts_err, new_bcts, new_bcts_err = \
                 rebin(
                     self.lc_bin_list[idx], 
                     stat, 
@@ -797,6 +806,18 @@ class Event(object):
                     min_evt=min_evt, 
                     max_bin=max_bin,
                     backscale=1)
+                
+            lc_rebin_list.append(new_bins)
+            lc_src_rects.append(new_cts)
+            lc_src_rects_err.append(new_cts_err)
+            lc_bkg_rebcts.append(new_bcts)
+            lc_bkg_rebcts_err.append(new_bcts_err)
+            
+        self.lc_rebin_list = np.vstack(lc_rebin_list)
+        self.lc_src_rects = np.hstack(lc_src_rects)
+        self.lc_src_rects_err = np.hstack(lc_src_rects_err)
+        self.lc_bkg_rebcts = np.hstack(lc_bkg_rebcts)
+        self.lc_bkg_rebcts_err = np.hstack(lc_bkg_rebcts_err)       
                 
         self.lc_retime = np.mean(self.lc_rebin_list, axis=1)
         self.lc_rebinsize = self.lc_rebin_list[:, 1] - self.lc_rebin_list[:, 0]
@@ -919,7 +940,7 @@ class Event(object):
             pha_hdu.writeto(savepath + f'/{file_name}')
             
             
-    def _extract_bkg_phaii(self, spec_slices, show=False, showall=False):
+    def _extract_bkg_phaii(self, spec_slices, poisson_binsize=True, show=False, showall=False):
         
         num_slices = len(spec_slices)
         num_channels = len(self.channel)
@@ -932,10 +953,15 @@ class Event(object):
         
         bins = np.arange(self.spec_t1t2[0], self.spec_t1t2[1]+1e-5, self.spec_binsize)
         
-        interp_low = self.spec_t1t2[0] + self.spec_interval / 10
-        interp_upp = self.spec_t1t2[1] - self.spec_interval / 10
-        interp_range = [max([interp_low, np.mean(bins[:2])]), min([interp_upp, np.mean(bins[-2:])])]
-        interp_time = np.linspace(interp_range[0], interp_range[-1], 100)
+        if poisson_binsize:
+            interp_low = self.spec_t1t2[0] + self.spec_interval / 10
+            interp_upp = self.spec_t1t2[1] - self.spec_interval / 10
+            interp_range = [max([interp_low, np.mean(bins[:2])]), min([interp_upp, np.mean(bins[-2:])])]
+            interp_time = np.linspace(interp_range[0], interp_range[-1], 100)
+        else:
+            interp_low = bins[1]
+            interp_upp = bins[-2]
+            interp_time = np.linspace(interp_low, interp_upp, 100)
         
         bs = PolyBase(self.spec_ts, bins, ignore=self.bs_ignore)
         bs.loop(p0=self.bs_p0, sigma=self.bs_sigma, deg=self.bs_deg)
@@ -953,7 +979,10 @@ class Event(object):
             index = (self.spec_pha == ch)
             ts_i = self.spec_ts[index]
             
-            binsize_i = Event._poisson_binsize(len(ts_i), self.spec_interval, 0.99)
+            if poisson_binsize:
+                binsize_i = Event._poisson_binsize(len(ts_i), self.spec_interval, 0.99)
+            else:
+                binsize_i = self.spec_binsize
 
             if binsize_i < min_binsize: binsize_i = min_binsize
             elif binsize_i < max_binsize: binsize_i = int(binsize_i * 10) / 10
@@ -1037,9 +1066,9 @@ class Event(object):
         return phaii, phaii_err
                 
                 
-    def extract_bkg_phaii(self, savepath='./spectrum', show=False):
+    def extract_bkg_phaii(self, savepath='./spectrum', poisson_binsize=True, show=False):
         
-        phaii, phaii_err = self._extract_bkg_phaii(self.spec_slices, show=show)
+        phaii, phaii_err = self._extract_bkg_phaii(self.spec_slices, poisson_binsize=poisson_binsize, show=show)
         
         savepath = os.path.abspath(savepath)
         
@@ -1064,7 +1093,7 @@ class Event(object):
             pha_hdu.writeto(savepath + f'/{file_name}')
                 
                 
-    def extract_spectrum(self, savepath='./spectrum', show=False):
+    def extract_spectrum(self, savepath='./spectrum', poisson_binsize=True, show=False):
         
         savepath = os.path.abspath(savepath)
         
@@ -1072,7 +1101,7 @@ class Event(object):
             os.makedirs(savepath)
         
         self.extract_src_phaii(savepath=savepath)
-        self.extract_bkg_phaii(savepath=savepath, show=show)
+        self.extract_bkg_phaii(savepath=savepath, poisson_binsize=poisson_binsize, show=show)
 
 
     def _to_pha_fits(self, pha, pha_err, exp, tstart, tstop, file_name):
@@ -1190,35 +1219,38 @@ class gbmTTE(Event):
 
 
     @classmethod
-    def from_utc(cls, utc, det):
+    def from_utc(cls, utc, det, t1=-200, t2=500):
         
-        dets = ['n0','n1','n2','n3','n4','n5','n6','n7','n8','n9','na','nb','b0','b1']
+        dets = gbmTTE.det_name_lookup.values()
         msg = 'invalid detector: %s' % det
-        assert det in dets, msg_format(msg)
+        assert det in dets, msg
         
-        rtv = gbmRetrieve.from_utc(utc=utc, t1=-200, t2=500)
+        rtv = gbmRetrieve.from_utc(utc=utc, t1=t1, t2=t2)
 
         file = rtv.rtv_res['tte'][det]
             
         msg = 'no retrieved tte file'
-        assert file != [], msg_format(msg)
+        assert file != [], msg
         
         posfile = rtv.rtv_res['poshist']
         
         msg = 'no retrieved poshist file'
-        assert posfile != [], msg_format(msg)
+        assert posfile != [], msg
         
         return cls(file, posfile)
     
 
     def _read(self):
         
+        if isinstance(self._file, str):
+            self._file = [self._file]
+        
         det_list = list()
         event_list = list()
         gti_list = list()
         
-        for i in range(len(self.file)):
-            hdu = fits.open(self.file[i])
+        for i in range(len(self._file)):
+            hdu = fits.open(self._file[i])
             det = hdu['PRIMARY'].header['DETNAM']
             event = table.Table.read(hdu['EVENTS'])
             ebound = table.Table.read(hdu['EBOUNDS'])
@@ -1255,12 +1287,15 @@ class gbmTTE(Event):
         self._filter = Filter(self._event)
         self._filter_info = {'time': None, 'energy': None, 'pha': None, 'tag': None}
         
-        if self.posfile is None:
+        if self._posfile is None:
             self._pos_t1t2_list = None
         else:
+            if isinstance(self._posfile, str):
+                self._posfile = [self._posfile]
+            
             pos_t1t2_list = []
-            for i in range(len(self.posfile)):
-                hdu = fits.open(self.posfile[i])
+            for i in range(len(self._posfile)):
+                hdu = fits.open(self._posfile[i])
                 pos = table.Table.read(hdu[1])
                 hdu.close()
                 
@@ -1410,8 +1445,8 @@ class gbmTTE(Event):
                 filename=file_name, 
                 overwrite=True)
             
-            copy(f'{file_name}_{self.det}.rsp', f'{file_name}.rsp')
-            remove(f'{file_name}_{self.det}.rsp')
+            copy_file(f'{file_name}_{self.det}.rsp', f'{file_name}.rsp')
+            remove_file(f'{file_name}_{self.det}.rsp')
             
         os.chdir(cwd)
 
@@ -1429,25 +1464,28 @@ class gecamEVT(Event):
 
 
     @classmethod
-    def from_utc(cls, utc, det, gain_type):
+    def from_utc(cls, utc, det, gain_type, t1=-200, t2=500):
         
-        rtv = gecamRetrieve.from_utc(utc=utc, t1=-200, t2=500)
+        rtv = gecamRetrieve.from_utc(utc=utc, t1=t1, t2=t2)
 
         file = rtv.rtv_res['grd_evt']
             
         msg = 'no retrieved evt file'
-        assert file != [], msg_format(msg)
+        assert file != [], msg
         
         return cls(file, det, gain_type)
 
 
     def _read(self):
         
+        if isinstance(self._file, str):
+            self._file = [self._file]
+        
         event_list = list()
         gti_list = list()
         
-        for i in range(len(self.file)):
-            hdu = fits.open(self.file[i])
+        for i in range(len(self._file)):
+            hdu = fits.open(self._file[i])
             event = table.Table.read(hdu[f'EVENTS{self.det}'])
             ebound = table.Table.read(hdu['EBOUNDS'])
             gti = table.Table.read(hdu['GTI'])
@@ -1496,7 +1534,7 @@ class gecamEVT(Event):
         
         dets = ['%02d' % i for i in range(1, 26)]
         msg = 'invalid detector: %s' % new_det
-        assert new_det in dets, msg_format(msg)
+        assert new_det in dets, msg
         
         self._det = new_det
 
@@ -1512,7 +1550,7 @@ class gecamEVT(Event):
         
         gain_types = ['HG', 'LG']
         msg = 'invalid gain type: %s' % new_gain_type
-        assert new_gain_type in gain_types, msg_format(msg)
+        assert new_gain_type in gain_types, msg
         
         self._gain_type = new_gain_type
         
@@ -1600,29 +1638,34 @@ class gridTTE(Event):
 
 
     @classmethod
-    def from_utc(cls, utc, det):
+    def from_utc(cls, utc, det, t1=-200, t2=500):
         
-        rtv = gridRetrieve.from_utc(utc=utc, t1=-200, t2=500, det=det)
+        rtv = gridRetrieve.from_utc(utc=utc, t1=t1, t2=t2, det=det)
 
         file = rtv.rtv_res['tte']
         rspfile = rtv.rtv_res['rsp']
             
         msg = 'no retrieved tte file'
-        assert file != [], msg_format(msg)
+        assert file != [], msg
         
         msg = 'no retrieved rsp file'
-        assert rspfile != [], msg_format(msg)
+        assert rspfile != [], msg
         
         return cls(file, rspfile, det)
 
 
     def _read(self):
         
+        if isinstance(self._file, str):
+            self._file = [self._file]
+        if isinstance(self._rspfile, str):
+            self._rspfile = [self._rspfile]
+        
         event_list = list()
         
-        for i in range(len(self.file)):
-            tte_hdu = fits.open(self.file[i])
-            rsp_hdu = fits.open(self.rspfile[i])
+        for i in range(len(self._file)):
+            tte_hdu = fits.open(self._file[i])
+            rsp_hdu = fits.open(self._rspfile[i])
             event = table.Table.read(tte_hdu[f'T_E{self.det}'])
             ebound = table.Table.read(rsp_hdu['EBOUNDS'])
             tte_hdu.close()
@@ -1682,7 +1725,7 @@ class gridTTE(Event):
         
         dets = ['%d' % i for i in range(0, 4)]
         msg = 'invalid detector: %s' % new_det
-        assert new_det in dets, msg_format(msg)
+        assert new_det in dets, msg
         
         self._det = new_det
         
@@ -1770,10 +1813,13 @@ class gridgroundTTE(Event):
 
     def _read(self):
         
+        if isinstance(self._file, str):
+            self._file = [self._file]
+        
         event_list = list()
         
-        for i in range(len(self.file)):
-            tte_hdu = fits.open(self.file[i])
+        for i in range(len(self._file)):
+            tte_hdu = fits.open(self._file[i])
             event = table.Table.read(tte_hdu[f'EVENTS{self.det}'])
             ebound = table.Table.read(tte_hdu['EBOUNDS'])
             tte_hdu.close()
@@ -1813,7 +1859,7 @@ class gridgroundTTE(Event):
         
         dets = ['%d' % i for i in range(0, 4)]
         msg = 'invalid detector: %s' % new_det
-        assert new_det in dets, msg_format(msg)
+        assert new_det in dets, msg
         
         self._det = new_det
         

@@ -12,7 +12,7 @@ from .filter import Filter
 from ..data.retrieve import epRetrieve, swiftRetrieve
 from ..temp.txx import ppTxx
 from ..auto.ppsignal import ppSignal
-from ..util.file import copy
+from ..util.file import copy_file
 from ..util.data import json_dump, rebin, union
 from ..util.time import ep_met_to_utc, ep_utc_to_met
 from ..util.time import swift_met_to_utc, swift_utc_to_met
@@ -884,7 +884,7 @@ class Image(object):
         txx.save(savepath=savepath)
         
         
-    def extract_rebin_curve(self, trange=None, min_sigma=None, min_evt=None, max_bin=None, 
+    def extract_rebin_curve(self, tranges=None, min_sigma=None, min_evt=None, max_bin=None, 
                             savepath='./curve', loglog=False, step=False, show=False):
         
         savepath = os.path.abspath(savepath)
@@ -892,13 +892,22 @@ class Image(object):
         if not os.path.exists(savepath):
             os.makedirs(savepath)
             
-        if trange is not None:
-            idx = (self.lc_bin_list[:, 0] >= trange[0]) * (self.lc_bin_list[:, 1] <= trange[1])
+        if tranges is not None:
+            if isinstance(tranges, list) and not isinstance(tranges[0], list):
+                tranges = [tranges]
+            elif isinstance(tranges, list) and isinstance(tranges[0], list):
+                tranges = tranges
+            else:
+                raise ValueError('trange is expected to be a list')
         else:
-            idx = np.ones(len(self.lc_bin_list), dtype=bool)
-        
-        self.lc_rebin_list, self.lc_src_rects, self.lc_src_rects_err, \
-            self.lc_bkg_rebcts, self.lc_bkg_rebcts_err = \
+            tranges = [[np.min(self.lc_bin_list[:, 0]), np.max(self.lc_bin_list[:, 1])]]
+            
+        lc_rebin_list, lc_src_rects, lc_src_rects_err, lc_bkg_rebcts, lc_bkg_rebcts_err = [], [], [], [], []
+            
+        for trange in tranges:
+            idx = (self.lc_bin_list[:, 0] >= trange[0]) * (self.lc_bin_list[:, 1] <= trange[1])
+            
+            new_bins, new_cts, new_cts_err, new_bcts, new_bcts_err = \
                 rebin(
                     self.lc_bin_list[idx], 
                     'cstat', 
@@ -910,6 +919,18 @@ class Image(object):
                     min_evt=min_evt, 
                     max_bin=max_bin,
                     backscale=self.backscale)
+                
+            lc_rebin_list.append(new_bins)
+            lc_src_rects.append(new_cts)
+            lc_src_rects_err.append(new_cts_err)
+            lc_bkg_rebcts.append(new_bcts)
+            lc_bkg_rebcts_err.append(new_bcts_err)
+            
+        self.lc_rebin_list = np.vstack(lc_rebin_list)
+        self.lc_src_rects = np.hstack(lc_src_rects)
+        self.lc_src_rects_err = np.hstack(lc_src_rects_err)
+        self.lc_bkg_rebcts = np.hstack(lc_bkg_rebcts)
+        self.lc_bkg_rebcts_err = np.hstack(lc_bkg_rebcts_err)  
                 
         self.lc_retime = np.mean(self.lc_rebin_list, axis=1)
         self.lc_rebinsize = self.lc_rebin_list[:, 1] - self.lc_rebin_list[:, 0]
@@ -1235,8 +1256,10 @@ class epImage(Image):
         file = rtv.rtv_res['evt']
         regfile = rtv.rtv_res['reg']
         bkregfile = rtv.rtv_res['bkreg']
+        rmffile = rtv.rtv_res['rmf']
+        arffile = rtv.rtv_res['arf']
         
-        return cls(file, regfile, bkregfile)
+        return cls(file, regfile, bkregfile, rmffile=rmffile, arffile=arffile)
             
             
     @property
@@ -1276,7 +1299,7 @@ class epImage(Image):
         if self.arm and self.armregfile:
             return f'"{os.path.abspath(self._bkregfile)} {self.armregfile}"'
         else:
-            return f'"{os.path.abspath(self._bkregfile)}"'
+            return f'{os.path.abspath(self._bkregfile)}'
 
 
     @property
@@ -1390,8 +1413,8 @@ class epImage(Image):
         rsp_rmffile = savepath + '/ep.rmf'
         rsp_arffile = savepath + '/ep.arf'
 
-        copy(self.rmffile, rsp_rmffile)
-        copy(self.arffile, rsp_arffile)
+        copy_file(self.rmffile, rsp_rmffile)
+        copy_file(self.arffile, rsp_arffile)
 
 
 
@@ -1679,7 +1702,7 @@ class swiftImage(Image):
             
             stdout, stderr = self._run_commands(commands)
             
-            copy(stdout.split()[0], rsp_rmffile)
+            copy_file(stdout.split()[0], rsp_rmffile)
             
             if std: 
                 print(stdout)
