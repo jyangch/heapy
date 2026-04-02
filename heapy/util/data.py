@@ -708,18 +708,18 @@ def format_boxed_message(msg, min_width=30):
 
 class JsonEncoder(json.JSONEncoder):
     """
-    Custom JSON encoder that can handle numpy data types and datetime objects.
+    Custom JSON encoder optimized for numpy data types and other common types.
     """
     
     def default(self, obj):
-        if isinstance(obj, (np.integer, np.bool_)):
-            return int(obj) if isinstance(obj, np.integer) else bool(obj)
-            
-        if isinstance(obj, np.floating):
-            return float(obj)
+        if isinstance(obj, np.generic):
+            return obj.item()
 
-        if isinstance(obj, (np.ndarray, set)):
-            return obj.tolist() if isinstance(obj, np.ndarray) else list(obj)
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+
+        if isinstance(obj, set):
+            return list(obj)
 
         if isinstance(obj, (datetime, date)):
             return obj.isoformat()
