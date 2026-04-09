@@ -664,7 +664,7 @@ def generate_asymmetric_gaussian(mean, std_left, std_right, size):
     return samples + mean
 
 
-def format_boxed_message(msg, min_width=30):
+def format_message(msg, min_width=30):
     """
     Format a message as a boxed string with borders.
 
