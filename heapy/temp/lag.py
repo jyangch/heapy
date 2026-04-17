@@ -1,6 +1,5 @@
 import os
 import numpy as np
-from scipy import signal
 import matplotlib.pyplot as plt
 from matplotlib import rcParams
 from astropy.stats import sigma_clip, mad_std
@@ -16,29 +15,50 @@ from ..util.data import json_dump
 
 class Lag(object):
 
-    def __init__(self, 
-                 xcts, 
-                 ycts, 
-                 dt,
-                 xcts_err=None,
-                 ycts_err=None,
-                 xbcts=None,
-                 ybcts=None,
-                 xbcts_err=None,
-                 ybcts_err=None,
-                 xtype='pg', 
-                 ytype='pg', 
-                 mc=True, 
-                 nmc=1000, 
-                 ):
+    def __init__(
+        self, 
+        xcts, 
+        ycts, 
+        dt,
+        xcts_err=None,
+        ycts_err=None,
+        xbcts=None,
+        ybcts=None,
+        xbcts_err=None,
+        ybcts_err=None,
+        xtype='pg',
+        ytype='pg',
+        nmc=1000,
+        M=1):
         """
-        low energy band is taken as y
-        high energy band is taken as x
+        Parameters
+        ----------
+        xcts, ycts : 1D array
+            Fine-bin light curves. x = high energy, y = low energy.
+        dt : float
+            Fine-bin width δt in seconds.
+        xcts_err, ycts_err : 1D array, optional
+            Errors on counts (required if type contains 'g').
+        xbcts, ybcts : 1D array, optional
+            Fine-bin background light curves (required if type is 'pg' or 'pp').
+        xbcts_err, ybcts_err : 1D array, optional
+            Background errors.
+        xtype, ytype : {'pg', 'pp', 'gg'}
+            Noise model:
+            - 'pg': Poisson source + Gaussian background (e.g. fitted polynomial bkg)
+            - 'pp': Poisson source + Poisson background
+            - 'gg': Gaussian source + Gaussian background
+        nmc : int
+            Number of MC realizations.
+        M : int
+            MCCF phase count; analysis bin width Δt = M * dt. M = 1 (default)
+            gives classic CCF; M > 1 enables MCCF via box-smoothing equivalence.
+            Access the resulting Δt through the ``dt_analysis`` property.
         """
-
+        
         self.xcts = np.asarray(xcts, dtype=float)
         self.ycts = np.asarray(ycts, dtype=float)
-        
+
         if self.xcts.ndim != 1 or self.ycts.ndim != 1:
             raise ValueError('xcts and ycts must be one-dimensional arrays')
         if self.xcts.shape != self.ycts.shape:
@@ -50,41 +70,34 @@ class Lag(object):
         if self.dt <= 0:
             raise ValueError('dt must be positive')
         
-        self.mc = mc
+        self.M = int(M)
+        if self.M < 1:
+            raise ValueError('M must be a positive integer')
+        
         self.nmc = int(nmc)
-        
-        if self.mc and self.nmc < 1:
-            raise ValueError('nmc must be at least 1 when mc=True')
-        self.nsample = len(self.xcts)
-        
-        if self.mc:
+        if self.nmc < 1:
+            raise ValueError('nmc must be at least 1')
 
-            self.xtype = xtype
-            self.ytype = ytype
+        self.xtype = xtype
+        self.ytype = ytype
 
-            self.xcts_err, self.xbcts, self.xbcts_err = \
-                self._validate(xtype, xcts, xcts_err, xbcts, xbcts_err, 'x')
-            self.ycts_err, self.ybcts, self.ybcts_err = \
-                self._validate(ytype, ycts, ycts_err, ybcts, ybcts_err, 'y')
+        self.xcts_err, self.xbcts, self.xbcts_err = \
+            self._validate(xtype, xcts, xcts_err, xbcts, xbcts_err, 'x')
+        self.ycts_err, self.ybcts, self.ybcts_err = \
+            self._validate(ytype, ycts, ycts_err, ybcts, ybcts_err, 'y')
 
-            self.xncts = self.xcts - self.xbcts
-            self.yncts = self.ycts - self.ybcts
-
-            self._mc_simulation()
-            
-        else:
-            self.xncts = self.xcts
-            self.yncts = self.ycts
-            
-            self.mc_xncts = self.xncts.reshape(1, -1)
-            self.mc_yncts = self.yncts.reshape(1, -1)
-            
         self.model_funcs = {
-            'gaussian': Lag.gaussian, 
-            'asymmetric_gaussian': Lag.asymmetric_gaussian, 
-            'double_gaussian': Lag.double_gaussian, 
-            'lorentzian': Lag.lorentzian, 
+            'gaussian': Lag.gaussian,
+            'asymmetric_gaussian': Lag.asymmetric_gaussian,
+            'double_gaussian': Lag.double_gaussian,
+            'lorentzian': Lag.lorentzian,
             'pseudo_voigt': Lag.pseudo_voigt}
+
+
+    @property
+    def dt_analysis(self):
+        
+        return self.M * self.dt
 
 
     @staticmethod
@@ -113,59 +126,39 @@ class Lag(object):
             raise ValueError(f'unknown {label}type')
         
         return cts_err, bcts, bcts_err
-    
-    
-    @staticmethod
-    def ccf_band(d, x, y):
-
-        x = np.asarray(x)
-        y = np.asarray(y)
-        N = len(x)
-        sx = np.sum(x ** 2)
-        sy = np.sum(y ** 2)
-        nor = np.sqrt(sx * sy)
-        low = max(0, -d)
-        upp = min(N, N - d)
-        sxy = np.dot(x[low:upp], y[low + d:upp + d])
-        ccf = sxy / nor
-
-        return ccf
 
 
     @staticmethod
-    def ccfs_band(dt, x, y):
+    def _box_smooth(arr, M):
 
-        x = np.asarray(x)
-        y = np.asarray(y)
-        N = len(x)
-        tau = dt * np.arange(-N + 1, N, 1)
-        ccfs = [Lag.ccf_band(d, x, y) for d in range(-N + 1, N, 1)]
-
-        return tau, np.array(ccfs)
+        if M == 1:
+            return np.asarray(arr, dtype=float).copy()
+        
+        return np.convolve(arr, np.ones(M), mode='valid')
 
 
     @staticmethod
-    def ccfs_scipy(dt, x, y):
+    def _box_smooth_batch(arr2d, M):
 
-        x = np.asarray(x)
-        y = np.asarray(y)
-        N = len(x)
-        nor = np.sqrt(np.sum(x ** 2) * np.sum(y ** 2))
-        tau = dt * np.arange(-N + 1, N, 1)
-        if nor == 0:
-            ccfs = np.zeros(2 * N - 1, dtype=float)
-        else:
-            ccfs = signal.correlate(y, x, mode='full', method='auto') / nor
-
-        return tau, ccfs
+        if M == 1:
+            return np.asarray(arr2d, dtype=float).copy()
+        
+        arr2d = np.asarray(arr2d, dtype=float)
+        
+        cumsum = np.concatenate([
+            np.zeros((arr2d.shape[0], 1), dtype=arr2d.dtype),
+            np.cumsum(arr2d, axis=1)
+            ], axis=1)
+        
+        return cumsum[:, M:] - cumsum[:, :-M]
 
 
     @staticmethod
     def gaussian(x, cons, amp, mu, sigma):
         
         return cons + amp * np.exp(-((x - mu) ** 2) / (2 * sigma ** 2))
-    
-    
+
+
     @staticmethod
     def asymmetric_gaussian(x, cons, amp, mu, sigma_l, sigma_r):
         
@@ -173,8 +166,8 @@ class Lag(object):
         gaussian_r = cons + amp * np.exp(-((x - mu) ** 2) / (2 * sigma_r ** 2))
         
         return gaussian_l * (x <= mu) + gaussian_r * (x > mu)
-    
-    
+
+
     @staticmethod
     def double_gaussian(x, cons, amp1, mu1, sigma1, amp2, mu2, sigma2):
         
@@ -192,9 +185,8 @@ class Lag(object):
 
     @staticmethod
     def pseudo_voigt(x, cons, amp, mu, sigma, eta):
-
-        gamma = sigma * np.sqrt(2 * np.log(2))
         
+        gamma = sigma * np.sqrt(2 * np.log(2))
         gaussian_part = np.exp(-((x - mu) ** 2) / (2 * sigma ** 2))
         lorentzian_part = (gamma ** 2) / ((x - mu) ** 2 + gamma ** 2)
         
@@ -224,16 +216,18 @@ class Lag(object):
 
 
     def _mc_simulation(self):
+        
+        xncts_sample = self._mc_sample(self.xtype, self.xcts, self.xcts_err, 
+                                       self.xbcts, self.xbcts_err)
+        self.mc_xncts = np.vstack([self.xncts, xncts_sample])
 
-        xnet = self._mc_sample(self.xtype, self.xcts, self.xcts_err, self.xbcts, self.xbcts_err)
-        self.mc_xncts = np.vstack([self.xncts, xnet])
-
-        ynet = self._mc_sample(self.ytype, self.ycts, self.ycts_err, self.ybcts, self.ybcts_err)
-        self.mc_yncts = np.vstack([self.yncts, ynet])
+        yncts_sample = self._mc_sample(self.ytype, self.ycts, self.ycts_err, 
+                                       self.ybcts, self.ybcts_err)
+        self.mc_yncts = np.vstack([self.yncts, yncts_sample])
 
 
-    def _batch_ccfs(self):
-
+    def _ccfs_batch(self):
+        
         n = self.nsample
         nfft = next_fast_len(2 * n - 1)
 
@@ -241,7 +235,8 @@ class Lag(object):
         Y = rfft(self.mc_yncts, n=nfft, axis=1)
         all_ccfs = irfft(Y * X_rev, n=nfft, axis=1)[:, :2 * n - 1]
 
-        norms = np.sqrt(np.sum(self.mc_xncts ** 2, axis=1) * np.sum(self.mc_yncts ** 2, axis=1))
+        norms = np.sqrt(np.sum(self.mc_xncts ** 2, axis=1) * 
+                         np.sum(self.mc_yncts ** 2, axis=1))
         zero_mask = norms == 0
         norms[zero_mask] = 1.0
         all_ccfs /= norms[:, np.newaxis]
@@ -250,14 +245,46 @@ class Lag(object):
         return all_ccfs
 
 
-    def calculate(self, method=None, width=None, threshold=None, poly_deg=None, spline_s=None):
+    def calculate(self, method=None, width=None, threshold=None, 
+                  poly_deg=None, spline_s=None):
+        """
+        Parameters
+        ----------
+        method : str
+            'argmax'  : direct peak + parabolic sub-bin refinement (MCCF default)
+            'polyfit' : polynomial fit
+            'spline'  : cubic spline fit
+            'gp'      : Gaussian process fit (classic CCF default)
+            'gaussian', 'asymmetric_gaussian', 'double_gaussian',
+            'lorentzian', 'pseudo_voigt' : analytic model fit
+        width : int, optional
+            Restrict fit/search to ±width bins around the CCF peak.
+        threshold : float, optional
+            Restrict to region where CCF >= threshold x peak.
+        poly_deg : int, optional
+            Polynomial degree (for 'polyfit').
+        spline_s : float, optional
+            Spline smoothing factor (for 'spline').
+        """
         
         if method is None:
-            method = 'gp'
-            
-        self.taus = self.dt * np.arange(- self.nsample + 1, self.nsample, 1)
+            method = 'argmax' if self.M > 1 else 'gp'
+
+        self.xncts = self.xcts - self.xbcts
+        self.yncts = self.ycts - self.ybcts
+        self.nsample = len(self.xcts)
+        self._mc_simulation()
         
-        self.mc_ccfs = self._batch_ccfs()
+        if self.M > 1:
+            self.xncts = self._box_smooth(self.xncts, self.M)
+            self.yncts = self._box_smooth(self.yncts, self.M)
+            self.mc_xncts = self._box_smooth_batch(self.mc_xncts, self.M)
+            self.mc_yncts = self._box_smooth_batch(self.mc_yncts, self.M)
+            self.nsample = len(self.xncts)
+
+        self.taus = self.dt * np.arange(-self.nsample + 1, self.nsample, 1)
+        
+        self.mc_ccfs = self._ccfs_batch()
         self.ccfs = self.mc_ccfs[0]
 
         pidx = np.argmax(self.ccfs)
@@ -298,40 +325,60 @@ class Lag(object):
             fit_ccfs = ccfs_i[self.nidx]
             
             try:
-                if method == 'polyfit':
+                if method == 'argmax':
+                    peak_pos = int(np.argmax(fit_ccfs))
+                    lag_i = fit_taus[peak_pos]
+                    if 0 < peak_pos < len(fit_ccfs) - 1:
+                        y0 = fit_ccfs[peak_pos - 1]
+                        y1 = fit_ccfs[peak_pos]
+                        y2 = fit_ccfs[peak_pos + 1]
+                        denom = y0 - 2 * y1 + y2
+                        if denom != 0:
+                            offset = 0.5 * (y0 - y2) / denom
+                            if abs(offset) < 1.0:
+                                lag_i = fit_taus[peak_pos] + offset * self.dt
+                    if i == 0:
+                        self.itp_ccfs = np.interp(self.itp_taus, fit_taus, fit_ccfs)
+
+                elif method == 'polyfit':
                     polyfit = np.polyfit(fit_taus, fit_ccfs, deg=poly_deg)
-                    lag_i = minimize_scalar(lambda x: -np.polyval(polyfit, x), bounds=self.nrange, method='bounded').x
+                    lag_i = minimize_scalar(lambda x: -np.polyval(polyfit, x), 
+                                            bounds=self.nrange, method='bounded').x
                     if i == 0:
                         self.itp_ccfs = np.polyval(polyfit, self.itp_taus)
-                
+
                 elif method == 'spline':
                     spline = UnivariateSpline(fit_taus, fit_ccfs, s=spline_s)
-                    lag_i = minimize_scalar(lambda x: -spline(x), bounds=self.nrange, method='bounded').x
+                    lag_i = minimize_scalar(lambda x: -spline(x), 
+                                            bounds=self.nrange, method='bounded').x
                     if i == 0:
                         self.itp_ccfs = spline(self.itp_taus)
-                        
+
                 elif method == 'gp':
                     if fitted_kernel is None:
                         kernel = 1.0 * RBF(length_scale=0.1) + WhiteKernel(noise_level=0.01)
                         gpr = GaussianProcessRegressor(kernel=kernel, n_restarts_optimizer=5)
                         gpr.fit(fit_taus.reshape(-1, 1), fit_ccfs)
                         fitted_kernel = gpr.kernel_
-                        lag_i = minimize_scalar(lambda x: -gpr.predict([[x]])[0], bounds=self.nrange, method='bounded').x
+                        lag_i = minimize_scalar(lambda x: -gpr.predict([[x]])[0], 
+                                                bounds=self.nrange, method='bounded').x
                         self.itp_ccfs = gpr.predict(self.itp_taus.reshape(-1, 1))
                     else:
                         gpr = GaussianProcessRegressor(kernel=fitted_kernel, optimizer=None)
                         gpr.fit(fit_taus.reshape(-1, 1), fit_ccfs)
-                        lag_i = minimize_scalar(lambda x: -gpr.predict([[x]])[0], bounds=self.nrange, method='bounded').x
-                    
+                        lag_i = minimize_scalar(lambda x: -gpr.predict([[x]])[0], 
+                                                bounds=self.nrange, method='bounded').x
+
                 elif method in self.model_funcs:
                     func = self.model_funcs[method]
                     popt, _ = curve_fit(func, fit_taus, fit_ccfs, maxfev=5000)
-                    lag_i = minimize_scalar(lambda x: -func(x, *popt), bounds=self.nrange, method='bounded').x
+                    lag_i = minimize_scalar(lambda x: -func(x, *popt), 
+                                            bounds=self.nrange, method='bounded').x
                     if i == 0:
                         self.itp_ccfs = func(self.itp_taus, *popt)
-                    
+
                 else:
-                    raise ValueError('unknown method')
+                    raise ValueError(f'unknown method: {method}')
 
                 self.mc_fit_lags.append(lag_i)
                 
@@ -341,30 +388,24 @@ class Lag(object):
                 continue
 
         lag_bv = self.mc_fit_lags[0]
-        
-        if self.mc:
-            clipped = sigma_clip(self.mc_fit_lags, sigma=5, maxiters=5, stdfunc=mad_std)
-            mc_fit_lags_filter = clipped.compressed()
 
-            lag_lo, lag_hi = np.percentile(mc_fit_lags_filter, [16, 84])
-            lag_err = np.diff([lag_lo, lag_bv, lag_hi])
-            self.lag = [lag_bv, lag_err[0], lag_err[1]]
-            
-            print('\n+-----------------------------------------------+')
-            print(' %-15s%-15s%-15s' % ('lag (s)', 'lag_le (s)', 'lag_he (s)'))
-            print(' %-15.4f%-15.4f%-15.4f' % (self.lag[0], self.lag[1], self.lag[2]))
-            print('+-----------------------------------------------+\n')
-            
-        else:
-            self.lag = lag_bv
-            
-            print('\n+-----------------------------------------------+')
-            print(' %-15s ' % 'lag (s)')
-            print(' %-15.4f ' % self.lag)
-            print('+-----------------------------------------------+\n')
+        clipped = sigma_clip(self.mc_fit_lags[1:], sigma=5, maxiters=5, stdfunc=mad_std)
+        mc_fit_lags_filter = clipped.compressed()
+
+        lag_lo, lag_hi = np.percentile(mc_fit_lags_filter, [16, 84])
+        lag_err = np.diff([lag_lo, lag_bv, lag_hi])
+        self.lag = [lag_bv, lag_err[0], lag_err[1]]
+
+        print('\n+---------------------------------------------------+')
+        print(' %-15s%-15s%-15s' % ('lag (s)', 'lag_le (s)', 'lag_he (s)'))
+        print(' %-15.6g%-15.6g%-15.6g' % (self.lag[0], self.lag[1], self.lag[2]))
+        print(' method=%s, M=%d, dt=%.3g s, dt_analysis=%.3g s' %
+              (method, self.M, self.dt, self.dt_analysis))
+        print('+---------------------------------------------------+\n')
 
         self.lag_res = {'lag': self.lag, 'mc_fit_lags': self.mc_fit_lags, 
                         'width': width, 'threshold': threshold, 'method': method, 
+                        'M': self.M, 'dt': self.dt, 'dt_analysis': self.dt_analysis,
                         'taus': self.taus, 'ccfs': self.ccfs, 
                         'itp_taus': self.itp_taus, 'itp_ccfs': self.itp_ccfs}
 
@@ -374,10 +415,9 @@ class Lag(object):
         if not os.path.exists(savepath):
             os.makedirs(savepath)
 
-        json_dump(self.lag_res, savepath + '/lag_res%s.json'%suffix)
+        json_dump(self.lag_res, savepath + '/lag_res%s.json' % suffix)
 
         rcParams['font.family'] = 'serif'
-        rcParams['font.sans-serif'] = 'Georgia'
         rcParams['font.size'] = 12
         rcParams['pdf.fonttype'] = 42
 
@@ -388,31 +428,35 @@ class Lag(object):
         ax.set_xlabel('Time delay (s)')
         ax.set_ylabel('CCF value')
         ax.minorticks_on()
-        ax.tick_params(axis='x', which='both', direction='in', labelcolor='k', colors='k')
-        ax.tick_params(axis='y', which='both', direction='in', labelcolor='k', colors='k')
+        ax.tick_params(axis='x', which='both', direction='in')
+        ax.tick_params(axis='y', which='both', direction='in')
         ax.tick_params(which='major', width=1.0, length=5)
         ax.tick_params(which='minor', width=1.0, length=3)
         ax.xaxis.set_ticks_position('both')
         ax.yaxis.set_ticks_position('both')
-        fig.savefig(savepath + '/tau_ccf%s.pdf'%suffix, bbox_inches='tight', pad_inches=0.1, dpi=300)
+        fig.savefig(savepath + '/tau_ccf%s.pdf' % suffix, bbox_inches='tight', 
+                    pad_inches=0.1, dpi=300)
         plt.close(fig)
         
-        if self.mc:
-            fig, ax = plt.subplots(1, 1, figsize=(7, 6))
-            lag_bins = np.linspace(min(self.mc_fit_lags), max(self.mc_fit_lags), 30)
-            ax.hist(self.mc_fit_lags, lag_bins, density=False, histtype='step', color='b', lw=1.0)
-            ax.axvline(self.lag[0], c='grey', lw=1.0)
-            ax.axvline(self.lag[0] - self.lag[1], c='grey', ls='--', lw=1.0)
-            ax.axvline(self.lag[0] + self.lag[2], c='grey', ls='--', lw=1.0)
-            ax.set_xlabel('Lags (sec)')
-            ax.set_ylabel('Counts')
-            ax.set_title(r'$\tau=%.4f_{-%.4f}^{+%.4f}~{\rm s}$'%(self.lag[0], self.lag[1], self.lag[2]))
-            ax.minorticks_on()
-            ax.tick_params(axis='x', which='both', direction='in', labelcolor='k', colors='k')
-            ax.tick_params(axis='y', which='both', direction='in', labelcolor='k', colors='k')
-            ax.tick_params(which='major', width=1.0, length=5)
-            ax.tick_params(which='minor', width=1.0, length=3)
-            ax.xaxis.set_ticks_position('both')
-            ax.yaxis.set_ticks_position('both')
-            fig.savefig(savepath + '/lag_pdf%s.pdf'%suffix, bbox_inches='tight', pad_inches=0.1, dpi=300)
-            plt.close(fig)
+        fig, ax = plt.subplots(1, 1, figsize=(7, 6))
+        mc_only = self.mc_fit_lags[1:]
+        lag_bins = np.linspace(min(mc_only), max(mc_only), 30)
+        ax.hist(mc_only, lag_bins, density=False, histtype='step',
+                color='b', lw=1.0)
+        ax.axvline(self.lag[0], c='grey', lw=1.0)
+        ax.axvline(self.lag[0] - self.lag[1], c='grey', ls='--', lw=1.0)
+        ax.axvline(self.lag[0] + self.lag[2], c='grey', ls='--', lw=1.0)
+        ax.set_xlabel('Lags (sec)')
+        ax.set_ylabel('Counts')
+        ax.set_title(r'$\tau=%.4g_{-%.4g}^{+%.4g}~{\rm s}$' % 
+                     (self.lag[0], self.lag[1], self.lag[2]))
+        ax.minorticks_on()
+        ax.tick_params(axis='x', which='both', direction='in')
+        ax.tick_params(axis='y', which='both', direction='in')
+        ax.tick_params(which='major', width=1.0, length=5)
+        ax.tick_params(which='minor', width=1.0, length=3)
+        ax.xaxis.set_ticks_position('both')
+        ax.yaxis.set_ticks_position('both')
+        fig.savefig(savepath + '/lag_pdf%s.pdf' % suffix, bbox_inches='tight', 
+                    pad_inches=0.1, dpi=300)
+        plt.close(fig)
