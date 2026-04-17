@@ -1359,6 +1359,7 @@ class epImage(Image):
     
     @staticmethod
     def _psf_model(r, p):
+        
         rc = 5.1964
         beta = 1.5792
         sigma = 8.7997
@@ -1520,6 +1521,7 @@ class swiftImage(Image):
     
     @staticmethod
     def _psf_model(r, p):
+        
         rc = 3.726
         beta = 1.305
         sigma = 7.422
