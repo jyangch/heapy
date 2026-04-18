@@ -318,7 +318,7 @@ class Lag(object):
             self.itp_taus = None
             self.itp_ccfs = None
         else:
-            self.itp_taus = np.linspace(self.nrange[0], self.nrange[1], 300)
+            self.itp_taus = np.linspace(self.nrange[0], self.nrange[1], 1000)
             self.itp_ccfs = np.zeros_like(self.itp_taus, dtype=float)
 
         self.mc_fit_lags = []
@@ -363,14 +363,23 @@ class Lag(object):
                         gpr = GaussianProcessRegressor(kernel=kernel, n_restarts_optimizer=5)
                         gpr.fit(fit_taus.reshape(-1, 1), fit_ccfs)
                         fitted_kernel = gpr.kernel_
-                        lag_i = minimize_scalar(lambda x: -gpr.predict([[x]])[0], 
-                                                bounds=self.nrange, method='bounded').x
-                        self.itp_ccfs = gpr.predict(self.itp_taus.reshape(-1, 1))
                     else:
                         gpr = GaussianProcessRegressor(kernel=fitted_kernel, optimizer=None)
                         gpr.fit(fit_taus.reshape(-1, 1), fit_ccfs)
-                        lag_i = minimize_scalar(lambda x: -gpr.predict([[x]])[0], 
-                                                bounds=self.nrange, method='bounded').x
+
+                    mu = gpr.predict(self.itp_taus.reshape(-1, 1))
+                    peak = int(np.argmax(mu))
+                    lag_i = self.itp_taus[peak]
+                    if 0 < peak < len(mu) - 1:
+                        y0, y1, y2 = mu[peak - 1], mu[peak], mu[peak + 1]
+                        denom = y0 - 2 * y1 + y2
+                        if denom != 0:
+                            step = self.itp_taus[1] - self.itp_taus[0]
+                            offset = 0.5 * (y0 - y2) / denom
+                            if abs(offset) < 1.0:
+                                lag_i = self.itp_taus[peak] + offset * step
+                    if i == 0:
+                        self.itp_ccfs = mu
 
                 elif method in self.model_funcs:
                     func = self.model_funcs[method]
