@@ -313,8 +313,13 @@ class Lag(object):
             spline_s = 0.1
         
         self.nrange = (self.taus[self.nidx[0]], self.taus[self.nidx[-1]])
-        self.itp_taus = np.linspace(self.nrange[0], self.nrange[1], 300)
-        self.itp_ccfs = np.zeros_like(self.itp_taus, dtype=float)
+        
+        if method == 'argmax':
+            self.itp_taus = None
+            self.itp_ccfs = None
+        else:
+            self.itp_taus = np.linspace(self.nrange[0], self.nrange[1], 300)
+            self.itp_ccfs = np.zeros_like(self.itp_taus, dtype=float)
 
         self.mc_fit_lags = []
         
@@ -337,8 +342,6 @@ class Lag(object):
                             offset = 0.5 * (y0 - y2) / denom
                             if abs(offset) < 1.0:
                                 lag_i = fit_taus[peak_pos] + offset * self.dt
-                    if i == 0:
-                        self.itp_ccfs = np.interp(self.itp_taus, fit_taus, fit_ccfs)
 
                 elif method == 'polyfit':
                     polyfit = np.polyfit(fit_taus, fit_ccfs, deg=poly_deg)
@@ -422,9 +425,10 @@ class Lag(object):
         rcParams['pdf.fonttype'] = 42
 
         fig, ax = plt.subplots(1, 1, figsize=(7, 6))
-        ax.scatter(self.taus[self.nidx], self.mc_ccfs[0][self.nidx], marker='+', 
-                   color='r', s=20, linewidths=0.5, alpha=1.0)
-        ax.plot(self.itp_taus, self.itp_ccfs, c='b', lw=0.5, alpha=1.0)
+        ax.scatter(self.taus[self.nidx], self.mc_ccfs[0][self.nidx], marker='o',
+                   color='r', s=10, linewidths=0.5, alpha=1.0)
+        if self.itp_taus is not None:
+            ax.plot(self.itp_taus, self.itp_ccfs, c='b', lw=0.5, alpha=1.0)
         ax.set_xlabel('Time delay (s)')
         ax.set_ylabel('CCF value')
         ax.minorticks_on()
