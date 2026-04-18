@@ -2,6 +2,7 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import rcParams
+from scipy.linalg import cho_solve
 from astropy.stats import sigma_clip, mad_std
 from scipy.interpolate import UnivariateSpline
 from scipy.fft import rfft, irfft, next_fast_len
@@ -310,7 +311,7 @@ class Lag(object):
             poly_deg = min(2, len(self.nidx) - 1)
             
         if method == 'spline' and spline_s is None:
-            spline_s = 0.1
+            spline_s = 0.05
         
         self.nrange = (self.taus[self.nidx[0]], self.taus[self.nidx[-1]])
         
@@ -325,6 +326,8 @@ class Lag(object):
         
         fit_taus = self.taus[self.nidx]
         fitted_kernel = None
+        gp_L = None
+        gp_K_star = None
 
         for i, ccfs_i in enumerate(self.mc_ccfs):
             fit_ccfs = ccfs_i[self.nidx]
@@ -363,21 +366,23 @@ class Lag(object):
                         gpr = GaussianProcessRegressor(kernel=kernel, n_restarts_optimizer=5)
                         gpr.fit(fit_taus.reshape(-1, 1), fit_ccfs)
                         fitted_kernel = gpr.kernel_
-                    else:
-                        gpr = GaussianProcessRegressor(kernel=fitted_kernel, optimizer=None)
-                        gpr.fit(fit_taus.reshape(-1, 1), fit_ccfs)
+                        gp_L = gpr.L_
+                        gp_K_star = fitted_kernel(
+                            self.itp_taus.reshape(-1, 1),
+                            fit_taus.reshape(-1, 1))
 
-                    mu = gpr.predict(self.itp_taus.reshape(-1, 1))
-                    peak = int(np.argmax(mu))
-                    lag_i = self.itp_taus[peak]
-                    if 0 < peak < len(mu) - 1:
-                        y0, y1, y2 = mu[peak - 1], mu[peak], mu[peak + 1]
+                    alpha = cho_solve((gp_L, True), fit_ccfs)
+                    mu = gp_K_star @ alpha
+                    peak_pos = int(np.argmax(mu))
+                    lag_i = self.itp_taus[peak_pos]
+                    if 0 < peak_pos < len(mu) - 1:
+                        y0, y1, y2 = mu[peak_pos - 1], mu[peak_pos], mu[peak_pos + 1]
                         denom = y0 - 2 * y1 + y2
                         if denom != 0:
                             step = self.itp_taus[1] - self.itp_taus[0]
                             offset = 0.5 * (y0 - y2) / denom
                             if abs(offset) < 1.0:
-                                lag_i = self.itp_taus[peak] + offset * step
+                                lag_i = self.itp_taus[peak_pos] + offset * step
                     if i == 0:
                         self.itp_ccfs = mu
 
@@ -434,7 +439,7 @@ class Lag(object):
         rcParams['pdf.fonttype'] = 42
 
         fig, ax = plt.subplots(1, 1, figsize=(7, 6))
-        ax.scatter(self.taus[self.nidx], self.mc_ccfs[0][self.nidx], marker='o',
+        ax.scatter(self.taus[self.nidx], self.mc_ccfs[0][self.nidx], marker='+',
                    color='r', s=10, linewidths=0.5, alpha=1.0)
         if self.itp_taus is not None:
             ax.plot(self.itp_taus, self.itp_ccfs, c='b', lw=0.5, alpha=1.0)
