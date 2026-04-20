@@ -1,21 +1,62 @@
+"""Signal classification pipeline for Gaussian-measured light curves.
+
+Provides :class:`ggSignal`, which turns per-bin rates with Gaussian errors
+into Bayesian blocks, computes SNR on raw and block scales, and sorts the
+bins into signal / background / bad categories.
+"""
+
 import os
-import warnings
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib import rcParams
 from astropy.stats import bayesian_blocks
 
+from .core_funcs import *
+from .plot_funcs import *
 from ..util.data import json_dump
 
 
 
 class ggSignal(object):
-    
-    """
-    NOTE: only apply to gaussian data
+    """Detect and sort signal bins in Gaussian-measured light curves.
+
+    Designed for data whose per-bin uncertainties are already Gaussian; do
+    not use this class for Poisson counts (see :class:`ppSignal` or
+    :class:`PolyBase` instead).
+
+    Attributes:
+        cts: Per-bin counts (or signal).
+        cts_err: 1-sigma uncertainty on :attr:`cts`.
+        bins: Bin edges (length ``N + 1``).
+        exp: Per-bin exposure times.
+        time: Bin centers.
+        rate: :attr:`cts` / :attr:`exp`.
+        rate_err: :attr:`cts_err` / :attr:`exp`.
+        ini_res, block_res, snr_res, sort_res: Stage result dicts populated
+            by :meth:`bblock`, :meth:`calsnr`, and :meth:`sorting`.
+
+    Example:
+        >>> sig = ggSignal(cts, cts_err, bins)
+        >>> sig.loop(p0=0.05, sigma=3)
+        >>> sig.save('./out')
+
+    Warning:
+        Only apply to Gaussian-distributed data.
     """
 
     def __init__(self, cts, cts_err, bins, exp=None):
+        """Store arrays and derive rates, rate errors, and bin geometry.
+
+        Args:
+            cts: Per-bin counts (or signal) matching bin count ``N``.
+            cts_err: 1-sigma uncertainty on ``cts``; same length as ``cts``.
+            bins: Bin edges (length ``N + 1``).
+            exp: Per-bin exposure times; defaults to bin widths when
+                ``None``.
+
+        Raises:
+            TypeError: If ``exp`` and ``bins`` have mismatched sizes or any
+                exposure exceeds its bin width.
+        """
 
         self.cts = np.array(cts)
         self.cts_err = np.array(cts_err)
@@ -42,30 +83,27 @@ class ggSignal(object):
                         'time': self.time, 'rate': self.rate, 
                         'exp': self.exp, 'bins': self.bins}
 
-        # bblock method
         self.block_res = None
-
-        # calsnr method
         self.snr_res = None
-
-        # fetsig method
         self.sort_res = None
     
     
     def bblock(self, p0=0.05):
-        
+        """Run ``astropy.stats.bayesian_blocks`` and filter undersized gaps.
+
+        Populates :attr:`edges`, :attr:`nblock`, :attr:`re_binsize`, and
+        :attr:`block_res`.
+
+        Args:
+            p0: False-alarm probability passed to ``bayesian_blocks``.
+        """
+
         edges_ = bayesian_blocks(self.time, self.rate, self.rate_err, fitness='measures', p0=p0)
             
         edges_[0] = max(edges_[0], self.time[0])
         edges_[-1] = min(edges_[-1], self.time[-1])
 
-        edges = [edges_[0], edges_[-1]]
-        for i in range(1, len(edges_) - 1, 1):
-            flag1 = (edges_[i] - edges_[i-1]) > np.min(self.binsize) / 1.8
-            flag2 = (edges_[i+1] - edges_[i]) > np.min(self.binsize) / 1.8
-            if flag1 and flag2:
-                edges.append(edges_[i])
-        self.edges = np.unique(edges)
+        self.edges = filter_block_edges(edges_, np.min(self.binsize))
         self.nblock = len(self.edges) - 1
         self.re_binsize = self.edges[1:] - self.edges[:-1]
 
@@ -73,9 +111,15 @@ class ggSignal(object):
     
     
     def calsnr(self):
-        
+        """Compute Gaussian SNR on both raw bins and Bayesian blocks.
+
+        Runs :meth:`bblock` first when block results are missing.
+        Populates :attr:`re_cts`, :attr:`re_cts_err`, :attr:`snr`,
+        :attr:`re_snr`, and :attr:`snr_res`.
+        """
+
         if self.block_res is None: self.bblock()
-        
+
         self.re_cts, self.re_cts_err = [], []
         for t1, t2 in zip(self.edges[:-1], self.edges[1:]):
             self.re_cts.append(np.sum(self.cts[(self.time >= t1) & (self.time < t2)]))
@@ -85,85 +129,39 @@ class ggSignal(object):
 
         self.snr = np.zeros_like(self.binsize)
         for i in range(len(self.binsize)):
-            cts_i = self.cts[i]
-            cts_err_i = self.cts_err[i]
-            
-            if cts_err_i <= 0:
-                snr_i = -5      # bad events
-            else:
-                snr_i = cts_i / cts_err_i
+            self.snr[i] = gauss_snr(self.cts[i], self.cts_err[i])
 
-            self.snr[i] = snr_i
-            
         self.re_snr = np.zeros_like(self.re_binsize)
         for i in range(len(self.re_binsize)):
-            cts_i = self.re_cts[i]
-            cts_err_i = self.re_cts_err[i]
+            self.re_snr[i] = gauss_snr(self.re_cts[i], self.re_cts_err[i])
 
-            if cts_err_i <= 0:
-                snr_i = -5      # bad events
-            else:
-                snr_i = cts_i / cts_err_i
-
-            self.re_snr[i] = snr_i
-
-        self.snr_res = {'snr': self.snr, 're_snr': self.re_snr, 
+        self.snr_res = {'snr': self.snr, 're_snr': self.re_snr,
                         're_cts': self.re_cts, 're_cts_err': self.re_cts_err}
         
         
     def sorting(self, sigma=3):
-        
+        """Classify raw bins and blocks into signal/background/bad by SNR.
+
+        Runs :meth:`calsnr` first when SNR results are missing. Populates
+        ``*_idx``/``*_int`` attributes plus :attr:`sort_res`.
+
+        Args:
+            sigma: Detection threshold in units of SNR.
+        """
+
         if self.snr_res is None: self.calsnr()
 
         self.sigma = sigma
-        self.re_bkg_idx, self.re_sig_idx, self.re_bad_idx = [], [], []
-        self.re_sig_int, self.re_bkg_int, self.re_bad_int = [], [], []
-        self.bkg_idx, self.sig_idx, self.bad_idx = [], [], []
-        self.sig_int, self.bkg_int, self.bad_int = [], [], []
+        re = classify_bins(self.re_snr, self.edges[:-1], self.edges[1:], sigma)
+        self.re_sig_idx, self.re_bkg_idx, self.re_bad_idx = re['sig_idx'], re['bkg_idx'], re['bad_idx']
+        self.re_sig_int, self.re_bkg_int, self.re_bad_int = re['sig_int'], re['bkg_int'], re['bad_int']
 
-        for i, snr_i in enumerate(self.re_snr):
-            if snr_i > sigma:
-                self.re_sig_idx.append(i)
-                self.re_sig_int.append([self.edges[i], self.edges[i+1]])
-            elif -5 < snr_i <= sigma:
-                self.re_bkg_idx.append(i)
-                self.re_bkg_int.append([self.edges[i], self.edges[i+1]])
-            else:
-                self.re_bad_idx.append(i)
-                self.re_bad_int.append([self.edges[i], self.edges[i+1]])
+        bn = classify_bins(self.snr, self.lbins, self.rbins, sigma)
+        self.sig_idx, self.bkg_idx, self.bad_idx = bn['sig_idx'], bn['bkg_idx'], bn['bad_idx']
+        self.sig_int, self.bkg_int, self.bad_int = bn['sig_int'], bn['bkg_int'], bn['bad_int']
 
-        for i, snr_i in enumerate(self.snr):
-            if snr_i > sigma:
-                self.sig_idx.append(i)
-                self.sig_int.append([self.lbins[i], self.rbins[i]])
-            elif -5 < snr_i <= sigma:
-                self.bkg_idx.append(i)
-                self.bkg_int.append([self.lbins[i], self.rbins[i]])
-            else:
-                self.bad_idx.append(i)
-                self.bad_int.append([self.lbins[i], self.rbins[i]])
-
-        self.re_bkg_idx = np.array(self.re_bkg_idx, dtype=int)
-        self.re_sig_idx = np.array(self.re_sig_idx, dtype=int)
-        self.re_bad_idx = np.array(self.re_bad_idx, dtype=int)
-
-        self.bkg_idx = np.array(self.bkg_idx, dtype=int)
-        self.sig_idx = np.array(self.sig_idx, dtype=int)
-        self.bad_idx = np.array(self.bad_idx, dtype=int)
-
-        self.re_bad_index = []
-        for i, (l, u) in enumerate(zip(self.lbins, self.rbins)):
-            for low, upp in self.re_bad_int:
-                if not (u <= low or l >= upp):
-                    self.re_bad_index.append(i)
-        self.re_bad_index = np.unique(self.re_bad_index).astype(int)
-
-        self.re_sig_index = []
-        for i, (l, u) in enumerate(zip(self.lbins, self.rbins)):
-            for low, upp in self.re_sig_int:
-                if not (u <= low or l >= upp):
-                    self.re_sig_index.append(i)
-        self.re_sig_index = np.unique(self.re_sig_index).astype(int)
+        self.re_bad_index = indices_in_intervals(self.lbins, self.rbins, self.re_bad_int)
+        self.re_sig_index = indices_in_intervals(self.lbins, self.rbins, self.re_sig_int)
 
         self.sort_res = {'sigma': self.sigma, 
                          're_bkg': (self.re_bkg_int, self.re_bkg_idx), 
@@ -172,14 +170,30 @@ class ggSignal(object):
 
 
     def loop(self, p0=0.05, sigma=3):
-        
+        """Run :meth:`bblock`, :meth:`calsnr`, and :meth:`sorting` in order.
+
+        Args:
+            p0: False-alarm probability for Bayesian blocks.
+            sigma: Detection threshold for bin classification.
+        """
+
         self.bblock(p0)
         self.calsnr()
         self.sorting(sigma)
 
 
     def save(self, savepath, suffix=''):
-        
+        """Dump stage results as JSON and write three diagnostic PDFs.
+
+        Creates ``savepath`` if missing. Writes ``ini_res``, ``block_res``,
+        ``snr_res``, ``sort_res`` JSON files and ``bs``/``snr``/``sort``
+        PDF figures, each suffixed with ``suffix``.
+
+        Args:
+            savepath: Destination directory; created if absent.
+            suffix: Optional filename suffix inserted before each extension.
+        """
+
         if not os.path.exists(savepath):
             os.makedirs(savepath)
 
@@ -188,77 +202,24 @@ class ggSignal(object):
         json_dump(self.snr_res, savepath + '/snr_res%s.json'%suffix)
         json_dump(self.sort_res, savepath + '/sort_res%s.json'%suffix)
 
-        rcParams['font.family'] = 'serif'
-        rcParams['font.sans-serif'] = 'Georgia'
-        rcParams['font.size'] = 12
-        rcParams['pdf.fonttype'] = 42
+        re_rate = self.re_cts / self.re_binsize
+        with rc_context_for_save():
+            fig, ax = plt.subplots(1, 1, figsize=(8, 5))
+            plot_lightcurve_bblock(ax, self.time, self.rate, self.edges, re_rate)
+            fig.savefig(savepath + '/bs%s.pdf'%suffix, bbox_inches='tight', pad_inches=0.1, dpi=300)
+            plt.close(fig)
 
-        fig, ax = plt.subplots(1, 1, figsize=(8, 5))
-        ax.plot(self.time, self.rate, lw=1.0, c='b', label='Light curve')
-        ax.plot(self.edges, np.append(self.re_cts/self.re_binsize, [(self.re_cts/self.re_binsize)[-1]]), 
-                lw=1.0, c='c', drawstyle='steps-post', label='Bayesian block')
-        ax.set_xlim([min(self.time), max(self.time)])
-        ax.set_xlabel('Time')
-        ax.set_ylabel('Rate')
-        ax.minorticks_on()
-        ax.tick_params(axis='x', which='both', direction='in', labelcolor='k', colors='k')
-        ax.tick_params(axis='y', which='both', direction='in', labelcolor='k', colors='k')
-        ax.tick_params(which='major', width=1.0, length=5)
-        ax.tick_params(which='minor', width=1.0, length=3)
-        ax.xaxis.set_ticks_position('both')
-        ax.yaxis.set_ticks_position('both')
-        ax.legend(frameon=False)
-        fig.savefig(savepath + '/bs%s.pdf'%suffix, bbox_inches='tight', pad_inches=0.1, dpi=300)
-        plt.close(fig)
+            fig, ax = plt.subplots(1, 1, figsize=(8, 5))
+            plot_snr(ax, self.time, self.rate, self.edges, self.snr, self.re_snr, self.sigma,
+                     left_label='light curve',
+                     bblock_snr_label='Baysian block SNR',
+                     ylim_factors=(1.5, 1.1))
+            fig.savefig(savepath + '/snr%s.pdf'%suffix, bbox_inches='tight', pad_inches=0.1, dpi=300)
+            plt.close(fig)
 
-        fig, ax = plt.subplots(1, 1, figsize=(8, 5))
-        p1, = ax.plot(self.time, self.rate, lw=1.0, c='k', label='light curve')
-        ax.set_xlim([min(self.time), max(self.time)])
-        ax.set_xlabel('Time')
-        ax.set_ylabel('Rate')
-        ax.minorticks_on()
-        ax.tick_params(axis='x', which='both', direction='in', labelcolor='k', colors='k')
-        ax.tick_params(axis='y', which='both', direction='in', labelcolor='k', colors='k')
-        ax.tick_params(which='major', width=1.0, length=5)
-        ax.tick_params(which='minor', width=1.0, length=3)
-        ax.xaxis.set_ticks_position('both')
-        ax.yaxis.set_ticks_position('both')
-
-        ax1 = ax.twinx()
-        p2, = ax1.plot(self.time, self.snr, lw=1.0, c='b', label='SNR', drawstyle='steps-mid')
-        p3, = ax1.plot(self.edges, np.append(self.re_snr, [self.re_snr[-1]]), lw=1.0, c='c', 
-                       label='Baysian block SNR', drawstyle='steps-post')
-        p4 = ax1.axhline(self.sigma, lw=1.0, c='grey', ls='--', label='%.1f$\\sigma$' % self.sigma)
-        ax1.set_xlim([min(self.time), max(self.time)])
-        ax1.set_ylabel('SNR')
-        
-        ratio = np.max(self.rate) / np.max(self.re_snr)
-        ax_ylim = [1.5 * np.min(self.rate), 1.1 * np.max(self.rate)]
-        ax1_ylim = [lim / ratio for lim in ax_ylim]
-        ax.set_ylim(ax_ylim)
-        ax1.set_ylim(ax1_ylim)
-
-        plt.legend(handles=[p1, p2, p3, p4], frameon=False)
-        fig.savefig(savepath + '/snr%s.pdf'%suffix, bbox_inches='tight', pad_inches=0.1, dpi=300)
-        plt.close(fig)
-
-        fig, ax = plt.subplots(1, 1, figsize=(8, 5))
-        colors = []
-        for i in range(len(self.re_binsize)):
-            if i in self.re_sig_idx: colors.append('m')
-            if i in self.re_bkg_idx: colors.append('b')
-            if i in self.re_bad_idx: colors.append('k')
-        ax.bar((self.edges[:-1]+self.edges[1:])/2, self.re_cts/self.re_binsize, bottom=0, width=self.re_binsize, color=colors)
-        ax.plot(self.time, self.rate, lw=1.0, c='b', label='Light curve')
-        ax.set_xlim([min(self.time), max(self.time)])
-        ax.set_xlabel('Time')
-        ax.set_ylabel('Rate')
-        ax.minorticks_on()
-        ax.tick_params(axis='x', which='both', direction='in', labelcolor='k', colors='k')
-        ax.tick_params(axis='y', which='both', direction='in', labelcolor='k', colors='k')
-        ax.tick_params(which='major', width=1.0, length=5)
-        ax.tick_params(which='minor', width=1.0, length=3)
-        ax.xaxis.set_ticks_position('both')
-        ax.yaxis.set_ticks_position('both')
-        fig.savefig(savepath + '/sort%s.pdf'%suffix, bbox_inches='tight', pad_inches=0.1, dpi=300)
-        plt.close(fig)
+            fig, ax = plt.subplots(1, 1, figsize=(8, 5))
+            plot_sorted(ax, self.time, self.edges, self.re_cts, self.re_binsize,
+                        self.re_sig_idx, self.re_bkg_idx, self.re_bad_idx,
+                        rate=self.rate)
+            fig.savefig(savepath + '/sort%s.pdf'%suffix, bbox_inches='tight', pad_inches=0.1, dpi=300)
+            plt.close(fig)

@@ -1,27 +1,85 @@
+"""Weighted-least-squares polynomial fitting with BIC model selection.
+
+Provides :class:`Polynomial`, a thin wrapper around :mod:`numpy.linalg`
+that exposes a ``fit``/``val`` interface and implements the GBM/GECAM
+two-pass fitting recipe used for Poisson-rate backgrounds.
+"""
+
 import warnings
 import numpy as np
 
 
 
 class Polynomial(object):
+    """Fit a polynomial background via BIC-selected weighted least squares.
+
+    The default ``'2pass'`` method iterates a uniform-weight pass followed
+    by a model-variance-weighted pass across degrees ``0..4`` and keeps the
+    degree with the lowest BIC. Coefficient covariance is propagated so
+    :meth:`val` can return per-point 1-sigma errors.
+
+    Attributes:
+        method: Selected fitting strategy.
+        x, y: Inputs to the last :meth:`fit` call.
+        deg: User-supplied degree (``None`` enables BIC search).
+        dx: Per-point width used to convert rate to counts for the variance.
+        ls_res: Fit dict returned by the winning call to :meth:`ls_polyfit`.
+        best_deg, best_bic, bic_list, deg_list: BIC selection bookkeeping.
+
+    Example:
+        >>> poly = Polynomial.set_method('2pass')
+        >>> poly.fit(time, rate, dx=exp)
+        >>> mo, err = poly.val(time_new)
+    """
 
     def __init__(self, method='2pass'):
-        
+        """Store the fitting strategy identifier.
+
+        Args:
+            method: Strategy name; currently only ``'2pass'`` is supported.
+        """
+
         self.method = method
 
 
     @classmethod
     def set_method(cls, method='2pass'):
-        
+        """Validate ``method`` and return a configured :class:`Polynomial`.
+
+        Args:
+            method: Strategy name; must be ``'2pass'``.
+
+        Returns:
+            A new :class:`Polynomial` bound to ``method``.
+
+        Raises:
+            ValueError: If ``method`` is not ``'2pass'``.
+        """
+
         if method == '2pass':
             pass
         else:
             raise ValueError('invalid method')
-        
+
         return cls(method=method)
 
 
     def fit(self, x, y, deg=None, dx=None):
+        """Fit a polynomial background to ``(x, y)`` using the configured method.
+
+        Stores inputs on the instance and delegates to :meth:`two_pass`
+        (the only method currently supported).
+
+        Args:
+            x: Abscissae (1D).
+            y: Rate values matching ``x``.
+            deg: Polynomial degree; ``None`` searches ``0..4`` by BIC.
+            dx: Per-point width converting rate variance to count variance;
+                scalar or 1D matching ``x``. Defaults to ``x[1] - x[0]``.
+
+        Raises:
+            ValueError: If :attr:`method` is not ``'2pass'``.
+        """
         
         self.x = np.array(x).astype(float)
         self.y = np.array(y).astype(float)
@@ -37,7 +95,22 @@ class Polynomial(object):
 
 
     def val(self, x):
-        
+        """Evaluate the fitted polynomial and its 1-sigma uncertainty at ``x``.
+
+        Emits a ``UserWarning`` when ``x`` falls outside the fitting
+        range. Requires a prior :meth:`fit` call.
+
+        Args:
+            x: Query abscissae.
+
+        Returns:
+            Tuple ``(mo, err)`` — model values and their 1-sigma errors
+            propagated from the coefficient covariance.
+
+        Raises:
+            AssertionError: If called before :meth:`fit`.
+        """
+
         x = np.array(x)
         
         if min(x) < min(self.x):
@@ -55,14 +128,25 @@ class Polynomial(object):
 
 
     def two_pass(self):
-        
-        # Two-pass fitting
-        # First pass donot use the variances (i.e. uniform weight)
-        # GBM and GECAM team: First pass uses the data variances calculated from data rates
-        # Second pass uses the data variances calculated from model rates
-        # 1) rate * livetime = counts
-        # 2) variance of counts = counts
-        # 3) variance of rate = variance of counts/livetime^2 = rate/livetime
+        """Run the GBM/GECAM-style two-pass polynomial fit with BIC selection.
+
+        For each candidate degree, runs a uniform-weight pass followed by
+        a model-variance-weighted pass and records the BIC. The instance
+        is updated with the lowest-BIC result.
+
+        Populates :attr:`deg_list`, :attr:`bic_list`, :attr:`best_bic`,
+        :attr:`best_deg`, and :attr:`ls_res`.
+
+        Raises:
+            TypeError: If ``self.dx`` is a non-scalar array with a shape
+                that does not match ``self.x``.
+        """
+
+        # Weighting scheme follows the GBM / GECAM background-fitting recipe:
+        # first pass is unweighted, second pass re-weights by model-rate
+        # variance so poorly-fit bins don't anchor the solution.
+        # Derivation: rate * livetime = counts; var(counts) = counts (Poisson);
+        # var(rate) = var(counts) / livetime^2 = rate / livetime.
         
         time = self.x
         rate = self.y
@@ -106,7 +190,25 @@ class Polynomial(object):
 
     @staticmethod
     def ls_polyval(x, coeff, covar=None):
-        
+        """Evaluate a polynomial and optionally its propagated 1-sigma error.
+
+        With ``covar`` supplied, the returned error is the diagonal of
+        ``X @ covar @ X^T``, clipped at zero before the square root.
+
+        Args:
+            x: 1D query abscissae (non-empty).
+            coeff: Polynomial coefficients in descending power order.
+            covar: Optional coefficient covariance matrix
+                (``order x order``).
+
+        Returns:
+            ``mo`` (1D model values) when ``covar`` is ``None``; otherwise
+            ``(mo, err)``.
+
+        Raises:
+            TypeError: If array shapes violate the documented contracts.
+        """
+
         if x.ndim != 1:
             raise TypeError("expected 1D vector for x")
         if x.size == 0:
@@ -151,7 +253,36 @@ class Polynomial(object):
 
     @staticmethod
     def ls_polyfit(x, y, deg, rcond=None, w=None, cov=True):
-        
+        """Fit a weighted least-squares polynomial and return diagnostic stats.
+
+        The Vandermonde system is column-scaled for conditioning, solved
+        via :func:`numpy.linalg.lstsq`, and the resulting coefficients and
+        covariance are rescaled back to the original basis. AIC and BIC
+        use the weighted sum of squared residuals as the likelihood proxy.
+
+        Args:
+            x: 1D abscissae (non-empty).
+            y: 1D or 2D ordinates with ``y.shape[0] == x.shape[0]``.
+            deg: Non-negative polynomial degree.
+            rcond: Cutoff for small singular values; defaults to
+                ``len(x) * eps``.
+            w: Per-point weights; defaults to ones.
+            cov: ``True`` returns scaled covariance, ``"unscaled"`` skips
+                the ``chi2/dof`` rescaling, ``False`` omits covariance.
+
+        Returns:
+            Dict with keys ``coeff``, ``chi2``, ``rank``, ``svs``,
+            ``rcond``, ``order``, ``dof``, ``aic``, ``bic`` (plus
+            ``covar`` when ``cov`` is truthy).
+
+        Raises:
+            ValueError: If ``deg < 0``.
+            TypeError: If array shapes violate the documented contracts.
+
+        Warning:
+            Emits ``UserWarning`` on rank deficiency or non-positive dof.
+        """
+
         order = int(deg) + 1
         x = np.asarray(x) + 0.0
         y = np.asarray(y) + 0.0
