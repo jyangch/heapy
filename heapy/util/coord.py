@@ -1,3 +1,11 @@
+"""Coordinate transformation utilities for satellite and spacecraft data analysis.
+
+This module provides functions to convert between celestial and terrestrial
+reference frames (GCRS/ITRS), compute Earth geometry parameters visible from
+orbit, estimate the McIlwain L-shell, and transform directions between the
+spacecraft body frame and the GCRS sky frame using quaternion attitude data.
+"""
+
 import os
 import numpy as np
 from astropy.time import Time
@@ -8,30 +16,36 @@ from astropy.coordinates import GCRS, ITRS, CartesianRepresentation, EarthLocati
 
 
 def gcrs_to_itrs(scpos, utc, utc_format='isot'):
-    """
-    Convert coordinates 
-    from GCRS (Geocentric Celestial Reference System) 
-    to ITRS (International Terrestrial Reference System).
-    
-    Parameters:
-    ----------
-    scpos : array_like, in units of (m, m, m)
-        single: [x, y, z]
-        batch: [[x1, y1, z1], ...]
-    utc : str or array_like
-        single: 'utc'
-        batch: ['utc1', ...]
-        
+    """Convert GCRS Cartesian position to ITRS geodetic coordinates.
+
+    Transforms one or more spacecraft positions expressed in the Geocentric
+    Celestial Reference System (GCRS) into geodetic latitude, longitude, and
+    altitude in the International Terrestrial Reference System (ITRS).
+
+    Args:
+        scpos: Spacecraft position(s) in metres. Single position as a
+            shape-(3,) array ``[x, y, z]``; batch as a shape-(N, 3) array
+            ``[[x1, y1, z1], ...]``.
+        utc: UTC timestamp(s) matching the format given by ``utc_format``.
+            Single value as a scalar string; batch as a 1-D array of strings
+            with length N matching ``scpos``.
+        utc_format: Astropy time format string for parsing ``utc``.
+            Defaults to ``'isot'``.
+
     Returns:
-    -------
-    lla : array_like, in units of (deg, deg, km)
-        single: [lat, lon, alt]
-        batch: [[lat1, lon1, alt1], ...]
+        Geodetic coordinates in units of (degrees, degrees, km). Single
+        position returned as a shape-(3,) array ``[lat, lon, alt]``; batch
+        returned as a shape-(N, 3) array ``[[lat1, lon1, alt1], ...]``.
+
+    Raises:
+        ValueError: If ``scpos`` is not shape (3,) or (N, 3), if ``utc`` is
+            not a scalar or shape-(N,) array, or if the number of positions
+            does not match the number of timestamps.
     """
-    
+
     scpos_arr = np.asarray(scpos)
     utc_arr = np.asarray(utc)
-    
+
     if scpos_arr.ndim == 1 \
         and utc_arr.ndim == 0 \
             and scpos_arr.shape[0] == 3:
@@ -43,58 +57,64 @@ def gcrs_to_itrs(scpos, utc, utc_format='isot'):
     else:
         raise ValueError('Invalid input shapes: scpos should be (3,) or (N, 3), \
             utc should be scalar or (N,)')
-        
+
     scpos_arr = np.atleast_2d(scpos_arr)
     utc_arr = np.atleast_1d(utc_arr)
-    
+
     if scpos_arr.shape[0] != utc_arr.shape[0]:
         raise ValueError('The number of coordinate positions must match the number of times')
-    
+
     t = Time(utc_arr, format=utc_format, scale='utc')
     cart_gcrs = CartesianRepresentation(
-        x=scpos_arr[:, 0], 
-        y=scpos_arr[:, 1], 
-        z=scpos_arr[:, 2], 
+        x=scpos_arr[:, 0],
+        y=scpos_arr[:, 1],
+        z=scpos_arr[:, 2],
         unit=u.m)
-    
+
     coords_gcrs = GCRS(cart_gcrs, obstime=t)
     coords_itrs = coords_gcrs.transform_to(ITRS(obstime=t))
-    
+
     location = coords_itrs.earth_location
-    
+
     lla = np.column_stack((
-        location.lat.deg, 
-        location.lon.deg, 
+        location.lat.deg,
+        location.lon.deg,
         location.height.to(u.km).value))
-    
+
     return lla[0] if not batch else lla
 
 
 def itrs_to_gcrs(lla, utc, utc_format='isot'):
-    """
-    Convert coordinates
-    from ITRS (International Terrestrial Reference System)
-    to GCRS (Geocentric Celestial Reference System).
-    
-    Parameters:
-    ----------
-    lla : array_like, in units of (deg, deg, km)
-        single: [lat, lon, alt]
-        batch: [[lat1, lon1, alt1], ...]
-    utc : str or array_like
-        single: 'utc'
-        batch: ['utc1', ...]
-        
+    """Convert ITRS geodetic coordinates to GCRS Cartesian position.
+
+    Transforms one or more geodetic positions expressed in the International
+    Terrestrial Reference System (ITRS) into Cartesian coordinates in the
+    Geocentric Celestial Reference System (GCRS).
+
+    Args:
+        lla: Geodetic coordinate(s) in units of (degrees, degrees, km).
+            Single position as a shape-(3,) array ``[lat, lon, alt]``; batch
+            as a shape-(N, 3) array ``[[lat1, lon1, alt1], ...]``.
+        utc: UTC timestamp(s) matching the format given by ``utc_format``.
+            Single value as a scalar string; batch as a 1-D array of strings
+            with length N matching ``lla``.
+        utc_format: Astropy time format string for parsing ``utc``.
+            Defaults to ``'isot'``.
+
     Returns:
-    -------
-    scpos : array_like, in units of (m, m, m)
-        single: [x, y, z]
-        batch: [[x1, y1, z1], ...]
+        Spacecraft position(s) in metres. Single position returned as a
+        shape-(3,) array ``[x, y, z]``; batch returned as a shape-(N, 3)
+        array ``[[x1, y1, z1], ...]``.
+
+    Raises:
+        ValueError: If ``lla`` is not shape (3,) or (N, 3), if ``utc`` is
+            not a scalar or shape-(N,) array, or if the number of positions
+            does not match the number of timestamps.
     """
-    
+
     lla_arr = np.asarray(lla)
     utc_arr = np.asarray(utc)
-    
+
     if lla_arr.ndim == 1 \
         and utc_arr.ndim == 0 \
             and lla_arr.shape[0] == 3:
@@ -109,17 +129,17 @@ def itrs_to_gcrs(lla, utc, utc_format='isot'):
 
     lla_arr = np.atleast_2d(lla_arr)
     utc_arr = np.atleast_1d(utc_arr)
-    
+
     if lla_arr.shape[0] != utc_arr.shape[0]:
         raise ValueError('The number of coordinate positions must match the number of times')
 
     t = Time(utc_arr, format=utc_format, scale='utc')
 
     loc = EarthLocation(
-        lat=lla_arr[:, 0] * u.deg, 
-        lon=lla_arr[:, 1] * u.deg, 
+        lat=lla_arr[:, 0] * u.deg,
+        lon=lla_arr[:, 1] * u.deg,
         height=lla_arr[:, 2] * u.km)
-    
+
     itrs_coords = loc.get_itrs(obstime=t)
     gcrs_coords = itrs_coords.transform_to(GCRS(obstime=t))
 
@@ -132,49 +152,55 @@ def itrs_to_gcrs(lla, utc, utc_format='isot'):
 
 
 def calc_earth_angular_radius(alt, alt_unit=u.km):
-    """
-    Calculate the angular radius of the Earth at a given altitude.
-    
-    Parameters:
-    ----------
-    alt : float or np.array
-        altitude above the Earth's surface
-    alt_unit : astropy.unit
-        unit of the input altitude, default is km
-        
+    """Calculate the angular radius of the Earth seen from a given altitude.
+
+    Computes the half-angle of the Earth's disk as viewed by an observer at
+    the specified altitude above the surface, using the WGS-84 equatorial
+    radius as the Earth radius.
+
+    Args:
+        alt: Altitude above the Earth's surface. Scalar or array, expressed
+            in the units given by ``alt_unit``.
+        alt_unit: Astropy unit for ``alt``. Defaults to ``u.km``.
+
     Returns:
-    -------
-    half_angle : np.array
-        angular radius of the Earth (in degrees)
+        Angular radius of the Earth in degrees. Scalar or array matching the
+        shape of ``alt``.
     """
 
-    R_EARTH = 6378.137 
-    
+    R_EARTH = 6378.137
+
     h = (alt * alt_unit).to(u.km).value
-    h = np.maximum(h, 0.0) 
-    
+    h = np.maximum(h, 0.0)
+
     sin_theta = R_EARTH / (R_EARTH + h)
     half_angle_rad = np.arcsin(np.clip(sin_theta, -1.0, 1.0))
-    
+
     return np.rad2deg(half_angle_rad)
 
 
 def get_geocenter_radec(scpos):
-    """
-    Calculate the RA/Dec of the Earth center as seen from the satellite.
-    
-    Parameters:
-    ----------
-    scpos : array_like, in units of (m, m, m)
-        
+    """Return the RA/Dec of the Earth center as seen from the spacecraft.
+
+    Computes the right ascension and declination in the GCRS frame of the
+    direction pointing from the spacecraft toward the geocenter.
+
+    Args:
+        scpos: Spacecraft position(s) in metres in GCRS Cartesian coordinates.
+            Single position as a shape-(3,) array ``[x, y, z]``; batch as a
+            shape-(N, 3) array.
+
     Returns:
-    -------
-    ra : array_like, in units of degrees
-    dec : array_like, in units of degrees
+        Geocenter direction(s) as (RA, Dec) pairs in degrees. Single position
+        returned as a shape-(2,) array ``[ra, dec]``; batch returned as a
+        shape-(N, 2) array ``[[ra1, dec1], ...]``.
+
+    Raises:
+        ValueError: If ``scpos`` is not shape (3,) or (N, 3).
     """
-    
+
     scpos_arr = np.asarray(scpos)
-    
+
     if scpos_arr.ndim == 1 \
         and scpos_arr.shape[0] == 3:
         batch = False
@@ -193,34 +219,40 @@ def get_geocenter_radec(scpos):
     )
 
     coord = SkyCoord(vec_to_earth, frame='gcrs')
-    
+
     geo = np.column_stack((
-        coord.ra.deg, 
+        coord.ra.deg,
         coord.dec.deg))
-    
+
     return geo[0] if not batch else geo
 
 
 def calc_mcilwain_l(latitude, longitude):
-    """
-    Estimate the McIlwain L-shell parameter based on the satellite's latitude and longitude.
-    
-    Parameters:
-    ----------
-    latitude : float or array_like
-        Geodetic latitude in degrees (range: -30 to 30)
-    longitude : float or array_like
-        Geodetic longitude in degrees (range: 0 to 360)
-        
+    """Estimate the McIlwain L-shell parameter from geodetic coordinates.
+
+    Computes an empirical polynomial estimate of the McIlwain L-shell value
+    using pre-computed coefficient tables stored in the package data directory.
+    The estimate is valid for geodetic latitudes in the range [-30, 30] degrees
+    and for longitudes in [0, 360) degrees.
+
+    Args:
+        latitude: Geodetic latitude in degrees. Scalar or 1-D array; must
+            be in the range [-30, 30].
+        longitude: Geodetic longitude in degrees. Scalar or 1-D array of the
+            same length as ``latitude``; values are wrapped to [0, 360).
+
     Returns:
-    -------
-    mc_l : float or array_like
-        Estimated McIlwain L-shell parameter
+        Estimated McIlwain L-shell value(s). Scalar when inputs are scalars;
+        array matching the shape of ``latitude`` when inputs are arrays.
+
+    Raises:
+        ValueError: If ``latitude`` or ``longitude`` have incompatible shapes,
+            or if any latitude value is outside [-30, 30].
     """
-    
+
     lat = np.asarray(latitude)
     lon = np.asarray(longitude)
-    
+
     if lat.ndim == 0 \
         and lon.ndim == 0:
         batch = False
@@ -231,67 +263,79 @@ def calc_mcilwain_l(latitude, longitude):
     else:
         raise ValueError('Invalid input shapes: \
             latitude and longitude should be scalars or 1D arrays of the same length')
-    
+
     lat = np.atleast_1d(lat)
     lon = np.atleast_1d(lon) % 360.0
-    
+
     if np.any((lat < -30) | (lat > 30)):
         raise ValueError("Latitude out of range [-30, 30]")
 
     idx1 = (lon / 10.0).astype(int)
     idx2 = (idx1 + 1) % 36
     f = (lon / 10.0) - idx1
-    
+
     coeffs_file = os.path.join(
-        os.path.dirname(os.path.dirname(__file__)), 
+        os.path.dirname(os.path.dirname(__file__)),
         'docs', 'McIlwainL_coeffs', 'McIlwainL_Coeffs.npy')
     poly_coeffs = np.load(coeffs_file)
-    
+
     c1 = poly_coeffs[idx1]
     c2 = poly_coeffs[idx2]
-    
+
     lat_powers = np.column_stack([np.ones_like(lat), lat, lat**2, lat**3])
-    
+
     l_left = np.sum(c1 * lat_powers, axis=1)
     l_right = np.sum(c2 * lat_powers, axis=1)
-    
+
     mc_l = (1.0 - f) * l_left + f * l_right
-    
+
     return mc_l.reshape(np.shape(latitude)) if batch else mc_l[0]
 
 
 def spacecraft_to_radec(az, zen, quat, deg=True):
-    """
-    Convert spacecraft body coordinates (Az/Zen) to celestial coordinates (RA/Dec).
+    """Convert spacecraft body-frame Az/Zen angles to GCRS RA/Dec.
 
-    Parameters:
-    ----------
-    az, zen : float or np.array
-        Satellite azimuth and zenith angles in the spacecraft body frame.
-    quat : np.array
-        Quaternion array. Shape can be (4,) or (N, 4).
-        Note: Assumes Fermi standard order [q1, q2, q3, q4] -> [x, y, z, w]
-    deg : bool
-        Whether the input and output are in degrees. Default is True.
-        
+    Rotates a direction given in the spacecraft body frame (azimuth and
+    zenith angle) into the GCRS celestial frame using the spacecraft attitude
+    quaternion. Supports three broadcast modes: one direction with N attitudes,
+    N directions with one attitude, or N directions with N attitudes.
+
+    Args:
+        az: Azimuth angle(s) in the spacecraft body frame. Scalar or array;
+            units controlled by ``deg``.
+        zen: Zenith angle(s) in the spacecraft body frame. Scalar or array
+            with the same shape as ``az``; units controlled by ``deg``.
+        quat: Spacecraft attitude quaternion(s) in Fermi standard order
+            ``[q1, q2, q3, q4]`` mapped to ``[x, y, z, w]``. Shape must be
+            (4,) for a single quaternion or (N, 4) for a batch.
+        deg: If ``True``, interpret ``az`` and ``zen`` as degrees and return
+            ``ra`` and ``dec`` in degrees. If ``False``, use radians throughout.
+            Defaults to ``True``.
+
     Returns:
-    -------
-    ra, dec : float or np.array
-        Right Ascension and Declination in the GCRS frame.
+        Tuple ``(ra, dec)`` giving right ascension and declination in the GCRS
+        frame. Scalars when all inputs are scalar; arrays otherwise. Units are
+        degrees when ``deg=True``, radians when ``deg=False``.
+
+    Raises:
+        ValueError: If ``az`` and ``zen`` do not have the same shape, if
+            ``quat`` does not have shape (4,) or (N, 4), or if the number of
+            positions and quaternions cannot be broadcast (must be 1:N, N:1,
+            or N:N).
     """
-    
+
     az_arr = np.asarray(az)
     zen_arr = np.asarray(zen)
     quat_arr = np.asarray(quat)
-    
+
     if az_arr.shape != zen_arr.shape:
         raise ValueError('Azimuth and zenith arrays must have the same shape')
-    
+
     if quat_arr.ndim == 1 and quat_arr.shape[0] != 4:
         raise ValueError('Quaternion array must have shape (4,) or (N, 4)')
     elif quat_arr.ndim == 2 and quat_arr.shape[1] != 4:
         raise ValueError('Quaternion array must have shape (4,) or (N, 4)')
-    
+
     if az_arr.ndim == 0 \
         and zen_arr.ndim == 0 \
             and quat_arr.ndim == 1:
@@ -339,50 +383,65 @@ def spacecraft_to_radec(az, zen, quat, deg=True):
 
     x, y, z = cart_pos[:, 0], cart_pos[:, 1], cart_pos[:, 2]
     z = np.clip(z, -1.0, 1.0)
-    
+
     dec = np.arcsin(z)
     ra = np.arctan2(y, x) % (2 * np.pi)
 
     if deg:
         ra, dec = np.rad2deg(ra), np.rad2deg(dec)
-    
+
     if not batch:
         return ra[0], dec[0]
-    
+
     return ra, dec
 
 
 def radec_to_spacecraft(ra, dec, quat, deg=True):
-    """
-    Convert celestial coordinates (RA/Dec) to spacecraft body coordinates (Az/Zen).
+    """Convert GCRS RA/Dec to spacecraft body-frame Az/Zen angles.
 
-    Parameters:
-    ----------
-    ra, dec : float or np.array
-        Right Ascension and Declination in the J2000/GCRS frame.
-    quat : np.array
-        Quaternion array. Shape can be (4,) or (N, 4).
-    deg : bool
-        Whether the input and output are in degrees. Default is True.
-        
+    Rotates a celestial direction given in the GCRS frame (right ascension and
+    declination) into the spacecraft body frame (azimuth and zenith angle)
+    using the inverse of the spacecraft attitude quaternion. Supports three
+    broadcast modes: one direction with N attitudes, N directions with one
+    attitude, or N directions with N attitudes.
+
+    Args:
+        ra: Right ascension in the J2000/GCRS frame. Scalar or array; units
+            controlled by ``deg``.
+        dec: Declination in the J2000/GCRS frame. Scalar or array with the
+            same shape as ``ra``; units controlled by ``deg``.
+        quat: Spacecraft attitude quaternion(s) in Fermi standard order
+            ``[q1, q2, q3, q4]`` mapped to ``[x, y, z, w]``. Shape must be
+            (4,) for a single quaternion or (N, 4) for a batch.
+        deg: If ``True``, interpret ``ra`` and ``dec`` as degrees and return
+            ``az`` and ``zen`` in degrees. If ``False``, use radians
+            throughout. Defaults to ``True``.
+
     Returns:
-    -------
-    az, zen : float or np.array
-        Satellite azimuth and zenith angles in the spacecraft body frame.
+        Tuple ``(az, zen)`` giving the azimuth and zenith angle in the
+        spacecraft body frame. Scalars when all inputs are scalar; arrays
+        otherwise. Units are degrees when ``deg=True``, radians when
+        ``deg=False``.
+
+    Raises:
+        ValueError: If ``ra`` and ``dec`` do not have the same shape, if
+            ``quat`` does not have shape (4,) or (N, 4), or if the number of
+            positions and quaternions cannot be broadcast (must be 1:N, N:1,
+            or N:N).
     """
-    
+
     ra_arr = np.asarray(ra)
     dec_arr = np.asarray(dec)
     quat_arr = np.asarray(quat)
-    
+
     if ra_arr.shape != dec_arr.shape:
         raise ValueError('RA and Dec arrays must have the same shape')
-    
+
     if quat_arr.ndim == 1 and quat_arr.shape[0] != 4:
         raise ValueError('Quaternion array must have shape (4,) or (N, 4)')
     elif quat_arr.ndim == 2 and quat_arr.shape[1] != 4:
         raise ValueError('Quaternion array must have shape (4,) or (N, 4)')
-    
+
     if ra_arr.ndim == 0 \
         and dec_arr.ndim == 0 \
             and quat_arr.ndim == 1:
@@ -430,9 +489,9 @@ def radec_to_spacecraft(ra, dec, quat, deg=True):
             positions ({num_pos}) and quaternions ({num_quat}) must be 1:N, N:1, or N:N")
 
     x, y, z = cart_pos_body[:, 0], cart_pos_body[:, 1], cart_pos_body[:, 2]
-    
+
     zen = np.arccos(np.clip(z, -1.0, 1.0))
-    
+
     az = np.arctan2(y, x) % (2 * np.pi)
 
     if deg:
@@ -440,5 +499,5 @@ def radec_to_spacecraft(ra, dec, quat, deg=True):
 
     if not batch:
         return az[0], zen[0]
-    
+
     return az, zen

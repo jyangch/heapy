@@ -136,17 +136,17 @@ class Polynomial(object):
 
         Populates :attr:`deg_list`, :attr:`bic_list`, :attr:`best_bic`,
         :attr:`best_deg`, and :attr:`ls_res`.
+        
+        Weighting scheme follows the GBM / GECAM background-fitting recipe:
+        first pass is unweighted, second pass re-weights by model-rate
+        variance so poorly-fit bins don't anchor the solution.
+        Derivation: rate * livetime = counts; var(counts) = counts (Poisson);
+        var(rate) = var(counts) / livetime^2 = rate / livetime.
 
         Raises:
             TypeError: If ``self.dx`` is a non-scalar array with a shape
                 that does not match ``self.x``.
         """
-
-        # Weighting scheme follows the GBM / GECAM background-fitting recipe:
-        # first pass is unweighted, second pass re-weights by model-rate
-        # variance so poorly-fit bins don't anchor the solution.
-        # Derivation: rate * livetime = counts; var(counts) = counts (Poisson);
-        # var(rate) = var(counts) / livetime^2 = rate / livetime.
         
         time = self.x
         rate = self.y

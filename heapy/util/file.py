@@ -1,3 +1,12 @@
+"""File-system utilities for reading, writing, copying, and searching files.
+
+This module provides convenience wrappers around standard library I/O
+operations, including displaying text files, copying or removing files and
+directories with warning-based error handling, searching for files by glob
+pattern or keyword list, and saving/loading 2-D data tables to and from
+formatted plain-text files.
+"""
+
 import os
 import re
 import shutil
@@ -10,15 +19,15 @@ from .data import transpose_2d_matrix, pad_2d_matrix
 
 
 def cat_file(file_path, encoding='utf-8'):
-    """
-    Display the contents of a text file to the console.
-    
-    Parameters:
-    ----------
-    file_path : str
-        The path to the text file to be displayed.
-    encoding : str, optional
-        The encoding of the text file. Default is 'utf-8'.
+    """Print the contents of a text file to the console.
+
+    Args:
+        file_path: Path to the text file to be displayed.
+        encoding: Character encoding used to open the file.
+            Defaults to ``'utf-8'``.
+
+    Raises:
+        FileNotFoundError: If ``file_path`` does not refer to an existing file.
     """
 
     if not os.path.isfile(file_path):
@@ -32,21 +41,20 @@ def cat_file(file_path, encoding='utf-8'):
         print(f"Error: Could not decode '{file_path}' using {encoding}. Try a different encoding.")
     except Exception as e:
         print(f"An unexpected error occurred: {e}")
-        
-        
+
+
 def copy_file(src, dst):
+    """Copy a file or directory from src to dst.
+
+    Copies the source path to the destination. Directories are copied
+    recursively. If ``src`` does not exist, a ``UserWarning`` is issued and
+    no destination is created.
+
+    Args:
+        src: Source file or directory path to copy.
+        dst: Destination path to copy the file or directory to.
     """
-    Copy a file or directory from src to dst. If src does not exist, 
-    a warning is issued and a marker file is created at dst.
-    
-    Parameters:
-    ----------
-    src : str
-        The source file or directory to be copied.
-    dst : str
-        The destination path where the file or directory should be copied to.
-    """
-    
+
     src_path = Path(src)
     dst_path = Path(dst)
 
@@ -66,18 +74,18 @@ def copy_file(src, dst):
 
 
 def remove_file(file_path):
+    """Remove a file at the specified path.
+
+    Issues a ``UserWarning`` if the file does not exist, a ``RuntimeWarning``
+    if the file cannot be removed due to a permission error, and a
+    ``RuntimeWarning`` for any other removal failure.
+
+    Args:
+        file_path: Path to the file to be removed.
     """
-    Remove a file at the specified path. If the file does not exist, a warning is issued. 
-    If the file cannot be removed due to permissions or other issues, a warning is also issued.
-    
-    Parameters:
-    ----------
-    file_path : str
-        The path to the file to be removed.
-    """
-    
+
     path = Path(file_path)
-    
+
     if path.is_file():
         try:
             path.unlink()
@@ -92,28 +100,28 @@ def remove_file(file_path):
 
 
 def find_file(root_dir, pattern, recursive=True):
-    """
-    Search for files in a directory that match a given pattern. 
-    The pattern can be a string with wildcards or a list of keywords.
-    
-    Parameters:
-    ----------
-    root_dir : str
-        The directory to search within.
-    pattern : str or list of str
-        The pattern to match file names against.
-        If a string is provided, it can include '*' as a wildcard.
-        If a list of strings is provided, all keywords must be present in the file name.
-    recursive : bool, optional
-        Whether to search subdirectories recursively. Default is True.
-        
+    """Search for files matching a pattern within a directory tree.
+
+    Accepts either a glob-style string (with ``*`` as wildcard) or a list of
+    keyword strings. All keywords must appear in the file name for a file to
+    be considered a match. Hidden files (names starting with ``.``) are
+    excluded.
+
+    Args:
+        root_dir: Root directory to search within.
+        pattern: Pattern to match file names against. A string may contain
+            ``'*'`` as a wildcard; all non-wildcard substrings must be present
+            in the file name. A list of strings requires every element to be
+            present in the file name.
+        recursive: If ``True``, search subdirectories recursively.
+            Defaults to ``True``.
+
     Returns:
-    -------
-    tuple or None
-        A tuple containing a list of matching file names and their corresponding paths,
-        or None if no matches are found or if an error occurs.
+        Sorted list of absolute path strings for all matching files, or
+        ``None`` if no matches are found, the directory does not exist, or
+        an error occurs during the search.
     """
-    
+
     root = Path(root_dir)
     if not root.exists():
         warnings.warn(f"Path not found: {root_dir}", UserWarning, stacklevel=2)
@@ -149,28 +157,32 @@ def find_file(root_dir, pattern, recursive=True):
 
 
 def savetxt(file, data, fmt=None, trans=False, header=None):
-    """
-    Save a 2D array or list to a text file with specified formatting and optional header.
-    
-    Parameters:
-    ----------
-    file : str
-        The path to the file where the data will be saved.
-    data : array-like
-        The 2D array or list to be saved.
-    fmt : str or list of str, optional
-        The format for each element. Default is None.
-    trans : bool, optional
-        Whether to transpose the data before saving. Default is False.
-    header : list of str, optional
-        The header for the columns. Default is None.
-        
+    """Save a 2-D array or list to a formatted plain-text file.
+
+    Writes ``data`` to ``file`` with column-aligned, fixed-width formatting.
+    An optional header row and per-element format strings are supported. The
+    data can be transposed before writing.
+
+    Args:
+        file: Path to the output file.
+        data: 2-D array or list of lists to save. A 1-D input is promoted to
+            a single-row 2-D structure with a warning.
+        fmt: Format specifier(s) for the data elements. ``None`` formats
+            everything as strings. A single string applies the same format to
+            all elements. A 1-D list of strings of length equal to the number
+            of columns (after optional transposition) applies one format per
+            column. A 2-D list must match the shape of the (possibly
+            transposed) data. Defaults to ``None``.
+        trans: If ``True``, transpose ``data`` (and ``fmt`` if 2-D) before
+            writing. Defaults to ``False``.
+        header: Column header strings. Must have the same length as the number
+            of columns (after optional transposition). Defaults to ``None``.
+
     Returns:
-    -------
-    bool
-        True if the file was saved successfully, False otherwise.
+        ``True`` if the file was saved successfully, ``False`` if a format or
+        header validation error occurred.
     """
-    
+
     if data is None:
         data = [[]]
     elif len(data) == 0:
@@ -238,24 +250,28 @@ def savetxt(file, data, fmt=None, trans=False, header=None):
 
 
 def loadtxt(file, fmt=None, trans=False):
-    """
-    Load data from a text file and return it as a 2D list, with optional formatting and transposition.
-    
-    Parameters:
-    ----------
-    file : str
-        The path to the file to be loaded.
-    fmt : str or list of str, optional
-        The format for each element. Default is None.
-    trans : bool, optional
-        Whether to transpose the data after loading. Default is False.
-        
+    """Load a plain-text file and return its contents as a 2-D list.
+
+    Reads whitespace-delimited rows from ``file``. Each cell is automatically
+    cast to ``int`` or ``float`` where possible; otherwise it remains a string.
+    An optional format specifier can re-format the values after loading, and
+    the result can be transposed before returning.
+
+    Args:
+        file: Path to the text file to load.
+        fmt: Format specifier(s) applied to each element after type conversion.
+            ``None`` skips re-formatting. A single string applies the same
+            format to all elements. A 1-D list of strings of length equal to
+            the number of columns applies one format per column. A 2-D list
+            must match the shape of the loaded data. Defaults to ``None``.
+        trans: If ``True``, transpose the loaded data before returning.
+            Defaults to ``False``.
+
     Returns:
-    -------
-    list
-        The loaded 2D list.
+        Loaded data as a 2-D list of rows. Returns ``False`` if a format
+        validation error occurs.
     """
-    
+
     data = []
     f = open(file, 'r')
     for line in f:
