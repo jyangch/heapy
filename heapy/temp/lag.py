@@ -3,7 +3,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import rcParams
 from scipy.linalg import cho_solve
-from astropy.stats import sigma_clip, mad_std
 from scipy.interpolate import UnivariateSpline
 from scipy.fft import rfft, irfft, next_fast_len
 from scipy.optimize import curve_fit, minimize_scalar
@@ -246,8 +245,8 @@ class Lag(object):
         return all_ccfs
 
 
-    def calculate(self, method=None, width=None, threshold=None, 
-                  poly_deg=None, spline_s=None):
+    def calculate(self, method=None, width=None, threshold=None,
+                  poly_deg=None, spline_s=None, point_estimate='observed'):
         """
         Parameters
         ----------
@@ -266,6 +265,17 @@ class Lag(object):
             Polynomial degree (for 'polyfit').
         spline_s : float, optional
             Spline smoothing factor (for 'spline').
+        point_estimate : {'observed', 'mean', 'median'}
+            Central value for the reported lag:
+            - 'observed' (default): mc_fit_lags[0], the MLE from the
+              observed (unperturbed) data. Standard frequentist choice;
+              unstable when the MC distribution is multi-modal.
+            - 'mean'    : mean of MC realisations. Robust under unimodal
+              MC; biased toward the heavier mode when bimodal.
+            - 'median'  : 50th percentile of MC realisations. Most robust
+              to outliers, but can fall in a low-density valley between
+              modes when the distribution is bimodal.
+            The 16/84 percentile interval from MC is reported regardless.
         """
         
         if method is None:
@@ -312,6 +322,11 @@ class Lag(object):
             
         if method == 'spline' and spline_s is None:
             spline_s = 0.05
+            
+        if point_estimate not in ('observed', 'mean', 'median'):
+            raise ValueError(
+                f"point_estimate must be 'observed'|'mean'|'median', "
+                f"got {point_estimate!r}")
         
         self.nrange = (self.taus[self.nidx[0]], self.taus[self.nidx[-1]])
         
@@ -404,10 +419,14 @@ class Lag(object):
                     raise RuntimeError('failed to fit the CCF for the original light curves')
                 continue
 
-        lag_bv = self.mc_fit_lags[0]
+        mc_fit_lags_filter = np.asarray(self.mc_fit_lags[1:])
 
-        clipped = sigma_clip(self.mc_fit_lags[1:], sigma=5, maxiters=5, stdfunc=mad_std)
-        mc_fit_lags_filter = clipped.compressed()
+        if point_estimate == 'observed':
+            lag_bv = self.mc_fit_lags[0]
+        elif point_estimate == 'mean':
+            lag_bv = float(np.mean(mc_fit_lags_filter))
+        else:
+            lag_bv = float(np.median(mc_fit_lags_filter))
 
         lag_lo, lag_hi = np.percentile(mc_fit_lags_filter, [16, 84])
         lag_err = np.diff([lag_lo, lag_bv, lag_hi])
@@ -416,14 +435,15 @@ class Lag(object):
         print('\n+---------------------------------------------------+')
         print(' %-15s%-15s%-15s' % ('lag (s)', 'lag_le (s)', 'lag_he (s)'))
         print(' %-15.6g%-15.6g%-15.6g' % (self.lag[0], self.lag[1], self.lag[2]))
-        print(' method=%s, M=%d, dt=%.3g s, dt_analysis=%.3g s' %
-              (method, self.M, self.dt, self.dt_analysis))
+        print(' method=%s, M=%d, dt=%.3g s, point_estimate=%s' % 
+              (method, self.M, self.dt, point_estimate))
         print('+---------------------------------------------------+\n')
 
-        self.lag_res = {'lag': self.lag, 'mc_fit_lags': self.mc_fit_lags, 
-                        'width': width, 'threshold': threshold, 'method': method, 
-                        'M': self.M, 'dt': self.dt, 'dt_analysis': self.dt_analysis,
-                        'taus': self.taus, 'ccfs': self.ccfs, 
+        self.lag_res = {'lag': self.lag, 'mc_fit_lags': self.mc_fit_lags,
+                        'width': width, 'threshold': threshold, 'method': method,
+                        'point_estimate': point_estimate,
+                        'M': self.M, 'dt': self.dt,
+                        'taus': self.taus, 'ccfs': self.ccfs,
                         'itp_taus': self.itp_taus, 'itp_ccfs': self.itp_ccfs}
 
 
