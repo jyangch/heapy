@@ -1,3 +1,11 @@
+"""Baseline estimators for 1D signals.
+
+Exposes a unified :class:`Baseline` facade over several algorithms
+(``drpls``, ``snip``, ``isnip``, ``fabc``, ``goldindec``, ``mixture``).
+The fitted baseline is stored on the instance and can be evaluated at
+arbitrary abscissae via cubic spline interpolation.
+"""
+
 import warnings
 import numpy as np
 import pybaselines
@@ -9,24 +17,74 @@ from astropy.stats import sigma_clip, mad_std
 
 
 class Baseline(object):
+    """Fit and evaluate a smooth baseline under a 1D signal.
+
+    Wraps multiple baseline algorithms behind a single ``fit``/``val``
+    interface. The SNIP family uses a Whittaker pre-smoothing step followed
+    by symmetric shrinking-window sweeps.
+
+    Attributes:
+        method: Selected baseline algorithm identifier.
+        x: Abscissae used for fitting (set by :meth:`fit`).
+        y: Ordinates used for fitting (set by :meth:`fit`).
+        mo: Baseline values sampled at :attr:`x` (set by :meth:`fit`).
+
+    Example:
+        >>> bl = Baseline.set_method('drpls')
+        >>> bl.fit(x, y)
+        >>> baseline = bl.val(x_new)
+    """
 
     def __init__(self, method='drpls'):
-        
+        """Store the baseline algorithm identifier.
+
+        Args:
+            method: Algorithm name; one of ``'drpls'``, ``'snip'``,
+                ``'isnip'``, ``'fabc'``, ``'goldindec'``, ``'mixture'``.
+        """
+
         self.method = method
 
 
     @classmethod
     def set_method(cls, method='drpls'):
-        
+        """Validate ``method`` and return a configured :class:`Baseline`.
+
+        Args:
+            method: Algorithm name; currently only ``'drpls'`` passes the
+                explicit check, other names from :meth:`fit` still work.
+
+        Returns:
+            A new :class:`Baseline` bound to ``method``.
+
+        Raises:
+            ValueError: If ``method`` is not ``'drpls'``.
+        """
+
         if method == 'drpls':
             pass
         else:
             raise ValueError('invalid method')
-        
+
         return cls(method=method)
 
 
     def fit(self, x, y, w=None, lam=None, nk=None):
+        """Estimate the baseline of ``(x, y)`` using the configured method.
+
+        Populates :attr:`x`, :attr:`y`, and :attr:`mo`. Defaults for
+        ``lam`` and ``nk`` are derived from ``len(x)``.
+
+        Args:
+            x: Monotonic 1D abscissae.
+            y: Ordinates matching ``x``.
+            w: Per-point weights; defaults to ones.
+            lam: Smoothing strength for Whittaker-based methods.
+            nk: Number of spline knots for the mixture model.
+
+        Raises:
+            ValueError: If :attr:`method` is not a recognized algorithm.
+        """
         
         self.x = np.array(x).astype(float)
         self.y = np.array(y).astype(float)
@@ -63,6 +121,15 @@ class Baseline(object):
 
 
     def val(self, x):
+        """Evaluate the fitted baseline at ``x`` via cubic spline interpolation.
+
+        Args:
+            x: Query abscissae; values outside the fitting range are
+                extrapolated and trigger a ``UserWarning``.
+
+        Returns:
+            Interpolated baseline values at ``x``.
+        """
 
         x = np.asarray(x)
 
@@ -70,13 +137,25 @@ class Baseline(object):
             warnings.warn("Extrapolation may be imprecise", UserWarning, stacklevel=2)
 
         interp = CubicSpline(self.x, self.mo, extrapolate=True)
-        
+
         return interp(x)
 
 
     @staticmethod
     def speyediff(N, d, format='csc'):
-        
+        """Build the sparse ``d``-th order finite-difference matrix of size ``N``.
+
+        Used as the penalty operator in Whittaker smoothing.
+
+        Args:
+            N: Number of samples (rows of the identity before differencing).
+            d: Difference order; must be non-negative.
+            format: Sparse storage format passed to ``scipy.sparse.diags``.
+
+        Returns:
+            A ``(N - d) x N`` sparse difference matrix.
+        """
+
         assert d >= 0, "d must be non-negative"
         
         shape = (N - d, N)
@@ -92,6 +171,20 @@ class Baseline(object):
 
 
     def whittaker_smooth(self, y, lmbd, d, w):
+        """Solve the weighted Whittaker smoothing normal equations.
+
+        Minimizes ``||W^{1/2} (y - z)||^2 + lmbd * ||D^d z||^2``.
+
+        Args:
+            y: Signal to smooth (1D).
+            lmbd: Penalty strength; larger values yield smoother output.
+            d: Difference order of the penalty.
+            w: Per-point weights matching ``y``.
+
+        Returns:
+            Tuple ``(coefmat, z)`` — the coefficient matrix and the
+            smoothed signal.
+        """
 
         y = np.asarray(y).ravel()
         m = len(y)
@@ -106,7 +199,22 @@ class Baseline(object):
 
 
     def get_smooth(self, y, w=None, d=None, lmbd=None):
-        
+        """Iteratively sigma-clip large residuals while Whittaker-smoothing.
+
+        Runs three passes at ``sigma = 3, 2, 1``. Points flagged as
+        outliers have their weights zeroed, which effectively excludes
+        peaks from the smooth estimate.
+
+        Args:
+            y: Signal to smooth (1D).
+            w: Initial weights; defaults to ones.
+            d: Penalty difference order; defaults to ``3``.
+            lmbd: Penalty strength; defaults to a length-dependent heuristic.
+
+        Returns:
+            The smoothed signal after outlier rejection.
+        """
+
         y = np.array(y)
         m = len(y)
         if w is None:
@@ -128,18 +236,26 @@ class Baseline(object):
 
 
     def _snip_core(self, y, x, w=None, d=None, lmbd=None, inte=None, pr=None, hwi=None, it=None):
-        """
-        Shared SNIP-iteration core used by both `snip` and `isnip`.
+        """Run the SNIP iteration core shared by :meth:`snip` and :meth:`isnip`.
 
-        Parameters (same meaning as snip/isnip):
-          lmbd : smooth hardness
-          it   : number of SNIP iterations
-          inte : number of sampling intervals
-          hwi  : half window width
-          pr   : peak ratio
+        Pre-smooths ``y`` with Whittaker smoothing, downsamples into
+        ``inte`` bins, runs ``it`` symmetric SNIP sweeps with shrinking
+        windows, then fits a cubic polynomial through the envelope.
 
-        Returns (y, idx, poly_z): input y, the full integer index array, and the
-        cubic-polyfit baseline estimated from the SNIP-downsampled points.
+        Args:
+            y: Signal (1D).
+            x: Abscissae matching ``y``; used only for median spacing.
+            w: Per-point weights; defaults to ones.
+            d: Difference order for the Whittaker pre-smooth.
+            lmbd: Penalty strength for the Whittaker pre-smooth.
+            inte: Number of SNIP sampling intervals.
+            pr: Peak ratio controlling the half window width.
+            hwi: Half window width; derived from ``inte`` and ``pr`` if omitted.
+            it: Number of SNIP iterations.
+
+        Returns:
+            Tuple ``(y, idx, poly_z)`` — the input ``y``, the full integer
+            index array, and the cubic-fit baseline on the SNIP envelope.
         """
         
         y, x = np.asarray(y), np.asarray(x)
@@ -201,13 +317,36 @@ class Baseline(object):
 
 
     def snip(self, y, x, w=None, d=None, lmbd=None, inte=None, pr=None, hwi=None, it=None):
+        """Estimate the baseline via the SNIP algorithm.
+
+        Args:
+            y: Signal (1D).
+            x: Abscissae matching ``y``.
+            w, d, lmbd, inte, pr, hwi, it: See :meth:`_snip_core`.
+
+        Returns:
+            Baseline sampled on ``arange(len(y))``.
+        """
 
         _, _, poly_z = self._snip_core(y, x, w, d, lmbd, inte, pr, hwi, it)
-        
+
         return poly_z
 
 
     def isnip(self, y, x, w=None, d=None, lmbd=None, inte=None, pr=None, hwi=None, it=None):
+        """Estimate the baseline via iteratively refined SNIP.
+
+        Runs :meth:`_snip_core`, then sigma-clips residuals and re-fits a
+        cubic polynomial at ``sigma = 3, 2, 1`` to sharpen the envelope.
+
+        Args:
+            y: Signal (1D).
+            x: Abscissae matching ``y``.
+            w, d, lmbd, inte, pr, hwi, it: See :meth:`_snip_core`.
+
+        Returns:
+            Refined baseline sampled on ``arange(len(y))``.
+        """
 
         y, idx, poly_z = self._snip_core(y, x, w, d, lmbd, inte, pr, hwi, it)
 
