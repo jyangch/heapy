@@ -29,8 +29,6 @@ class Polynomial(object):
         self.dx = dx
 
         self.ls_res = None
-        self.mo = None
-        self.err = None
 
         if self.method == '2pass':
             self.two_pass()
@@ -43,12 +41,12 @@ class Polynomial(object):
         x = np.array(x)
         
         if min(x) < min(self.x):
-            msg = "External interpolation may be imprecise: %f < %f" % (min(x), min(self.x))
-            warnings.warn(msg, InterpWarning, stacklevel=2)
+            msg = "Extrapolation may be imprecise: %f < %f" % (min(x), min(self.x))
+            warnings.warn(msg, UserWarning, stacklevel=2)
 
         if max(x) > max(self.x):
-            msg = "External interpolation may be imprecise: %f > %f" % (max(x), max(self.x))
-            warnings.warn(msg, InterpWarning, stacklevel=2)
+            msg = "Extrapolation may be imprecise: %f > %f" % (max(x), max(self.x))
+            warnings.warn(msg, UserWarning, stacklevel=2)
 
         assert self.ls_res is not None, 'you should first perform fitting'
 
@@ -81,13 +79,8 @@ class Polynomial(object):
             if dt.ndim != 0 and dt.shape != time.shape:
                 raise TypeError("if dt is array, expected dt and time to have same length")
 
-        variance = rate / dt
-        zero = (variance <= 0)
-    
-        weight = np.piecewise(variance,
-                              condlist=[zero, ~zero],
-                              funclist=[lambda var: 0.0, lambda var: np.sqrt(1 / var)])
-        weight = np.mean(weight) * np.ones_like(rate)  # uniform weight
+        # First pass: uniform weight (scale cancels out in WLS coefficients/covariance)
+        weight = np.ones_like(rate)
         
         self.bic_list = []
         self.best_bic = np.inf
@@ -100,9 +93,8 @@ class Polynomial(object):
                 if ipass == 0:
                     variance = mo / dt
                     zero = (variance <= 0)
-                    weight = np.piecewise(variance,
-                                          condlist=[zero, ~zero],
-                                          funclist=[lambda var: 0.0, lambda var: np.sqrt(1 / var)])
+                    weight = np.zeros_like(variance)
+                    weight[~zero] = np.sqrt(1.0 / variance[~zero])
                     
             self.bic_list.append(ls_res['bic'])
                     
@@ -149,7 +141,7 @@ class Polynomial(object):
             # evaluate the model uncertainty at given x
             # M (i.e. var) = X M_\beta (i.e. covar) X^T
             var = lhs @ covar @ lhs.T
-            err = np.sqrt(np.diag(var))
+            err = np.sqrt(np.clip(np.diag(var), 0.0, None))
 
             return mo, err
 
@@ -159,12 +151,6 @@ class Polynomial(object):
 
     @staticmethod
     def ls_polyfit(x, y, deg, rcond=None, w=None, cov=True):
-        
-        """
-        #----------------------------#
-        # see np.polyfit for details #
-        #----------------------------#
-        """
         
         order = int(deg) + 1
         x = np.asarray(x) + 0.0
@@ -206,8 +192,8 @@ class Polynomial(object):
             
         dof = np.sum(w != 0) - order
         if dof <= 0:
-            msg = 'The degree of freedom should be great than zero'
-            warnings.warn(msg, DofWarning, stacklevel=2)
+            msg = 'The degree of freedom should be greater than zero'
+            warnings.warn(msg, UserWarning, stacklevel=2)
             
         # X' = diag(w)X, see "Weighted least squares" in Wikipedia for details
         lhs *= w[:, np.newaxis]
@@ -233,9 +219,18 @@ class Polynomial(object):
         # warn on rank reduction, which indicates an ill conditioned matrix
         if rank != order:
             msg = "Polyfit may be poorly conditioned"
-            warnings.warn(msg, RankWarning, stacklevel=2)
-            
-        resids = resids[0]
+            warnings.warn(msg, UserWarning, stacklevel=2)
+
+        # np.linalg.lstsq returns empty `resids` when rank < order or n <= order;
+        # fall back to computing the weighted sum of squared residuals directly.
+        # Note: `lhs` is column-scaled and `coeff` has already been rescaled back
+        # to the original basis, so multiply coeff by `scale` to match `lhs`.
+        if resids.size:
+            resids = resids[0]
+        else:
+            fit = lhs @ (coeff.T * scale).T
+            resids = float(np.sum((rhs - fit) ** 2))
+
         aic = resids + 2 * order
         bic = resids + order * np.log(len(x))
         
@@ -250,11 +245,9 @@ class Polynomial(object):
             if cov == "unscaled":
                 fac = 1
             else:
-                # note, this used to be: fac = resids / (len(x) - order - 2.0)
-                # it was decided that the "- 2" (originally justified by "Bayesian
-                # uncertainty analysis") is not what the user expects
-                # (see gh-11196 and gh-11197)
-                fac = resids / dof
+                # Guard against dof <= 0 (already warned above): fall back to 1
+                # so the returned covariance stays finite rather than inf/negative.
+                fac = resids / dof if dof > 0 else 1.0
             if y.ndim == 1:
                 covar *= fac
             else:
@@ -262,30 +255,3 @@ class Polynomial(object):
             res['covar'] = covar
 
         return res
-
-
-class RankWarning(UserWarning):
-    
-    """
-    Issued by self.ls_polyfit when the Vandermonde matrix is rank deficient.
-    """
-    
-    pass
-
-
-class InterpWarning(UserWarning):
-    
-    """
-    Issued by self.val for External interpolation.
-    """
-    
-    pass
-
-
-class DofWarning(UserWarning):
-    
-    """
-    Issued by self.ls_polyfit for dof < 0.
-    """
-    
-    pass

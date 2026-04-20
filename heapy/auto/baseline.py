@@ -71,8 +71,8 @@ class Baseline(object):
         x = np.array(x)
 
         if min(x) < min(self.x) or max(x) > max(self.x):
-            msg = "External interpolation may be imprecise"
-            warnings.warn(msg, InterpWarning, stacklevel=2)
+            msg = "Extrapolation may be imprecise"
+            warnings.warn(msg, UserWarning, stacklevel=2)
             interp = UnivariateSpline(self.x, self.mo, w=None, k=3, s=0)
             mo = interp(x)
         else:
@@ -295,12 +295,3 @@ class Baseline(object):
             poly_cs = y - poly_z
 
         return poly_z
-
-
-class InterpWarning(UserWarning):
-    
-    """
-    Issued by self.val for External interpolation.
-    """
-    
-    pass
