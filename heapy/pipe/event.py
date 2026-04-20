@@ -1,3 +1,18 @@
+"""Read and process gamma-ray burst event FITS files from GBM, GECAM, and GRID.
+
+Provides time-series extraction, spectral binning, light curve generation,
+automatic background estimation, and OGIP-compliant PHA spectrum output.
+The module exposes a generic ``Event`` base class and four instrument-specific
+subclasses: ``gbmTTE``, ``gecamEVT``, ``gridTTE``, and ``gridgroundTTE``.
+
+Typical usage:
+    from heapy.pipe.event import gbmTTE
+    tte = gbmTTE(file='glg_tte_n0_bn210101_v00.fit')
+    tte.lc_t1t2 = [-10, 60]
+    tte.lc_binsize = 0.5
+    tte.extract_curve(savepath='./curve')
+"""
+
 import os
 import warnings
 import numpy as np
@@ -26,28 +41,46 @@ from ..util.time import gecam_met_to_utc, gecam_utc_to_met
 
 
 class Event(object):
-    
+    """Base class for reading and processing photon event FITS files.
+
+    Encapsulates event table I/O, time/energy filtering, light curve
+    generation with automatic polynomial background estimation, and
+    OGIP PHA spectrum extraction.  Instrument-specific subclasses
+    override ``_read``, ``chantype``, ``telescope``, ``instrument``, and
+    ``timezero_utc`` to handle mission-dependent FITS layouts and
+    time-system conversions.
+
+    Attributes:
+        colors: Ordered list of Plotly color strings used for multi-slice
+            spectrum plots.
+    """
+
     colors = px.colors.qualitative.Plotly \
         + px.colors.qualitative.D3 \
             + px.colors.qualitative.G10 \
                 + px.colors.qualitative.T10 \
                     + px.colors.qualitative.Alphabet
-    
+
     def __init__(self, file):
+        """Initialize Event and read the FITS file.
+
+        Args:
+            file: Path to the event FITS file.
+        """
         
         self._file = file
-        
+
         self._read()
-        
-        
+
+
     def _read(self):
-        
+
         if self.file is not None:
             hdu = fits.open(self.file)
             self._event = table.Table.read(hdu['EVENTS'])
             self._ebound = table.Table.read(hdu['EBOUNDS'])
             self._gti = table.Table.read(hdu['GTI'])
-            
+
             self._timezero = np.min(self._event['TIME'])
             self._filter = Filter(self._event)
             self._filter_info = {'time': None, 'energy': None, 'tag': None}
@@ -55,7 +88,7 @@ class Event(object):
 
     @staticmethod
     def _ch_to_energy(pi, ch, e1, e2):
-        
+
         pi = np.asarray(pi)
         ch = np.asarray(ch)
         e1 = np.asarray(e1)
@@ -63,7 +96,7 @@ class Event(object):
 
         ch_to_index = np.zeros(np.max(ch) + 1, dtype=int)
         ch_to_index[ch] = np.arange(len(ch))
-        
+
         indices = ch_to_index[pi]
 
         e1_selected = e1[indices]
@@ -72,35 +105,42 @@ class Event(object):
         energy = Event._energy_of_ch(len(pi), e1_selected, e2_selected)
 
         return energy
-    
-    
+
+
     @staticmethod
     def _energy_of_ch(n, e1, e2):
-        
+
         return e1 + (e2 - e1) * np.random.random_sample(n)
 
 
     @property
     def file(self):
-        
+
         return self._file
-    
-    
+
+
     @file.setter
     def file(self, new_file):
-        
+
         self._file = new_file
-        
+
         self._read()
-    
-    
+
+
     @property
     def event(self):
+        """Return the filtered event table."""
         
         return self._filter.evt
-    
-    
+
+
     def gti(self):
+        """Return the merged good-time intervals as an (N, 2) array.
+
+        Returns:
+            Array of shape (N, 2) with columns ``[tstart, tstop]`` in
+            mission elapsed time (MET) seconds.
+        """
         
         tstart = self._gti['START']
         tstop = self._gti['STOP']
@@ -110,132 +150,186 @@ class Event(object):
 
     @property
     def ebound(self):
+        """Return the energy-bounds table (EBOUNDS HDU)."""
         
         return self._ebound
-    
-    
+
+
     @property
     def chantype(self):
+        """Return the channel-type identifier string."""
         
         return 'None'
-    
-    
+
+
     @property
     def telescope(self):
+        """Return the telescope (mission) name string."""
         
         return 'None'
-    
-    
+
+
     @property
     def instrument(self):
+        """Return the instrument name string."""
         
         return 'None'
-    
-    
+
+
     @property
     def timezero(self):
+        """Return the reference time in MET seconds."""
         
         return self._timezero
-    
-    
+
+
     @timezero.setter
     def timezero(self, new_timezero):
-        
+
         self._timezero = new_timezero
-        
-        
+
+
     @property
     def timezero_utc(self):
+        """Return the reference time as a UTC string, or ``None`` if unavailable."""
         
         return None
 
 
     def slice_time(self, t1t2):
+        """Trim the event table in-place to a time window relative to ``timezero``.
+
+        Unlike ``filter_time``, this permanently discards events outside
+        ``[t1, t2]`` and resets all active filters.
+
+        Args:
+            t1t2: Two-element sequence ``[t1, t2]`` in seconds relative to
+                ``timezero``.
+        """
         
         t1, t2 = t1t2
-        
+
         met_t1 = self.timezero + t1
         met_t2 = self.timezero + t2
-        
+
         met_ts = self._event['TIME']
         flt = (met_ts >= met_t1) & (met_ts <= met_t2)
         self._event = self._event[flt]
-        
+
         self._clear_filter()
 
-    
+
     def filter_time(self, t1t2):
+        """Apply a reversible time filter to the event table.
+
+        Passing ``None`` removes the current time filter and restores all
+        previously excluded events.
+
+        Args:
+            t1t2: Two-element list ``[t1, t2]`` in seconds relative to
+                ``timezero``, or ``None`` to clear the filter.
+
+        Raises:
+            ValueError: If ``t1t2`` is neither a list nor ``None``.
+        """
         
         if t1t2 is None:
             expr = None
-            
+
         elif isinstance(t1t2, list):
             t1, t2 = t1t2
-            
+
             met_t1 = self.timezero + t1
             met_t2 = self.timezero + t2
-                
+
             expr = f'(TIME >= {met_t1}) * (TIME <= {met_t2})'
-            
+
         else:
             raise ValueError('t1t2 is extected to be list or None')
-        
+
         self._time_filter = t1t2
-        
+
         self._filter_info['time'] = expr
-        
+
         self._filter_update()
-        
-        
+
+
     def filter_energy(self, e1e2):
+        """Apply a reversible energy filter to the event table.
+
+        Passing ``None`` removes the current energy filter.
+
+        Args:
+            e1e2: Two-element list ``[e1, e2]`` in keV, or ``None`` to
+                clear the filter.
+
+        Raises:
+            ValueError: If ``e1e2`` is neither a list nor ``None``.
+        """
         
         if e1e2 is None:
             expr = None
-            
+
         elif isinstance(e1e2, list):
             e1, e2 = e1e2
             expr = f'(ENERGY >= {e1}) * (ENERGY <= {e2})'
-            
+
         else:
             raise ValueError('e1e2 is extected to be list or None')
-        
+
         self._filter_info['energy'] = expr
-        
+
         self._filter_update()
-        
-        
+
+
     def filter(self, expr):
+        """Apply an arbitrary boolean expression filter to the event table.
+
+        The expression is evaluated against the event table column names,
+        e.g. ``'(ENERGY > 10) * (ENERGY < 300)'``.  Passing ``None``
+        removes the tag filter.
+
+        Args:
+            expr: Boolean expression string compatible with
+                ``astropy.table.Table`` evaluation, or ``None`` to clear.
+        """
         
         self._filter_info['tag'] = expr
-        
+
         self._filter_update()
-        
-        
+
+
     def _filter_update(self):
-        
+
         self._clear_filter()
-        
+
         self._filter.eval(self._filter_info['time'])
         self._filter.eval(self._filter_info['energy'])
         self._filter.eval(self._filter_info['tag'])
-        
-        
+
+
     def _clear_filter(self):
-        
+
         self._filter.clear()
-        
-        
+
+
     @property
     def filter_info(self):
+        """Return the current filter expression dictionary."""
         
         return self._filter_info
-    
-    
+
+
     @property
     def time_filter(self):
+        """Return the active time-filter window ``[t1, t2]`` in seconds.
+
+        When no time filter has been set, returns the full span of the
+        event table relative to ``timezero``.
+        """
         
         if self._filter_info['time'] is None:
-            return [np.min(self._event['TIME']) - self.timezero, 
+            return [np.min(self._event['TIME']) - self.timezero,
                     np.max(self._event['TIME']) - self.timezero]
         else:
             return self._time_filter
@@ -243,13 +337,13 @@ class Event(object):
 
     @property
     def _ts(self):
-        
+
         return np.array(self._event['TIME']) - self.timezero
 
 
     @property
     def _pha(self):
-        
+
         try:
             return np.array(self._event['PHA']).astype(int)
         except KeyError:
@@ -258,18 +352,20 @@ class Event(object):
 
     @property
     def _dtime(self):
-        
+
         return np.array(self._event['DEAD_TIME'])
-    
-    
+
+
     @property
     def ts(self):
-    
+        """Return filtered event times in seconds relative to ``timezero``."""
+        
         return np.array(self.event['TIME']) - self.timezero
 
 
     @property
     def pha(self):
+        """Return filtered pulse-height channel indices as integers."""
         
         try:
             return np.array(self.event['PHA']).astype(int)
@@ -279,24 +375,37 @@ class Event(object):
 
     @property
     def channel(self):
+        """Return detector channel numbers from the EBOUNDS table."""
         
         return np.array(self.ebound['CHANNEL'], dtype=int)
-    
-    
+
+
     @property
     def channel_emin(self):
+        """Return lower energy boundary of each channel in keV."""
         
         return np.array(self.ebound['E_MIN'])
-    
-    
+
+
     @property
     def channel_emax(self):
+        """Return upper energy boundary of each channel in keV.
+
+        Every ``channel_*`` property maps directly to the corresponding
+        column of the EBOUNDS HDU: ``channel`` (integer indices),
+        ``channel_emin``, and ``channel_emax`` (both in keV).
+        """
         
         return np.array(self.ebound['E_MAX'])
-    
-    
+
+
     @property
     def lc_t1t2(self):
+        """Return the light curve time window ``[t1, t2]`` in seconds.
+
+        Falls back to ``time_filter`` when ``_lc_t1t2`` has not been set
+        or is ``None``.
+        """
         
         try:
             self._lc_t1t2
@@ -307,11 +416,11 @@ class Event(object):
                 return self._lc_t1t2
             else:
                 return self.time_filter
-        
-        
+
+
     @lc_t1t2.setter
     def lc_t1t2(self, new_lc_t1t2):
-        
+
         if isinstance(new_lc_t1t2, (list, type(None))):
             self._lc_t1t2 = new_lc_t1t2
         else:
@@ -320,6 +429,11 @@ class Event(object):
 
     @property
     def spec_t1t2(self):
+        """Return the spectrum extraction time window ``[t1, t2]`` in seconds.
+
+        Falls back to ``time_filter`` when ``_spec_t1t2`` has not been set
+        or is ``None``.
+        """
         
         try:
             self._spec_t1t2
@@ -334,27 +448,34 @@ class Event(object):
 
     @spec_t1t2.setter
     def spec_t1t2(self, new_spec_t1t2):
-        
+
         if isinstance(new_spec_t1t2, (list, type(None))):
             self._spec_t1t2 = new_spec_t1t2
         else:
             raise ValueError('spec_t1t2 is extected to be list or None')
-    
-    
+
+
     @property
     def lc_interval(self):
+        """Return the total duration of the light curve window in seconds."""
         
         return self.lc_t1t2[1] - self.lc_t1t2[0]
-    
-    
+
+
     @property
     def spec_interval(self):
+        """Return the total duration of the spectrum extraction window in seconds."""
         
         return self.spec_t1t2[1] - self.spec_t1t2[0]
-    
-    
+
+
     @property
     def lc_binsize(self):
+        """Return the light curve bin width in seconds.
+
+        Defaults to ``lc_interval / 300`` (300 bins across the window)
+        when not explicitly set.
+        """
         
         try:
             self._lc_binsize
@@ -365,19 +486,23 @@ class Event(object):
                 return self._lc_binsize
             else:
                 return self.lc_interval / 300
-            
-            
+
+
     @lc_binsize.setter
     def lc_binsize(self, new_lc_binsize):
-        
+
         if isinstance(new_lc_binsize, (int, float, type(None))):
             self._lc_binsize = new_lc_binsize
         else:
             raise ValueError('lc_binsize is extected to be int, float or None')
-        
-        
+
+
     @property
     def spec_binsize(self):
+        """Return the per-channel background fitting bin width in seconds.
+
+        Defaults to ``spec_interval / 200`` when not explicitly set.
+        """
         
         try:
             self._spec_binsize
@@ -388,80 +513,98 @@ class Event(object):
                 return self._spec_binsize
             else:
                 return self.spec_interval / 200
-            
-            
+
+
     @spec_binsize.setter
     def spec_binsize(self, new_spec_binsize):
-        
+
         if isinstance(new_spec_binsize, (int, float, type(None))):
             self._spec_binsize = new_spec_binsize
         else:
             raise ValueError('spec_binsize is extected to be int, float or None')
-        
-        
+
+
     @property
     def lc_ts(self):
+        """Return event times within the light curve window in seconds."""
         
         idx = (self.ts >= self.lc_t1t2[0]) & (self.ts <= self.lc_t1t2[1])
-        
+
         return self.ts[idx]
-    
-    
+
+
     @property
     def spec_ts(self):
+        """Return unfiltered event times within the spectrum window in seconds."""
         
         idx = (self._ts >= self.spec_t1t2[0]) & (self._ts <= self.spec_t1t2[1])
-        
+
         return self._ts[idx]
-    
-    
+
+
     @property
     def lc_pha(self):
+        """Return PHA channel indices for events within the light curve window."""
         
         idx = (self.ts >= self.lc_t1t2[0]) & (self.ts <= self.lc_t1t2[1])
-        
+
         return self.pha[idx]
-    
-    
+
+
     @property
     def spec_pha(self):
+        """Return unfiltered PHA channel indices within the spectrum window."""
         
         idx = (self._ts >= self.spec_t1t2[0]) & (self._ts <= self.spec_t1t2[1])
-        
+
         return self._pha[idx]
-    
-    
+
+
     @staticmethod
     def _poisson_binsize(counts, interval, p):
-        
+
         rate = float(counts) / interval
 
         if rate == 0:
             return interval
         else:
             binsize = np.log(1 - p) / (- rate)
-            
+
             if binsize > interval:
                 return interval
-            
+
             elif binsize > 1:
                 return np.ceil(binsize)
-            
+
             elif binsize < 1:
                 return binsize
 
 
     def calc_exposure(self, bin_list, dead=True):
+        """Compute net exposure times for a list of time bins.
+
+        Sums dead-time corrections from the ``DEAD_TIME`` column of the
+        unfiltered event table.  Dead times are stored in microseconds and
+        are converted to seconds before subtraction.
+
+        Args:
+            bin_list: Array-like of shape (N, 2) with ``[tstart, tstop]``
+                pairs in seconds relative to ``timezero``.
+            dead: If ``True``, subtract dead-time from each bin's duration.
+
+        Returns:
+            1-D array of net exposure times in seconds with length N.
+        """
         
         ts = self._ts
         dtime = self._dtime
-        
+
         lbins = np.array(bin_list)[:, 0]
         rbins = np.array(bin_list)[:, 1]
         binsize = rbins - lbins
-        
+
         dead_time = np.zeros_like(binsize, dtype=float)
-        
+
         if dead:
             for i, (l, r) in enumerate(zip(lbins, rbins)):
                 dead_time[i] = 1e-6 * np.sum(dtime[(ts >= l) & (ts < r)])
@@ -471,64 +614,79 @@ class Event(object):
 
     @property
     def lc_bins(self):
+        """Return the light curve bin edges array in seconds."""
         
         return np.arange(self.lc_t1t2[0], self.lc_t1t2[1] + 1e-5, self.lc_binsize)
-    
-    
+
+
     @property
     def lc_bin_list(self):
+        """Return light curve bin boundaries as an (N, 2) array in seconds."""
         
         lbins, rbins = self.lc_bins[:-1], self.lc_bins[1:]
-        
+
         return np.vstack((lbins, rbins)).T
-    
-    
+
+
     @property
     def lc_exps(self):
+        """Return light curve bin exposures in seconds (no dead-time correction)."""
         
         return self.calc_exposure(self.lc_bin_list, dead=False)
-    
-    
+
+
     @property
     def lc_time(self):
+        """Return light curve bin center times in seconds."""
         
         return np.mean(self.lc_bin_list, axis=1)
-    
+
 
     @property
     def lc_time_err(self):
+        """Return half-widths of light curve bins in seconds."""
         
         lbins, rbins = self.lc_bins[:-1], self.lc_bins[1:]
-        
+
         return (rbins - lbins) / 2
-    
-    
+
+
     @property
     def lc_src_cts(self):
+        """Return source counts per light curve bin."""
         
         return np.histogram(self.lc_ts, bins=self.lc_bins)[0]
-    
-    
+
+
     @property
     def lc_src_cts_err(self):
+        """Return Poisson 1-sigma uncertainties on source counts per bin."""
         
         return np.sqrt(self.lc_src_cts)
-    
-    
+
+
     @property
     def lc_src_rate(self):
+        """Return source count rate per light curve bin in counts per second."""
         
         return self.lc_src_cts / self.lc_exps
-    
-    
+
+
     @property
     def lc_src_rate_err(self):
+        """Return 1-sigma uncertainties on source count rate in counts per second."""
         
         return self.lc_src_cts_err / self.lc_exps
-    
-    
+
+
     @property
     def bs_ignore(self):
+        """Return the background-fit ignore intervals, or ``None`` if unset.
+
+        Each element of the list is a ``[t1, t2]`` interval (in seconds
+        relative to ``timezero``) that will be excluded from the polynomial
+        background fit.
+        """
         
         try:
             self._bs_ignore
@@ -543,7 +701,7 @@ class Event(object):
 
     @bs_ignore.setter
     def bs_ignore(self, new_bs_ignore):
-        
+
         if isinstance(new_bs_ignore, (list, type(None))):
             self._bs_ignore = new_bs_ignore
         else:
@@ -552,6 +710,7 @@ class Event(object):
 
     @property
     def bs_p0(self):
+        """Return the background-fit significance threshold p0 (default 0.05)."""
         
         try:
             self._bs_p0
@@ -563,15 +722,16 @@ class Event(object):
 
     @bs_p0.setter
     def bs_p0(self, new_bs_p0):
-        
+
         if isinstance(new_bs_p0, (float, int)):
             self._bs_p0 = new_bs_p0
         else:
             raise ValueError('bs_p0 is extected to be float or int')
-    
-    
+
+
     @property
     def bs_sigma(self):
+        """Return the background-fit outlier rejection threshold in sigma (default 3)."""
         
         try:
             self._bs_sigma
@@ -583,15 +743,19 @@ class Event(object):
 
     @bs_sigma.setter
     def bs_sigma(self, new_bs_sigma):
-        
+
         if isinstance(new_bs_sigma, (int, float)):
             self._bs_sigma = new_bs_sigma
         else:
             raise ValueError('bs_sigma is extected to be int or float')
-        
-        
+
+
     @property
     def bs_deg(self):
+        """Return the forced polynomial degree for background fitting, or ``None``.
+
+        When ``None``, the degree is chosen automatically by ``PolyBase``.
+        """
         
         try:
             self._bs_deg
@@ -603,14 +767,20 @@ class Event(object):
 
     @bs_deg.setter
     def bs_deg(self, new_bs_deg):
-        
+
         if isinstance(new_bs_deg, (int, type(None))):
             self._bs_deg = new_bs_deg
         else:
             raise ValueError('bs_deg is extected to be int or None')
-        
-        
+
+
     def calc_autobs(self):
+        """Run automatic polynomial background estimation for the light curve.
+
+        Fits a polynomial background to the light curve using ``PolyBase``,
+        running two sigma-clipping iterations.  The result is stored in
+        ``_lc_bs`` and retrieved via the ``lc_bs`` property.
+        """
         
         self._lc_bs = PolyBase(self.lc_ts, self.lc_bins, self.lc_exps, self.bs_ignore)
         self._lc_bs.loop(p0=self.bs_p0, sigma=self.bs_sigma, deg=self.bs_deg)
@@ -619,6 +789,7 @@ class Event(object):
 
     @property
     def lc_bs(self):
+        """Return the ``PolyBase`` background-fit result, computing it if needed."""
         
         try:
             self._lc_bs
@@ -631,154 +802,222 @@ class Event(object):
 
     @property
     def lc_bkg_rate(self):
+        """Return background count rate at light curve bin centers in counts per second."""
         
         return self.lc_bs.poly.val(self.lc_time)[0]
-    
-    
+
+
     @property
     def lc_bkg_rate_err(self):
+        """Return 1-sigma uncertainty on background rate in counts per second."""
         
         return self.lc_bs.poly.val(self.lc_time)[1]
-    
-    
+
+
     @property
     def lc_bkg_cts(self):
+        """Return background counts per light curve bin."""
         
         return self.lc_bkg_rate * self.lc_exps
-    
-    
+
+
     @property
     def lc_bkg_cts_err(self):
+        """Return 1-sigma uncertainty on background counts per light curve bin."""
         
         return self.lc_bkg_rate_err * self.lc_exps
-    
-    
+
+
     @property
     def lc_net_rate(self):
+        """Return background-subtracted net count rate in counts per second."""
         
         return self.lc_src_rate - self.lc_bkg_rate
-    
-    
+
+
     @property
     def lc_net_rate_err(self):
+        """Return 1-sigma uncertainty on net count rate in counts per second."""
         
         return np.sqrt(self.lc_src_rate_err ** 2 + self.lc_bkg_rate_err ** 2)
-    
-    
+
+
     @property
     def lc_net_cts(self):
+        """Return net (background-subtracted) counts per light curve bin."""
         
         return self.lc_net_rate * self.lc_exps
-    
-    
+
+
     @property
     def lc_net_cts_err(self):
+        """Return 1-sigma uncertainty on net counts per light curve bin."""
         
         return self.lc_net_rate_err * self.lc_exps
-    
+
 
     @property
     def lc_net_ccts(self):
+        """Return cumulative net counts over the light curve bins."""
         
         return np.cumsum(self.lc_net_cts)
-    
-    
+
+
     def extract_curve(self, savepath='./curve', autobs=True, show=False):
+        """Extract and save the light curve as interactive HTML and JSON files.
+
+        Generates a source light curve plot and, when ``autobs`` is enabled,
+        overlays the polynomial background model and writes a separate
+        cumulative net-counts plot.  Both plots are saved under ``savepath``.
+
+        Args:
+            savepath: Directory where output files are written.
+            autobs: If ``True``, compute the automatic polynomial background
+                and overlay it on the light curve.
+            show: If ``True``, display plots interactively in the browser.
+        """
         
         savepath = os.path.abspath(savepath)
-        
+
         if not os.path.exists(savepath):
             os.makedirs(savepath)
-            
+
         if autobs:
             lc_bs = self.lc_bs
             lc_bs.save(savepath=savepath + '/polybase')
-            
+
             lc_bkg_rate, lc_bkg_rate_err = lc_bs.poly.val(self.lc_time)
-        
+
             lc_net_rate = self.lc_src_rate - lc_bkg_rate
             lc_net_cts = lc_net_rate * self.lc_exps
-            
+
             lc_net_ccts = np.cumsum(lc_net_cts)
-        
+
         fig = go.Figure()
-        src = go.Scatter(x=self.lc_time, 
-                         y=self.lc_src_rate, 
-                         mode='lines+markers', 
-                         name='source lightcurve', 
-                         showlegend=True, 
+        src = go.Scatter(x=self.lc_time,
+                         y=self.lc_src_rate,
+                         mode='lines+markers',
+                         name='source lightcurve',
+                         showlegend=True,
                          error_y=dict(
                              type='data',
                              array=self.lc_src_rate_err,
                              thickness=1.5,
-                             width=0), 
+                             width=0),
                          marker=dict(symbol='cross-thin', size=0))
         fig.add_trace(src)
-        
+
         if autobs:
-            bkg = go.Scatter(x=self.lc_time, 
-                             y=lc_bkg_rate, 
-                             mode='lines+markers', 
-                             name='background lightcurve', 
-                             showlegend=True, 
+            bkg = go.Scatter(x=self.lc_time,
+                             y=lc_bkg_rate,
+                             mode='lines+markers',
+                             name='background lightcurve',
+                             showlegend=True,
                              error_y=dict(
                                  type='data',
                                  array=lc_bkg_rate_err,
                                  thickness=1.5,
-                                 width=0), 
+                                 width=0),
                              marker=dict(symbol='cross-thin', size=0))
             fig.add_trace(bkg)
-        
+
         fig.update_xaxes(title_text=f'Time since {self.timezero_utc} (s)')
         fig.update_yaxes(title_text=f'Counts per second (binsize={self.lc_binsize} s)')
         fig.update_layout(template='plotly_white', height=600, width=800)
         fig.update_layout(legend=dict(x=1, y=1, xanchor='right', yanchor='bottom'))
-        
+
         if show: fig.show()
         fig.write_html(savepath + '/lc.html')
         json_dump(fig.to_dict(), savepath + '/lc.json')
-        
+
         if autobs:
             fig = go.Figure()
-            net = go.Scatter(x=self.lc_time, 
-                            y=lc_net_ccts, 
-                            mode='lines', 
-                            name='net cumulated counts', 
+            net = go.Scatter(x=self.lc_time,
+                            y=lc_net_ccts,
+                            mode='lines',
+                            name='net cumulated counts',
                             showlegend=True)
-            
+
             fig.add_trace(net)
-            
+
             fig.update_xaxes(title_text=f'Time since {self.timezero_utc} (s)')
             fig.update_yaxes(title_text=f'Cumulated counts (binsize={self.lc_binsize} s)')
             fig.update_layout(template='plotly_white', height=600, width=800)
             fig.update_layout(legend=dict(x=1, y=1, xanchor='right', yanchor='bottom'))
-            
+
             fig.write_html(savepath + '/cum_lc.html')
             json_dump(fig.to_dict(), savepath + '/cum_lc.json')
-            
 
-    def calculate_txx(self, mp=True, xx=0.9, pstart=None, pstop=None, 
+
+    def calculate_txx(self, mp=True, xx=0.9, pstart=None, pstop=None,
                       lbkg=None, rbkg=None, savepath='./curve/duration'):
+        """Compute the Txx duration of a burst from the light curve.
+
+        Runs ``pgTxx`` to detect the pulse, then computes the interval
+        enclosing a fraction ``xx`` of the total counts.  Results are
+        saved to ``savepath``.
+
+        Args:
+            mp: If ``True``, use multi-peak pulse-finding mode.
+            xx: Fraction of total counts to enclose; e.g. 0.9 for T90.
+            pstart: Forced pulse start time in seconds relative to
+                ``timezero``, or ``None`` for automatic detection.
+            pstop: Forced pulse stop time in seconds relative to
+                ``timezero``, or ``None`` for automatic detection.
+            lbkg: Left background window ``[t1, t2]``, or ``None`` to use
+                the automatically determined window.
+            rbkg: Right background window ``[t1, t2]``, or ``None`` to use
+                the automatically determined window.
+            savepath: Directory where duration results are written.
+        """
         
         savepath = os.path.abspath(savepath)
-        
+
         if not os.path.exists(savepath):
             os.makedirs(savepath)
-        
+
         txx = pgTxx(self.lc_ts, self.lc_bins, self.lc_exps, self.bs_ignore)
         txx.find_pulse(p0=self.bs_p0, sigma=self.bs_sigma, deg=self.bs_deg, mp=mp)
         txx.calculate(xx=xx, pstart=pstart, pstop=pstop, lbkg=lbkg, rbkg=rbkg)
         txx.save(savepath=savepath)
 
-        
-    def extract_rebin_curve(self, tranges=None, stat='pgstat', min_sigma=None, min_evt=None, max_bin=None, 
+
+    def extract_rebin_curve(self, tranges=None, stat='pgstat', min_sigma=None, min_evt=None, max_bin=None,
                             savepath='./curve', loglog=False, step=False, show=False):
+        """Rebin the net light curve and save the result as HTML and JSON.
+
+        Bins are adaptively merged within each time range in ``tranges``
+        until the significance criterion is met.  The rebinned net count
+        rate is plotted and written to ``savepath``.
+
+        Args:
+            tranges: List of ``[t1, t2]`` windows in seconds within which
+                rebinning is applied.  A single ``[t1, t2]`` list is also
+                accepted.  Defaults to the full light curve range.
+            stat: Rebinning statistic; passed to ``rebin()`` (e.g.
+                ``'pgstat'``, ``'cstat'``).
+            min_sigma: Minimum signal-to-noise ratio per merged bin, or
+                ``None`` to skip this criterion.
+            min_evt: Minimum number of source counts per merged bin, or
+                ``None`` to skip this criterion.
+            max_bin: Maximum number of raw bins to merge, or ``None`` for
+                no limit.
+            savepath: Directory where output files are written.
+            loglog: If ``True``, use logarithmic axes on both the time and
+                rate axes.
+            step: If ``True``, overlay a step-function representation of
+                the rebinned light curve.
+            show: If ``True``, display the plot interactively in the browser.
+
+        Raises:
+            ValueError: If ``tranges`` is not a list.
+        """
         
         savepath = os.path.abspath(savepath)
-        
+
         if not os.path.exists(savepath):
             os.makedirs(savepath)
-            
+
         if tranges is not None:
             if isinstance(tranges, list) and not isinstance(tranges[0], list):
                 tranges = [tranges]
@@ -788,37 +1027,37 @@ class Event(object):
                 raise ValueError('trange is expected to be a list')
         else:
             tranges = [[np.min(self.lc_bin_list[:, 0]), np.max(self.lc_bin_list[:, 1])]]
-            
+
         lc_rebin_list, lc_src_rects, lc_src_rects_err, lc_bkg_rebcts, lc_bkg_rebcts_err = [], [], [], [], []
-            
+
         for trange in tranges:
             idx = (self.lc_bin_list[:, 0] >= trange[0]) * (self.lc_bin_list[:, 1] <= trange[1])
-            
+
             new_bins, new_cts, new_cts_err, new_bcts, new_bcts_err = \
                 rebin(
-                    self.lc_bin_list[idx], 
-                    stat, 
-                    self.lc_src_cts[idx], 
+                    self.lc_bin_list[idx],
+                    stat,
+                    self.lc_src_cts[idx],
                     cts_err=self.lc_src_cts_err[idx],
-                    bcts=self.lc_bkg_cts[idx], 
-                    bcts_err=self.lc_bkg_cts_err[idx], 
-                    min_sigma=min_sigma, 
-                    min_evt=min_evt, 
+                    bcts=self.lc_bkg_cts[idx],
+                    bcts_err=self.lc_bkg_cts_err[idx],
+                    min_sigma=min_sigma,
+                    min_evt=min_evt,
                     max_bin=max_bin,
                     backscale=1)
-                
+
             lc_rebin_list.append(new_bins)
             lc_src_rects.append(new_cts)
             lc_src_rects_err.append(new_cts_err)
             lc_bkg_rebcts.append(new_bcts)
             lc_bkg_rebcts_err.append(new_bcts_err)
-            
+
         self.lc_rebin_list = np.vstack(lc_rebin_list)
         self.lc_src_rects = np.hstack(lc_src_rects)
         self.lc_src_rects_err = np.hstack(lc_src_rects_err)
         self.lc_bkg_rebcts = np.hstack(lc_bkg_rebcts)
-        self.lc_bkg_rebcts_err = np.hstack(lc_bkg_rebcts_err)       
-                
+        self.lc_bkg_rebcts_err = np.hstack(lc_bkg_rebcts_err)
+
         self.lc_retime = np.mean(self.lc_rebin_list, axis=1)
         self.lc_rebinsize = self.lc_rebin_list[:, 1] - self.lc_rebin_list[:, 0]
         self.lc_retime_err = self.lc_rebinsize / 2
@@ -827,38 +1066,38 @@ class Event(object):
         self.lc_net_rects_err = np.sqrt(self.lc_src_rects_err ** 2 + self.lc_bkg_rebcts_err ** 2)
         self.lc_net_rerate = self.lc_net_rects / self.lc_reexps
         self.lc_net_rerate_err = self.lc_net_rects_err / self.lc_reexps
-        
+
         self.lc_retime_step = self.lc_rebin_list.flatten()
         self.lc_net_rerate_step = np.repeat(self.lc_net_rerate, 2)
-        
+
         fig = go.Figure()
-        net = go.Scatter(x=self.lc_retime, 
-                         y=self.lc_net_rerate, 
-                         mode='markers', 
-                         name='net lightcurve', 
-                         showlegend=True, 
+        net = go.Scatter(x=self.lc_retime,
+                         y=self.lc_net_rerate,
+                         mode='markers',
+                         name='net lightcurve',
+                         showlegend=True,
                          error_x=dict(
                              type='data',
-                             array=self.lc_retime_err, 
+                             array=self.lc_retime_err,
                              thickness=1.5,
-                             width=0), 
+                             width=0),
                          error_y=dict(
                              type='data',
                              array=self.lc_net_rerate_err,
                              thickness=1.5,
-                             width=0), 
+                             width=0),
                          marker=dict(color='#636EFA', symbol='circle', size=3))
         fig.add_trace(net)
-        
+
         if step:
-            net_step = go.Scatter(x=self.lc_retime_step, 
-                                  y=self.lc_net_rerate_step, 
-                                  mode='lines', 
-                                  showlegend=False, 
+            net_step = go.Scatter(x=self.lc_retime_step,
+                                  y=self.lc_net_rerate_step,
+                                  mode='lines',
+                                  showlegend=False,
                                   line=dict(width=1.5, color='#636EFA'))
             fig.add_trace(net_step)
-        
-        if loglog: 
+
+        if loglog:
             fig.update_xaxes(title_text=f'Time since {self.timezero_utc} (s)', type='log')
             fig.update_yaxes(title_text='Counts per second', type='log')
         else:
@@ -866,7 +1105,7 @@ class Event(object):
             fig.update_yaxes(title_text='Counts per second')
         fig.update_layout(template='plotly_white', height=600, width=800)
         fig.update_layout(legend=dict(x=1, y=1, xanchor='right', yanchor='bottom'))
-        
+
         if show: fig.show()
         fig.write_html(savepath + '/rebin_lc.html')
         json_dump(fig.to_dict(), savepath + '/rebin_lc.json')
@@ -874,16 +1113,20 @@ class Event(object):
 
     @property
     def spec_slices(self):
+        """Return the list of ``[t1, t2]`` spectral time slices in seconds.
+
+        Defaults to ``[time_filter]`` when ``spec_slices`` has not been set.
+        """
         
         try:
             return self._spec_slices
         except AttributeError:
             return [self.time_filter]
-        
-        
+
+
     @spec_slices.setter
     def spec_slices(self, new_spec_slice):
-        
+
         if isinstance(new_spec_slice, list):
             if isinstance(new_spec_slice[0], list):
                 self._spec_slices = new_spec_slice
@@ -891,68 +1134,77 @@ class Event(object):
                 raise ValueError('not expected spec_slices type')
         else:
             raise ValueError('not expected spec_slices type')
-        
-        
+
+
     def _extract_src_phaii(self, spec_slices):
-        
+
         num_slices = len(spec_slices)
         num_channels = len(self.channel)
-        
+
         phaii = np.zeros([num_slices, num_channels], dtype=float)
-        
+
         lslices = np.array(spec_slices)[:, 0]
         rslices = np.array(spec_slices)[:, 1]
-        
+
         pha_bins = np.arange(np.min(self.channel), np.max(self.channel) + 2, 1)
-        
+
         for i, (l, r) in enumerate(zip(lslices, rslices)):
             pii = self.spec_pha[(self.spec_ts >= l) & (self.spec_ts < r)]
             pha, _ = np.histogram(pii, pha_bins)
             phaii[i, :] = pha
-            
+
         return phaii
-    
-    
+
+
     def extract_src_phaii(self, savepath='./spectrum'):
-            
+        """Extract source PHA-II spectra and write OGIP-compliant ``.src`` files.
+
+        One ``.src`` file is written per spectral time slice defined in
+        ``spec_slices``.  File names encode the slice boundaries in the
+        format ``{t1}_{t2}.src``.
+
+        Args:
+            savepath: Directory where ``.src`` files are written.
+        """
+        
         phaii = self._extract_src_phaii(self.spec_slices)
-        
+
         savepath = os.path.abspath(savepath)
-        
+
         if not os.path.exists(savepath):
             os.makedirs(savepath)
-                
+
         exps = self.calc_exposure(self.spec_slices)
-            
+
         lslices = np.array(self.spec_slices)[:, 0]
         rslices = np.array(self.spec_slices)[:, 1]
-    
+
         for i, (l, r) in enumerate(zip(lslices, rslices)):
             new_l = '{:+.2f}'.format(l).replace('-', 'm').replace('.', 'd').replace('+', 'p')
             new_r = '{:+.2f}'.format(r).replace('-', 'm').replace('.', 'd').replace('+', 'p')
-            
+
             file_name = '_'.join([new_l, new_r]) + '.src'
-            
+
             pha_hdu = self._to_pha_fits(phaii[i], np.sqrt(phaii[i]), exps[i], self.timezero + l, self.timezero + r, file_name)
 
             if os.path.isfile(savepath + f'/{file_name}'):
                 os.remove(savepath + f'/{file_name}')
             pha_hdu.writeto(savepath + f'/{file_name}')
-            
-            
+
+
     def _extract_bkg_phaii(self, spec_slices, poisson_binsize=True, show=False, showall=False):
-        
+
         num_slices = len(spec_slices)
         num_channels = len(self.channel)
-        
+
         phaii = np.zeros([num_slices, num_channels], dtype=float)
         phaii_err = np.zeros([num_slices, num_channels], dtype=float)
-        
+
         lslices = np.array(spec_slices)[:, 0]
         rslices = np.array(spec_slices)[:, 1]
-        
+
         bins = np.arange(self.spec_t1t2[0], self.spec_t1t2[1]+1e-5, self.spec_binsize)
-        
+
         if poisson_binsize:
             interp_low = self.spec_t1t2[0] + self.spec_interval / 10
             interp_upp = self.spec_t1t2[1] - self.spec_interval / 10
@@ -962,23 +1214,23 @@ class Event(object):
             interp_low = bins[1]
             interp_upp = bins[-2]
             interp_time = np.linspace(interp_low, interp_upp, 100)
-        
+
         bs = PolyBase(self.spec_ts, bins, ignore=self.bs_ignore)
         bs.loop(p0=self.bs_p0, sigma=self.bs_sigma, deg=self.bs_deg)
         bs.loop(p0=self.bs_p0, sigma=self.bs_sigma, deg=self.bs_deg)
 
         ignore = bs.ignore
         brate, _ = bs.poly.val(interp_time)
-        
+
         brate_sum = np.zeros_like(brate)
-        
+
         min_binsize = self.spec_binsize
         max_binsize = int(self.spec_interval / 10 * 10) / 10
-        
+
         for i, ch in enumerate(self.channel):
             index = (self.spec_pha == ch)
             ts_i = self.spec_ts[index]
-            
+
             if poisson_binsize:
                 binsize_i = Event._poisson_binsize(len(ts_i), self.spec_interval, 0.99)
             else:
@@ -989,123 +1241,151 @@ class Event(object):
             else: binsize_i = max_binsize
 
             bins_i = np.arange(self.spec_t1t2[0], self.spec_t1t2[1] + 1e-5, binsize_i)
-            
+
             bs_i = PolyBase(ts_i, bins_i, ignore=ignore)
             bs_i.polyfit(deg=bs.poly_res['deg'])
-            
+
             brate_i, _ = bs_i.poly.val(interp_time)
-            
+
             if showall:
                 fig = go.Figure()
-                src = go.Scatter(x=bs_i.time, 
-                                 y=bs_i.rate, 
-                                 mode='lines', 
-                                 name='lightcurve', 
+                src = go.Scatter(x=bs_i.time,
+                                 y=bs_i.rate,
+                                 mode='lines',
+                                 name='lightcurve',
                                  showlegend=True)
-                bkg = go.Scatter(x=interp_time, 
-                                 y=brate_i, 
-                                 mode='lines', 
-                                 name='background', 
+                bkg = go.Scatter(x=interp_time,
+                                 y=brate_i,
+                                 mode='lines',
+                                 name='background',
                                  showlegend=True)
 
                 fig.add_trace(src)
                 fig.add_trace(bkg)
-                
+
                 fig.update_xaxes(title_text=f'Time since {self.timezero_utc} (s)')
                 fig.update_yaxes(title_text=f'Counts per second')
                 fig.update_layout(template='plotly_white', height=600, width=800)
                 fig.update_layout(legend=dict(x=1, y=1, xanchor='right', yanchor='bottom'))
-                
+
                 fig.show()
 
             brate_sum = brate_sum + brate_i
-            
+
             for j, (l, r) in enumerate(zip(lslices, rslices)):
-                
+
                 bins_j = np.linspace(l, r, 100)
                 brate_j, brate_err_j = bs_i.poly.val(bins_j)
-                
+
                 phaii[j, i] = np.trapz(brate_j, bins_j)
                 phaii_err[j, i] = np.sqrt(np.trapz(brate_err_j ** 2, bins_j))
-                
+
         fig = go.Figure()
-        src = go.Scatter(x=bs.time, 
-                         y=bs.rate, 
-                         mode='lines', 
-                         name='total lightcurve', 
+        src = go.Scatter(x=bs.time,
+                         y=bs.rate,
+                         mode='lines',
+                         name='total lightcurve',
                          showlegend=True)
-        tot = go.Scatter(x=interp_time, 
-                         y=brate, 
-                         mode='lines', 
-                         name='total background', 
+        tot = go.Scatter(x=interp_time,
+                         y=brate,
+                         mode='lines',
+                         name='total background',
                          showlegend=True)
-        sum = go.Scatter(x=interp_time, 
-                         y=brate_sum, 
-                         mode='lines', 
-                         name='summing background', 
+        sum = go.Scatter(x=interp_time,
+                         y=brate_sum,
+                         mode='lines',
+                         name='summing background',
                          showlegend=True)
-        
+
         lslices = np.array(self.spec_slices)[:, 0]
         rslices = np.array(self.spec_slices)[:, 1]
 
         for i, slice in enumerate(self.spec_slices):
-            fig.add_vrect(x0=slice[0], x1=slice[1], fillcolor=Event.colors[i], 
+            fig.add_vrect(x0=slice[0], x1=slice[1], fillcolor=Event.colors[i],
                           opacity=0.3, line_width=0)
 
         fig.add_trace(src)
         fig.add_trace(tot)
         fig.add_trace(sum)
-        
+
         fig.update_xaxes(title_text=f'Time since {self.timezero_utc} (s)')
         fig.update_yaxes(title_text=f'Counts per second')
         fig.update_layout(template='plotly_white', height=600, width=800)
         fig.update_layout(legend=dict(x=1, y=1, xanchor='right', yanchor='bottom'))
-        
+
         if show: fig.show()
-                
+
         return phaii, phaii_err
-                
-                
+
+
     def extract_bkg_phaii(self, savepath='./spectrum', poisson_binsize=True, show=False):
+        """Extract background PHA-II spectra and write OGIP-compliant ``.bkg`` files.
+
+        Fits a per-channel polynomial background to the spectrum-window
+        time series and integrates over each spectral slice.  One ``.bkg``
+        file is written per slice.
+
+        Args:
+            savepath: Directory where ``.bkg`` files are written.
+            poisson_binsize: If ``True``, choose the per-channel bin width
+                so that the expected number of Poisson events per bin is
+                approximately one, rather than using ``spec_binsize`` for
+                all channels.
+            show: If ``True``, display the background diagnostic plot
+                interactively in the browser.
+        """
         
         phaii, phaii_err = self._extract_bkg_phaii(self.spec_slices, poisson_binsize=poisson_binsize, show=show)
-        
+
         savepath = os.path.abspath(savepath)
-        
+
         if not os.path.exists(savepath):
             os.makedirs(savepath)
-            
+
         exps = self.calc_exposure(self.spec_slices)
-            
+
         lslices = np.array(self.spec_slices)[:, 0]
         rslices = np.array(self.spec_slices)[:, 1]
-    
+
         for i, (l, r) in enumerate(zip(lslices, rslices)):
             new_l = '{:+.2f}'.format(l).replace('-', 'm').replace('.', 'd').replace('+', 'p')
             new_r = '{:+.2f}'.format(r).replace('-', 'm').replace('.', 'd').replace('+', 'p')
-            
+
             file_name = '_'.join([new_l, new_r]) + '.bkg'
-            
+
             pha_hdu = self._to_pha_fits(phaii[i], phaii_err[i], exps[i], self.timezero + l, self.timezero + r, file_name)
-            
+
             if os.path.isfile(savepath + f'/{file_name}'):
                 os.remove(savepath + f'/{file_name}')
             pha_hdu.writeto(savepath + f'/{file_name}')
-                
-                
+
+
     def extract_spectrum(self, savepath='./spectrum', poisson_binsize=True, show=False):
+        """Extract both source and background spectra for all spectral slices.
+
+        Convenience wrapper that calls ``extract_src_phaii`` and
+        ``extract_bkg_phaii`` in sequence, writing ``.src`` and ``.bkg``
+        files to ``savepath``.
+
+        Args:
+            savepath: Directory where spectrum files are written.
+            poisson_binsize: Passed to ``extract_bkg_phaii``; enables
+                per-channel Poisson-optimised bin widths.
+            show: If ``True``, display the background diagnostic plot
+                interactively in the browser.
+        """
         
         savepath = os.path.abspath(savepath)
-        
+
         if not os.path.exists(savepath):
             os.makedirs(savepath)
-        
+
         self.extract_src_phaii(savepath=savepath)
         self.extract_bkg_phaii(savepath=savepath, poisson_binsize=poisson_binsize, show=show)
 
 
     def _to_pha_fits(self, pha, pha_err, exp, tstart, tstop, file_name):
-        
+
         hdr = fits.Header()
         hdr['HDUCLASS'] = ('ogip', 'Format conforms to OGIP/GSFC conventions')
         hdr['HDUVERS'] = ('1.2.1', 'Version of format (OGIP memo OGIP-92-007)')
@@ -1146,16 +1426,16 @@ class Event(object):
         spectrum_hdu.header['CORRFILE'] = ('None', 'correlation FITS file for this object')
         spectrum_hdu.header['RESPFILE'] = ('None', 'redistribution; RSP')
         spectrum_hdu.header['ANCRFILE'] = ('None', 'ancillary response; ARF')
-        
+
         if self.chantype == 'pha':
             spectrum_hdu.header['CHANTYPE'] = (self.chantype, 'No corrections have been applied')
         elif self.chantype == 'pi':
             spectrum_hdu.header['CHANTYPE'] = (self.chantype, 'Channels assigned by detector electronics')
-            
+
         spectrum_hdu.header['TSTART'] = (round(tstart, 5), 'Observation start time')
         spectrum_hdu.header['TSTOP'] = (round(tstop, 5), 'Observation stop time')
         spectrum_hdu.header['TIMEZERO'] = (round(self.timezero, 5), 'zero time in MET format')
-            
+
         spectrum_hdu.header['HDUCLASS'] = ('OGIP', 'format conforms to OGIP standard')
         spectrum_hdu.header['HDUCLAS1'] = ('SPECTRUM', 'PHA dataset (OGIP memo OGIP-92-007)')
         spectrum_hdu.header['HDUVERS'] = ('1.2.1', 'Version of format (OGIP memo OGIP-92-007)')
@@ -1167,17 +1447,17 @@ class Event(object):
         e_min_field = fits.Column(name='E_MIN', array=self.channel_emin, format='E', unit='keV')
         e_max_field = fits.Column(name='E_MAX', array=self.channel_emax, format='E', unit='keV')
         ebound_hdu = fits.BinTableHDU.from_columns([channel_field, e_min_field, e_max_field])
-        
+
         ebound_hdu.header['EXTNAME'] = ('EBOUNDS', 'name of this binary table extension')
         ebound_hdu.header['TLMIN1'] = (np.min(self.channel), 'Lowest legal channel number')
         ebound_hdu.header['TLMAX1'] = (np.max(self.channel), 'Highest legal channel number')
         ebound_hdu.header['DETCHANS'] = (len(self.channel), 'Total No. of Detector Channels available')
-        
+
         if self.chantype == 'pha':
             ebound_hdu.header['CHANTYPE'] = (self.chantype, 'No corrections have been applied')
         elif self.chantype == 'pi':
             ebound_hdu.header['CHANTYPE'] = (self.chantype, 'Channels assigned by detector electronics')
-        
+
         ebound_hdu.header['HDUCLASS'] = ('OGIP', 'format conforms to OGIP standard')
         ebound_hdu.header['HDUCLAS1'] = ('RESPONSE', 'These are typically found in RMF files')
         ebound_hdu.header['HDUCLAS2'] = ('EBOUNDS', 'From CAL/GEN/92-002')
@@ -1187,13 +1467,24 @@ class Event(object):
         ebound_hdu.header['FILTER'] = ('None', 'Instrument filter in use')
 
         pha_hdu = fits.HDUList([primary_hdu, spectrum_hdu, ebound_hdu])
-        
+
         return pha_hdu
 
 
 
 class gbmTTE(Event):
-    
+    """Read and process Fermi/GBM Time-Tagged Event (TTE) FITS files.
+
+    Supports single or multiple TTE files from the same detector,
+    merging and deduplicating the event tables automatically.  Provides
+    PHA-channel filtering and on-the-fly DRM response generation via
+    ``gbm_drm_gen`` when a position history (poshist) file is supplied.
+
+    Attributes:
+        det_name_lookup: Mapping from full detector-name strings (e.g.
+            ``'NAI_00'``) to short identifiers (e.g. ``'n0'``).
+    """
+
     det_name_lookup = {
         "NAI_00": "n0",
         "NAI_01": "n1",
@@ -1209,46 +1500,71 @@ class gbmTTE(Event):
         "NAI_11": "nb",
         "BGO_00": "b0",
         "BGO_01": "b1"}
-        
+
     def __init__(self, file, posfile=None):
+        """Initialize gbmTTE and read the TTE FITS file(s).
+
+        Args:
+            file: Path (or list of paths) to GBM TTE FITS file(s).
+            posfile: Path (or list of paths) to GBM position history
+                (poshist) FITS file(s), or ``None`` if response generation
+                is not needed.
+        """
         
         self._file = file
         self._posfile = posfile
-        
+
         self._read()
 
 
     @classmethod
     def from_utc(cls, utc, det, t1=-200, t2=500):
+        """Retrieve a GBM TTE file from the FSSC archive and construct an instance.
+
+        Downloads TTE and poshist files covering ``[utc + t1, utc + t2]``
+        seconds for the specified detector.
+
+        Args:
+            utc: Trigger UTC time string (e.g. ``'2021-01-01T00:00:00'``).
+            det: Short detector name (e.g. ``'n0'``, ``'b1'``); must be a
+                value in ``gbmTTE.det_name_lookup``.
+            t1: Start offset in seconds relative to ``utc``.
+            t2: Stop offset in seconds relative to ``utc``.
+
+        Raises:
+            AssertionError: If ``det`` is not a recognised detector name.
+            AssertionError: If no TTE file is found in the retrieved results.
+            AssertionError: If no poshist file is found in the retrieved results.
+        """
         
         dets = gbmTTE.det_name_lookup.values()
         msg = 'invalid detector: %s' % det
         assert det in dets, msg
-        
+
         rtv = gbmRetrieve.from_utc(utc=utc, t1=t1, t2=t2)
 
         file = rtv.rtv_res['tte'][det]
-            
+
         msg = 'no retrieved tte file'
         assert file != [], msg
-        
+
         posfile = rtv.rtv_res['poshist']
-        
+
         msg = 'no retrieved poshist file'
         assert posfile != [], msg
-        
+
         return cls(file, posfile)
-    
+
 
     def _read(self):
-        
+
         if isinstance(self._file, str):
             self._file = [self._file]
-        
+
         det_list = list()
         event_list = list()
         gti_list = list()
-        
+
         for i in range(len(self._file)):
             hdu = fits.open(self._file[i])
             det = hdu['PRIMARY'].header['DETNAM']
@@ -1256,7 +1572,7 @@ class gbmTTE(Event):
             ebound = table.Table.read(hdu['EBOUNDS'])
             gti = table.Table.read(hdu['GTI'])
             hdu.close()
-            
+
             pha = np.array(event['PHA']).astype(int)
             ch = np.array(ebound['CHANNEL']).astype(int)
             emin = np.array(ebound['E_MIN'])
@@ -1264,14 +1580,14 @@ class gbmTTE(Event):
             energy = Event._ch_to_energy(pha, ch, emin, emax)
             event['ENERGY'] = energy * units.keV
             event['DEAD_TIME'] = (pha == 127) * 10.0 + (pha < 127) * 2.6
-            
+
             det_list.append(det)
             event_list.append(event)
             gti_list.append(gti)
 
         assert len(set(det_list)) == 1, 'currently unsupport for data from different detectors'
         self._det = list(set(det_list))[0]
-        
+
         self._event = table.vstack(event_list)
         self._gti = table.vstack(gti_list)
         self._ebound = ebound
@@ -1281,33 +1597,34 @@ class gbmTTE(Event):
 
         self._event.sort('TIME')
         self._gti.sort('START')
-        
+
         self._timezero = np.min(self._event['TIME'])
-        
+
         self._filter = Filter(self._event)
         self._filter_info = {'time': None, 'energy': None, 'pha': None, 'tag': None}
-        
+
         if self._posfile is None:
             self._pos_t1t2_list = None
         else:
             if isinstance(self._posfile, str):
                 self._posfile = [self._posfile]
-            
+
             pos_t1t2_list = []
             for i in range(len(self._posfile)):
                 hdu = fits.open(self._posfile[i])
                 pos = table.Table.read(hdu[1])
                 hdu.close()
-                
+
                 pos_time = pos['SCLK_UTC']
                 pos_t1t2 = [np.min(pos_time), np.max(pos_time)]
                 pos_t1t2_list.append(pos_t1t2)
-            
+
             self._pos_t1t2_list = pos_t1t2_list
 
 
     @property
     def posfile(self):
+        """Return the poshist file path(s), or ``None`` if not set."""
         
         if self._posfile is None:
             return None
@@ -1317,196 +1634,257 @@ class gbmTTE(Event):
 
     @posfile.setter
     def posfile(self, new_posfile):
-        
+
         self._posfile = new_posfile
-        
+
         self._read()
 
 
     @property
     def chantype(self):
+        """Return ``'pha'`` to indicate uncorrected PHA channels."""
         
         return 'pha'
-    
-    
+
+
     @property
     def telescope(self):
+        """Return ``'GLAST'`` as the telescope name."""
         
         return 'GLAST'
-    
-    
+
+
     @property
     def instrument(self):
+        """Return ``'GBM'`` as the instrument name."""
         
         return 'GBM'
-        
+
     @property
     def det(self):
-            
+        """Return the short detector identifier (e.g. ``'n0'``, ``'b1'``)."""
+        
         return gbmTTE.det_name_lookup[self._det]
-    
-    
+
+
     @property
     def pos_t1t2_list(self):
+        """Return the time coverage of each poshist file as a list of ``[t1, t2]``."""
         
         return self._pos_t1t2_list
-    
-    
+
+
     @property
     def timezero(self):
+        """Return the reference time in Fermi MET seconds."""
         
         return self._timezero
 
 
     @timezero.setter
     def timezero(self, new_timezero):
-        
+
         if isinstance(new_timezero, float):
             self._timezero = new_timezero
-            
+
         elif isinstance(new_timezero, str):
             self._timezero = fermi_utc_to_met(new_timezero)
-            
+
         else:
             raise ValueError('not expected type for timezero')
 
 
     @property
     def timezero_utc(self):
+        """Return the reference time as a Fermi UTC string."""
         
         return fermi_met_to_utc(self.timezero)
-    
-    
+
+
     def filter_pha(self, p1p2):
+        """Apply a reversible PHA channel range filter to the event table.
+
+        Args:
+            p1p2: Two-element list ``[p1, p2]`` of integer channel bounds
+                (inclusive), or ``None`` to clear the filter.
+
+        Raises:
+            ValueError: If ``p1p2`` is neither a list nor ``None``.
+        """
         
         if p1p2 is None:
             expr = None
-            
+
         elif isinstance(p1p2, list):
             p1, p2 = p1p2
             expr = f'(PHA >= {p1}) * (PHA <= {p2})'
-            
+
         else:
             raise ValueError('p1p2 is extected to be list or None')
-        
+
         self._filter_info['pha'] = expr
-        
+
         self._filter_update()
-        
-        
+
+
     def _filter_update(self):
-        
+
         self._clear_filter()
-        
+
         self._filter.eval(self._filter_info['time'])
         self._filter.eval(self._filter_info['pha'])
         self._filter.eval(self._filter_info['energy'])
         self._filter.eval(self._filter_info['tag'])
-        
-        
+
+
     def extract_response(self, ra, dec, savepath='./spectrum'):
+        """Generate DRM response files for each spectral slice.
+
+        Uses ``gbm_drm_gen`` to compute a detector response matrix (DRM)
+        at the mid-time of each slice and writes a ``.rsp`` file per slice.
+        Requires ``posfile`` to be set.
+
+        Args:
+            ra: Source right ascension in degrees (J2000).
+            dec: Source declination in degrees (J2000).
+            savepath: Directory where ``.rsp`` files are written.
+
+        Raises:
+            AssertionError: If ``posfile`` has not been set.
+        """
         
         assert self.posfile is not None, 'posfile is not set, cannot extract response'
-        
+
         savepath = os.path.abspath(savepath)
-        
+
         if not os.path.exists(savepath):
             os.makedirs(savepath)
-            
+
         cwd = os.getcwd()
         os.chdir(savepath)
-        
+
         lslices = np.array(self.spec_slices)[:, 0]
         rslices = np.array(self.spec_slices)[:, 1]
-    
+
         for _, (l, r) in enumerate(zip(lslices, rslices)):
             new_l = '{:+.2f}'.format(l).replace('-', 'm').replace('.', 'd').replace('+', 'p')
             new_r = '{:+.2f}'.format(r).replace('-', 'm').replace('.', 'd').replace('+', 'p')
-            
+
             file_name = '_'.join([new_l, new_r])
-            
+
             rsp_met = (l + r) / 2 + self.timezero
             for i, (t1, t2) in enumerate(self.pos_t1t2_list):
                 if (rsp_met >= t1) and (rsp_met <= t2):
                     poshist = self.posfile[i]
                     break
-        
+
             drm = DRMGenTTE(
-                tte_file=self.file[0], 
-                time=(l + r) / 2, 
-                poshist=poshist, 
-                T0=self.timezero, 
-                mat_type=2, 
+                tte_file=self.file[0],
+                time=(l + r) / 2,
+                poshist=poshist,
+                T0=self.timezero,
+                mat_type=2,
                 occult=False)
-        
+
             drm.to_fits(
-                ra=ra, 
-                dec=dec, 
-                filename=file_name, 
+                ra=ra,
+                dec=dec,
+                filename=file_name,
                 overwrite=True)
-            
+
             copy_file(f'{file_name}_{self.det}.rsp', f'{file_name}.rsp')
             remove_file(f'{file_name}_{self.det}.rsp')
-            
+
         os.chdir(cwd)
 
 
 
 class gecamEVT(Event):
+    """Read and process GECAM detector event FITS files.
+
+    Supports high-gain (HG) and low-gain (LG) readout modes and multiple
+    input files from the same detector, with automatic event merging and
+    deduplication.  PI channels are used throughout instead of uncorrected
+    PHA values.
+    """
 
     def __init__(self, file, det, gain_type):
+        """Initialize gecamEVT and read the event FITS file(s).
+
+        Args:
+            file: Path (or list of paths) to GECAM event FITS file(s).
+            det: Detector number string, zero-padded to two digits
+                (e.g. ``'01'`` through ``'25'``).
+            gain_type: Gain-type selector; either ``'HG'`` (high-gain) or
+                ``'LG'`` (low-gain).
+        """
         
         self._file = file
         self._det = det
         self._gain_type = gain_type
-        
+
         self._read()
 
 
     @classmethod
     def from_utc(cls, utc, det, gain_type, t1=-200, t2=500):
+        """Retrieve a GECAM event file from the archive and construct an instance.
+
+        Downloads GRD event files covering ``[utc + t1, utc + t2]``
+        seconds.
+
+        Args:
+            utc: Trigger UTC time string (e.g. ``'2021-01-01T00:00:00'``).
+            det: Detector number string (e.g. ``'01'``).
+            gain_type: Gain-type selector; ``'HG'`` or ``'LG'``.
+            t1: Start offset in seconds relative to ``utc``.
+            t2: Stop offset in seconds relative to ``utc``.
+
+        Raises:
+            AssertionError: If no event file is found in the retrieved results.
+        """
         
         rtv = gecamRetrieve.from_utc(utc=utc, t1=t1, t2=t2)
 
         file = rtv.rtv_res['grd_evt']
-            
+
         msg = 'no retrieved evt file'
         assert file != [], msg
-        
+
         return cls(file, det, gain_type)
 
 
     def _read(self):
-        
+
         if isinstance(self._file, str):
             self._file = [self._file]
-        
+
         event_list = list()
         gti_list = list()
-        
+
         for i in range(len(self._file)):
             hdu = fits.open(self._file[i])
             event = table.Table.read(hdu[f'EVENTS{self.det}'])
             ebound = table.Table.read(hdu['EBOUNDS'])
             gti = table.Table.read(hdu['GTI'])
             hdu.close()
-            
+
             gt = event['GAIN_TYPE']
             if self.gain_type == 'HG':
                 event = event[gt == 0]
             else:
                 event = event[gt == 1]
-            
+
             pi = np.array(event['PI']).astype(int)
             ch = np.array(ebound['CHANNEL']).astype(int)
             emin = np.array(ebound['E_MIN'])
             emax = np.array(ebound['E_MAX'])
             energy = Event._ch_to_energy(pi, ch, emin, emax)
             event['ENERGY'] = energy * units.keV
-            
+
             event_list.append(event)
             gti_list.append(gti)
-            
+
         self._event = table.vstack(event_list)
         self._gti = table.vstack(gti_list)
         self._ebound = ebound
@@ -1516,109 +1894,125 @@ class gecamEVT(Event):
 
         self._event.sort('TIME')
         self._gti.sort('START')
-        
+
         self._timezero = np.min(self._event['TIME'])
-        
+
         self._filter = Filter(self._event)
         self._filter_info = {'time': None, 'energy': None, 'pi': None, 'tag': None}
-        
-        
+
+
     @property
     def det(self):
+        """Return the detector number string (e.g. ``'01'``)."""
         
         return self._det
-    
-    
+
+
     @det.setter
     def det(self, new_det):
-        
+
         dets = ['%02d' % i for i in range(1, 26)]
         msg = 'invalid detector: %s' % new_det
         assert new_det in dets, msg
-        
+
         self._det = new_det
 
 
     @property
     def gain_type(self):
+        """Return the active gain type string (``'HG'`` or ``'LG'``)."""
         
         return self._gain_type
-    
-    
+
+
     @gain_type.setter
     def gain_type(self, new_gain_type):
-        
+
         gain_types = ['HG', 'LG']
         msg = 'invalid gain type: %s' % new_gain_type
         assert new_gain_type in gain_types, msg
-        
+
         self._gain_type = new_gain_type
-        
-        
+
+
     @property
     def chantype(self):
+        """Return ``'pi'`` to indicate PI-corrected channels."""
         
         return 'pi'
-    
-    
+
+
     @property
     def telescope(self):
+        """Return ``'GECAM'`` as the telescope name."""
         
         return 'GECAM'
-    
-    
+
+
     @property
     def instrument(self):
+        """Return ``'GRD'`` as the instrument name."""
         
         return 'GRD'
-    
-    
+
+
     @property
     def timezero(self):
+        """Return the reference time in GECAM MET seconds."""
         
         return self._timezero
 
 
     @timezero.setter
     def timezero(self, new_timezero):
-        
+
         if isinstance(new_timezero, float):
             self._timezero = new_timezero
-            
+
         elif isinstance(new_timezero, str):
             self._timezero = gecam_utc_to_met(new_timezero)
-            
+
         else:
             raise ValueError('not expected type for timezero')
-        
-        
+
+
     @property
     def timezero_utc(self):
+        """Return the reference time as a GECAM UTC string."""
         
         return gecam_met_to_utc(self.timezero)
-    
-    
+
+
     def filter_pi(self, p1p2):
+        """Apply a reversible PI channel range filter to the event table.
+
+        Args:
+            p1p2: Two-element list ``[p1, p2]`` of integer PI channel
+                bounds (inclusive), or ``None`` to clear the filter.
+
+        Raises:
+            ValueError: If ``p1p2`` is neither a list nor ``None``.
+        """
         
         if p1p2 is None:
             expr = None
-            
+
         elif isinstance(p1p2, list):
             p1, p2 = p1p2
             expr = f'(PI >= {p1}) * (PI <= {p2})'
-            
+
         else:
             raise ValueError('p1p2 is extected to be list or None')
-        
+
         self._filter_info['pi'] = expr
-        
+
         self._filter_update()
-        
-        
+
+
     def _filter_update(self):
-        
+
         self._clear_filter()
-        
+
         self._filter.eval(self._filter_info['time'])
         self._filter.eval(self._filter_info['pi'])
         self._filter.eval(self._filter_info['energy'])
@@ -1627,42 +2021,72 @@ class gecamEVT(Event):
 
 
 class gridTTE(Event):
+    """Read and process GRID Time-Tagged Event (TTE) FITS files.
+
+    Reads TTE data and the associated response (RSP) FITS file to obtain
+    energy bounds.  Multiple file pairs are supported with automatic
+    merging.  PI channels are derived from energy via searchsorted on
+    the RSP EBOUNDS.
+    """
 
     def __init__(self, file, rspfile, det):
+        """Initialize gridTTE and read the TTE and RSP FITS file(s).
+
+        Args:
+            file: Path (or list of paths) to GRID TTE FITS file(s).
+            rspfile: Path (or list of paths) to GRID RSP FITS file(s)
+                providing the EBOUNDS extension.
+            det: Detector index string (``'0'`` through ``'3'``).
+        """
         
         self._file = file
         self._rspfile = rspfile
         self._det = det
-        
+
         self._read()
 
 
     @classmethod
     def from_utc(cls, utc, det, t1=-200, t2=500):
+        """Retrieve GRID TTE and RSP files from the archive and construct an instance.
+
+        Downloads files covering ``[utc + t1, utc + t2]`` seconds for the
+        specified detector.
+
+        Args:
+            utc: Trigger UTC time string (e.g. ``'2021-01-01T00:00:00'``).
+            det: Detector index string (``'0'`` through ``'3'``).
+            t1: Start offset in seconds relative to ``utc``.
+            t2: Stop offset in seconds relative to ``utc``.
+
+        Raises:
+            AssertionError: If no TTE file is found in the retrieved results.
+            AssertionError: If no RSP file is found in the retrieved results.
+        """
         
         rtv = gridRetrieve.from_utc(utc=utc, t1=t1, t2=t2, det=det)
 
         file = rtv.rtv_res['tte']
         rspfile = rtv.rtv_res['rsp']
-            
+
         msg = 'no retrieved tte file'
         assert file != [], msg
-        
+
         msg = 'no retrieved rsp file'
         assert rspfile != [], msg
-        
+
         return cls(file, rspfile, det)
 
 
     def _read(self):
-        
+
         if isinstance(self._file, str):
             self._file = [self._file]
         if isinstance(self._rspfile, str):
             self._rspfile = [self._rspfile]
-        
+
         event_list = list()
-        
+
         for i in range(len(self._file)):
             tte_hdu = fits.open(self._file[i])
             rsp_hdu = fits.open(self._rspfile[i])
@@ -1670,130 +2094,146 @@ class gridTTE(Event):
             ebound = table.Table.read(rsp_hdu['EBOUNDS'])
             tte_hdu.close()
             rsp_hdu.close()
-            
+
             event[f't{self.det}'].name = 'TIME'
             event[f'E{self.det}'].name = 'ENERGY'
             event.remove_columns([f'adcv{self.det}', f'adcv_c{self.det}'])
-            
+
             ch = np.array(ebound['CHANNEL']).astype(int)
             emin = np.array(ebound['E_MIN'])
             emax = np.array(ebound['E_MAX'])
-            
+
             energy = np.array(event['ENERGY'])
             pi = ch[np.searchsorted(emin, energy, side='right') - 1]
             event['PI'] = pi
-            
+
             event['DEAD_TIME'] = np.zeros_like(event['TIME'])
-            
+
             event_list.append(event)
-            
+
         self._event = table.vstack(event_list)
         self._gti = None
         self._ebound = ebound
 
         self._event = table.unique(self._event, keys=['TIME', 'PI'])
         self._event.sort('TIME')
-        
+
         self._timezero = np.min(self._event['TIME'])
-        
+
         self._filter = Filter(self._event)
         self._filter_info = {'time': None, 'energy': None, 'pi': None, 'tag': None}
-        
-        
+
+
     @property
     def rspfile(self):
+        """Return the RSP file path(s)."""
         
         return self._rspfile
-    
-    
+
+
     @rspfile.setter
     def rspfile(self, new_rspfile):
-        
+
         self._rspfile = new_rspfile
-        
+
         self._read()
-        
-        
+
+
     @property
     def det(self):
+        """Return the GRID detector index string (``'0'`` through ``'3'``)."""
         
         return self._det
-    
-    
+
+
     @det.setter
     def det(self, new_det):
-        
+
         dets = ['%d' % i for i in range(0, 4)]
         msg = 'invalid detector: %s' % new_det
         assert new_det in dets, msg
-        
+
         self._det = new_det
-        
-        
+
+
     @property
     def chantype(self):
+        """Return ``'pi'`` to indicate PI-corrected channels."""
         
         return 'pi'
-    
-    
+
+
     @property
     def telescope(self):
+        """Return ``'GRID'`` as the telescope name."""
         
         return 'GRID'
-    
-    
+
+
     @property
     def instrument(self):
+        """Return ``'GRID'`` as the instrument name."""
         
         return 'GRID'
-    
-    
+
+
     @property
     def timezero(self):
+        """Return the reference time in GRID MET seconds."""
         
         return self._timezero
 
 
     @timezero.setter
     def timezero(self, new_timezero):
-        
+
         if isinstance(new_timezero, float):
             self._timezero = new_timezero
-            
+
         elif isinstance(new_timezero, str):
             self._timezero = grid_utc_to_met(new_timezero)
-            
+
         else:
             raise ValueError('not expected type for timezero')
-        
-        
+
+
     @property
     def timezero_utc(self):
+        """Return the reference time as a GRID UTC string."""
         
         return grid_met_to_utc(self.timezero)
-    
-    
+
+
     def filter_pi(self, p1p2):
+        """Apply a reversible PI channel range filter to the event table.
+
+        Args:
+            p1p2: Two-element list ``[p1, p2]`` of integer PI channel
+                bounds (inclusive), or ``None`` to clear the filter.
+
+        Raises:
+            ValueError: If ``p1p2`` is neither a list nor ``None``.
+        """
         
         if p1p2 is None:
             expr = None
-            
+
         elif isinstance(p1p2, list):
             p1, p2 = p1p2
             expr = f'(PI >= {p1}) * (PI <= {p2})'
-            
+
         else:
             raise ValueError('p1p2 is extected to be list or None')
-        
+
         self._filter_info['pi'] = expr
-        
+
         self._filter_update()
-        
-        
+
+
     def _filter_update(self):
-        
+
         self._clear_filter()
-        
+
         self._filter.eval(self._filter_info['time'])
         self._filter.eval(self._filter_info['pi'])
         self._filter.eval(self._filter_info['energy'])
@@ -1802,132 +2242,160 @@ class gridTTE(Event):
 
 
 class gridgroundTTE(Event):
+    """Read and process GRID ground-calibration TTE FITS files.
+
+    Handles on-ground GRID data where both the event table and EBOUNDS
+    are stored in a single FITS file.  PI channels are converted to
+    energies using the same channel-to-energy mapping as ``gridTTE``.
+    """
 
     def __init__(self, file, det):
+        """Initialize gridgroundTTE and read the ground-calibration FITS file(s).
+
+        Args:
+            file: Path (or list of paths) to GRID ground-calibration TTE
+                FITS file(s).
+            det: Detector index string (``'0'`` through ``'3'``).
+        """
         
         self._file = file
         self._det = det
-        
+
         self._read()
 
 
     def _read(self):
-        
+
         if isinstance(self._file, str):
             self._file = [self._file]
-        
+
         event_list = list()
-        
+
         for i in range(len(self._file)):
             tte_hdu = fits.open(self._file[i])
             event = table.Table.read(tte_hdu[f'EVENTS{self.det}'])
             ebound = table.Table.read(tte_hdu['EBOUNDS'])
             tte_hdu.close()
-            
+
             ebound['Channel'].name = 'CHANNEL'
-            
+
             pi = np.array(event['PI']).astype(int)
             ch = np.array(ebound['CHANNEL']).astype(int)
             emin = np.array(ebound['E_MIN'])
             emax = np.array(ebound['E_MAX'])
             energy = Event._ch_to_energy(pi, ch, emin, emax)
             event['ENERGY'] = energy * units.keV
-            
+
             event_list.append(event)
-            
+
         self._event = table.vstack(event_list)
         self._gti = None
         self._ebound = ebound
 
         self._event = table.unique(self._event, keys=['TIME', 'PI'])
         self._event.sort('TIME')
-        
+
         self._timezero = np.min(self._event['TIME'])
-        
+
         self._filter = Filter(self._event)
         self._filter_info = {'time': None, 'energy': None, 'pi': None, 'tag': None}
-        
-        
+
+
     @property
     def det(self):
+        """Return the GRID detector index string (``'0'`` through ``'3'``)."""
         
         return self._det
-    
-    
+
+
     @det.setter
     def det(self, new_det):
-        
+
         dets = ['%d' % i for i in range(0, 4)]
         msg = 'invalid detector: %s' % new_det
         assert new_det in dets, msg
-        
+
         self._det = new_det
-        
-        
+
+
     @property
     def chantype(self):
+        """Return ``'pi'`` to indicate PI-corrected channels."""
         
         return 'pi'
-    
-    
+
+
     @property
     def telescope(self):
+        """Return ``'GRID'`` as the telescope name."""
         
         return 'GRID'
-    
-    
+
+
     @property
     def instrument(self):
+        """Return ``'GRID'`` as the instrument name."""
         
         return 'GRID'
-    
-    
+
+
     @property
     def timezero(self):
+        """Return the reference time in GRID MET seconds."""
         
         return self._timezero
 
 
     @timezero.setter
     def timezero(self, new_timezero):
-        
+
         if isinstance(new_timezero, float):
             self._timezero = new_timezero
-            
+
         elif isinstance(new_timezero, str):
             self._timezero = grid_utc_to_met(new_timezero)
-            
+
         else:
             raise ValueError('not expected type for timezero')
-        
-        
+
+
     @property
     def timezero_utc(self):
+        """Return the reference time as a GRID UTC string."""
         
         return grid_met_to_utc(self.timezero)
-    
-    
+
+
     def filter_pi(self, p1p2):
+        """Apply a reversible PI channel range filter to the event table.
+
+        Args:
+            p1p2: Two-element list ``[p1, p2]`` of integer PI channel
+                bounds (inclusive), or ``None`` to clear the filter.
+
+        Raises:
+            ValueError: If ``p1p2`` is neither a list nor ``None``.
+        """
         
         if p1p2 is None:
             expr = None
-            
+
         elif isinstance(p1p2, list):
             p1, p2 = p1p2
             expr = f'(PI >= {p1}) * (PI <= {p2})'
-            
+
         else:
             raise ValueError('p1p2 is extected to be list or None')
-        
+
         self._filter_info['pi'] = expr
-        
+
         self._filter_update()
-        
-        
+
+
     def _filter_update(self):
-        
+
         self._clear_filter()
-        
+
         self._filter.eval(self._filter_info['time'])
         self._filter.eval(self._filter_info['pi'])
         self._filter.eval(self._filter_info['energy'])

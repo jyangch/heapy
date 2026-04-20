@@ -1,10 +1,17 @@
-"""
-NOTE: this script is basically from gv_significance 
-(https://github.com/giacomov/gv_significance.git)
-Giacomo Vianello 2018 ApJS: https://doi.org/10.3847/1538-4365/aab780
-BSD 3-Clause License
-Copyright (c) 2018, Giacomo Vianello
-All rights reserved.
+"""Compute Poisson and Gaussian statistical significance for count measurements.
+
+Provides scalar and vectorised implementations of ``x * log(y)`` with
+safe handling of the ``0 * log(0)`` edge case, a broadcast helper, and
+two significance functions: ``pgsig`` (Gaussian background) and ``ppsig``
+(Poisson background with optional systematic uncertainties).
+
+Note:
+    This module is substantially derived from ``gv_significance``
+    (https://github.com/giacomov/gv_significance.git).
+    Reference: Giacomo Vianello, 2018, ApJS,
+    https://doi.org/10.3847/1538-4365/aab780.
+    BSD 3-Clause License. Copyright (c) 2018, Giacomo Vianello.
+    All rights reserved.
 """
 
 import numpy as np
@@ -14,28 +21,42 @@ from numpy import sqrt, squeeze
 
 
 def xlogy(x, y):
-    """
-    This function implements x * log(y) so that if both x and y are 0, 
-    the results is zero (and not infinite or nan
-    as the computer would return otherwise).
-    NOTE: x and y must be numbers, not arrays
+    """Compute ``x * log(y)`` returning 0 when both ``x`` and ``y`` are 0.
+
+    Avoids ``nan`` or ``inf`` that would arise from ``0 * log(0)`` under
+    standard floating-point arithmetic.
+
+    Args:
+        x: Scalar multiplier. Must be a number, not an array.
+        y: Scalar argument of the logarithm. Must be a number, not an array.
+
+    Returns:
+        ``0.0`` when ``x`` is ``0.0``; otherwise ``x * log(y)``.
     """
 
     if x == 0.0:
-        
+
         return 0.0
-    
+
     else:
-        
+
         return x * log(y)
 
 
 def xlogyv(x, y):
-    """
-    This function implements x * log(y) so that if both x and y are 0, 
-    the results is zero (and not infinite or nan
-    as the computer would return otherwise).
-    Version which accepts numpy.array as inputs.
+    """Compute ``x * log(y)`` element-wise, returning 0 where ``x`` is 0.
+
+    Array-valued counterpart of ``xlogy``. Avoids ``nan`` or ``inf`` that
+    would arise from ``0 * log(0)`` under standard floating-point arithmetic.
+
+    Args:
+        x: Multiplier array (or scalar). Converted to ``numpy.ndarray`` internally.
+        y: Argument of the logarithm (or scalar). Converted to ``numpy.ndarray``
+            internally; must broadcast with ``x``.
+
+    Returns:
+        Array of the same shape as ``y`` with ``x * log(y)`` where ``x != 0``
+        and ``0`` elsewhere, squeezed to remove length-1 dimensions.
     """
 
     x = np.array(x, ndmin=1)
@@ -51,6 +72,27 @@ def xlogyv(x, y):
 
 
 def size_one_or_n(value, other_array, name):
+    """Broadcast a scalar or length-1 value to match another array's length.
+
+    If ``value`` has exactly one element it is broadcast to
+    ``other_array.shape[0]``; otherwise its length must already equal
+    ``other_array.shape[0]``.
+
+    Args:
+        value: Scalar, length-1 sequence, or sequence of the same length
+            as ``other_array``. Converted to a 1-D ``float64`` array.
+        other_array: Reference array whose first-axis length determines
+            the target size.
+        name: Name of the parameter, used in the assertion error message.
+
+    Returns:
+        A 1-D ``numpy.ndarray`` of ``float64`` with length equal to
+        ``other_array.shape[0]``.
+
+    Raises:
+        AssertionError: If ``value`` has more than one element and its
+            length does not match ``other_array.shape[0]``.
+    """
 
     value_ = np.array(value, dtype=float, ndmin=1)
 
@@ -67,14 +109,27 @@ def size_one_or_n(value, other_array, name):
 
 
 def pgsig(n, b, sigma):
-    """
-    Returns the significance for observing n counts when b are expected. 
-    The measurement "b +/- sigma" is returned by some kind of background estimation procedure, 
-    and b is assumed to be a Gaussian random variable.
-    :param n: observed counts
-    :param b: estimation of the background coming from some method
-    :param sigma: error on the estimation of the background
-    :return: the significance of the measurement(s)
+    """Compute Gaussian-background significance for observed counts.
+
+    Returns the significance (in standard deviations) for observing ``n``
+    counts when the expected background ``b`` is measured with Gaussian
+    uncertainty ``sigma``.  The MLE background estimate
+    :math:`\\hat{B}_0` is derived analytically from the profile likelihood
+    under the null hypothesis, and the sign follows the direction of the
+    excess (positive when ``n >= b``, negative otherwise).
+
+    Args:
+        n: Observed counts. May be a scalar or array-like.
+        b: Background estimate returned by the background-estimation method.
+            Treated as a Gaussian random variable with standard deviation
+            ``sigma``. Same shape as ``n`` or broadcastable to it.
+        sigma: Standard deviation of the background estimate. May be a
+            scalar (applied uniformly) or an array matching ``n``.
+
+    Returns:
+        Significance in units of Gaussian standard deviations (z score),
+        squeezed to remove length-1 dimensions. Positive values indicate
+        an excess above background; negative values indicate a deficit.
     """
 
     n_ = np.array(n, dtype=float, ndmin=1)
@@ -91,7 +146,7 @@ def pgsig(n, b, sigma):
     # B0_mle could be slightly < 0 (even though it shouldn't) because of the
     # limited numerical precision of the calculator. let's accept as negative as 0.01, and clip
     # at zero to avoid giving results difficult to interpret
-    
+
     assert np.all(B0_mle > -0.01), "This is a bug. B0_mle cannot be negative."
 
     B0_mle = np.clip(B0_mle, 0, None)
@@ -101,9 +156,9 @@ def pgsig(n, b, sigma):
 
 def _li_and_ma(n_, b_, alpha):
 
-    # In order to avoid numerical problem with 0 * log(0), 
+    # In order to avoid numerical problem with 0 * log(0),
     # we add a tiny number to n_ and b_, inconsequential for the computation
-    
+
     n_ += 1E-25  # type: np.ndarray
     b_ += 1E-25  # type: np.ndarray
 
@@ -169,31 +224,43 @@ _get_TS_by_numerical_optimization_v = np.vectorize(_get_TS_by_numerical_optimiza
 
 
 def ppsig(n, b, alpha, sigma=0, k=0):
-    """
-    Returns the significance for detecting n counts when alpha * B are expected.
+    """Compute Poisson-background significance with optional systematic uncertainty.
 
-    If sigma=0 and k=0 (default), this is the case with no additional systematic error and the classic result
-    from Li & Ma (1983) is used. Example:
+    Returns the significance (z score) for detecting ``n`` source counts when
+    :math:`\\alpha \\times B` background counts are expected.  The method applied
+    depends on the values of ``sigma`` and ``k``:
 
-        > significance(n, b, alpha)
+    - ``sigma=0, k=0`` (default): no systematic error; uses the classic
+      Li & Ma (1983) formula.
+    - ``k > 0``: uses Eq. 7 from Vianello (2018), treating ``k`` as the
+      upper boundary on the fractional systematic uncertainty; ``sigma``
+      is ignored.
+    - ``sigma > 0``: uses Eq. 9 from Vianello (2018), assuming a Gaussian
+      distribution for the systematic uncertainty; ``k`` is ignored.
 
-    If k>0 then eq.7 from Vianello (2018) is used, which assumes that k is the upper boundary on the fractional
-    systematic uncertainty. In this case sigma has no meaning and is ignored. Example:
+    Args:
+        n: Observed counts. May be a scalar or array-like.
+        b: Expected background counts. May be a scalar or array-like of the
+            same shape as ``n``.
+        alpha: Ratio of source-region to background-region observation
+            efficiency. Either a scalar or an array matching ``n``.
+        sigma: Standard deviation for the Gaussian systematic case. Either
+            a scalar (applied uniformly) or an array matching ``n``.
+            Set to ``0`` (default) to disable.
+        k: Upper boundary on the fractional systematic uncertainty for the
+            bounded systematic case. Either a scalar or an array matching
+            ``n``. Set to ``0`` (default) to disable.
 
-        > significance(n, b, alpha, k=0.1)
+    Returns:
+        Significance in units of Gaussian standard deviations (z score),
+        squeezed to remove length-1 dimensions. Positive values indicate
+        an excess; negative values indicate a deficit.
 
-    If sigma>0, then eq. 9 from Vianello (2018) is used, which assumes a Gaussian distribution for the systematic
-    uncertainty. In this case k has no meaning and is ignored.Example:
-
-        > significance(n, b, alpha, sigma=0.1)
-
-    :param n: observed counts (can be an array)
-    :param b: expected background counts (can be an array)
-    :param alpha: ratio of the source observation efficiency and background observation efficiency
-    (either a float, or an array of the same shape of n)
-    :param sigma: standard deviation for the Gaussian case (either a float, or an array of the same shape of n)
-    :param k: maximum fractional systematic uncertainty expected (either a float, or an array of the same shape of n)
-    :return: the significance (z score) for the measurement(s)
+    Note:
+        The no-systematic case implements Eq. 17 from Li & Ma (1983),
+        ApJ, 272, 317. The systematic cases implement Eqs. 7 and 9 from
+        Vianello (2018), ApJS, 236, 17
+        (https://doi.org/10.3847/1538-4365/aab780).
     """
 
     # Make sure we are dealing with arrays, and if not, make the input so. This way

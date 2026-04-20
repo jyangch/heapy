@@ -1,3 +1,17 @@
+"""Compute Txx duration metrics (T90, T50, etc.) for gamma-ray burst light curves.
+
+Provides three concrete classes — ``pgTxx``, ``ppTxx``, and ``ggTxx`` — that
+inherit from ``PolyBase`` / ``ppSignal`` / ``ggSignal`` and add pulse detection
+and cumulative-count-fraction duration analysis.  Monte Carlo simulation is
+used by default to propagate uncertainties on the start/stop times.
+
+Typical usage:
+    from heapy.temp.txx import pgTxx
+    txx = pgTxx(ts, bins)
+    txx.calculate(xx=0.9)
+    txx.save('/output/dir')
+"""
+
 import os
 import warnings
 import operator
@@ -15,17 +29,58 @@ from ..util.data import generate_asymmetric_gaussian, json_dump
 
 
 class pgTxx(PolyBase):
+    """Compute Txx durations for a Poisson-source/Gaussian-background light curve.
+
+    Extends ``PolyBase`` with pulse detection and cumulative-count-fraction
+    duration (Txx) analysis.  Background subtraction uses the polynomial fit
+    from the parent class; uncertainties are estimated via Monte Carlo
+    simulation by default (1000 realisations).
+
+    Attributes:
+        pulse_res: Dictionary storing detected pulse start/stop edges, or
+            ``None`` before ``find_pulse`` is called.
+        txx_res: Dictionary storing Txx results, or ``None`` before
+            ``calculate`` is called.
+    """
 
     def __init__(self, ts, bins, exp=None, ignore=None):
-        
+        """Initialize pgTxx with time-tagged event data and binning.
+
+        Args:
+            ts: Array of event arrival times.
+            bins: Bin edges or bin width used to build the light curve.
+            exp: Exposure correction array, or ``None`` for uniform exposure.
+            ignore: Time intervals to exclude from the background fit, or
+                ``None`` to use all data.
+        """
+
         super().__init__(ts, bins, exp=exp, ignore=ignore)
-        
+
         self.pulse_res = None
         self.txx_res = None
 
-    
+
     def find_pulse(self, p0=0.05, sigma=3, deg=None, mp=True):
-        
+        """Detect significant pulse intervals in the net light curve.
+
+        Runs the background polynomial fit if not already done, computes
+        net counts and rates on the rebinned grid, then identifies
+        contiguous blocks whose signal-to-noise ratio exceeds ``sigma``.
+        Results are stored in ``self.pstart``, ``self.pstop``, and
+        ``self.pulse_res``.
+
+        Args:
+            p0: Bayesian-blocks prior probability for a new change point;
+                passed to the parent ``loop`` method.
+            sigma: Minimum SNR threshold for a block to be classified as
+                a pulse.
+            deg: Polynomial degree for the background fit, or ``None`` to
+                select automatically.
+            mp: When ``True``, keep multiple separate pulse intervals.
+                When ``False``, merge all intervals into one and emit a
+                warning if more than one interval is found.
+        """
+
         if self.poly_res is None:
             self.loop(p0=p0, sigma=sigma, deg=deg)
             self.loop(p0=p0, sigma=sigma, deg=deg)
@@ -79,15 +134,24 @@ class pgTxx(PolyBase):
                 warnings.warn(msg, UserWarning, stacklevel=2)
             pstart = [pstart[0]]
             pstop = [pstop[-1]]
-        
+
         self.pstart = np.array(pstart)
         self.pstop = np.array(pstop)
 
         self.pulse_res = {'pstart': self.pstart, 'pstop': self.pstop}
-        
-        
+
+
     def mc_simulation(self, nmc):
-        
+        """Generate Monte Carlo realisations of the net count light curve.
+
+        Draws Poisson samples for the source counts and Gaussian samples for
+        the background counts, then stacks the net realisation matrix as
+        ``self.mc_ncts`` with the observed data in row 0.
+
+        Args:
+            nmc: Number of Monte Carlo realisations to generate.
+        """
+
         self.nmc = int(nmc)
         self.nsample = len(self.time)
 
@@ -98,7 +162,34 @@ class pgTxx(PolyBase):
 
 
     def calculate(self, xx=0.9, pstart=None, pstop=None, lbkg=None, rbkg=None, simple_err=False):
-        
+        """Compute Txx duration and its uncertainties for each detected pulse.
+
+        Calls ``find_pulse`` if not already done.  Optionally overrides the
+        detected pulse boundaries.  Uncertainties are estimated either via a
+        simple propagation formula (``simple_err=True``) or via 1000 Monte
+        Carlo realisations (default).  Results are printed to stdout and
+        stored in ``self.txx_res``.
+
+        Args:
+            xx: Cumulative count fraction defining the duration, e.g. ``0.9``
+                for T90 or ``0.5`` for T50.
+            pstart: Override pulse start time(s).  A scalar is promoted to a
+                length-1 array; a list is sorted in ascending order.
+            pstop: Override pulse stop time(s).  Same promotion rules as
+                ``pstart``.
+            lbkg: Length of the background window to the left of the first
+                pulse, in the same time units as the light curve.  ``None``
+                extends to the beginning of the data.
+            rbkg: Length of the background window to the right of the last
+                pulse.  ``None`` extends to the end of the data.
+            simple_err: When ``True``, use analytic error propagation instead
+                of Monte Carlo simulation.
+
+        Returns:
+            ``False`` if no pulse is detected; ``None`` on success (results
+            are stored as instance attributes).
+        """
+
         if self.pulse_res is None: self.find_pulse()
 
         self.xx = xx
@@ -108,7 +199,7 @@ class pgTxx(PolyBase):
                 self.pstart = np.array([pstart])
             else:
                 self.pstart = np.sort(pstart)
-            
+
         if pstop is not None:
             if type(pstop) is not list:
                 self.pstop = np.array([pstop])
@@ -122,7 +213,7 @@ class pgTxx(PolyBase):
 
         if lbkg is None:
             lbkg = np.inf
-            
+
         if rbkg is None:
             rbkg = np.inf
 
@@ -131,31 +222,31 @@ class pgTxx(PolyBase):
         tmax_ = self.pstop[-1] + rbkg
         tmax = min(tmax_, self.time[-1])
         self.tindex = np.where((self.time >= tmin) & (self.time <= tmax))[0]
-        
+
         self.ccts = np.cumsum(self.ncts)
-        
+
         if simple_err:
             self.txx, self.txx1, self.txx2, \
                 self.txx_err, self.txx1_err, self.txx2_err, \
                     self.csf, self.csf1, self.csf2, \
                         self.csf_err, self.csf1_err, self.csf2_err \
                             = accumcts(self.time[self.tindex], self.ccts[self.tindex], self.pstart, self.pstop, self.xx, simple_err=True)
-                            
-            self.txx_res = {'xx': self.xx, 'txx':self.txx, 'txx1': self.txx1, 'txx2': self.txx2, 
-                            'txx_err': self.txx_err, 'txx1_err': self.txx1_err, 'txx2_err': self.txx2_err, 
-                            'csf': self.csf, 'csf1': self.csf1, 'csf2': self.csf2, 
+
+            self.txx_res = {'xx': self.xx, 'txx':self.txx, 'txx1': self.txx1, 'txx2': self.txx2,
+                            'txx_err': self.txx_err, 'txx1_err': self.txx1_err, 'txx2_err': self.txx2_err,
+                            'csf': self.csf, 'csf1': self.csf1, 'csf2': self.csf2,
                             'csf_err': self.csf_err, 'csf1_err': self.csf1_err, 'csf2_err': self.csf2_err}
-            
+
         else:
             self.mc_simulation(1000)
-        
+
             mc_csf, mc_csf1, mc_csf2 = [], [], []
             mc_txx, mc_txx1, mc_txx2 = [], [], []
-            
+
             for ncts in self.mc_ncts:
-                
+
                 ccts = np.cumsum(ncts)
-                
+
                 txx, txx1, txx2, csf, csf1, csf2 \
                     = accumcts(self.time[self.tindex], ccts[self.tindex], self.pstart, self.pstop, self.xx, simple_err=False)
 
@@ -165,11 +256,11 @@ class pgTxx(PolyBase):
                 mc_txx.append(txx)
                 mc_txx1.append(txx1)
                 mc_txx2.append(txx2)
-                
+
             self.csf = mc_csf[0]
             self.csf1 = mc_csf1[0]
             self.csf2 = mc_csf2[0]
-            
+
             self.txx = mc_txx[0]
             self.txx1 = mc_txx1[0]
             self.txx2 = mc_txx2[0]
@@ -177,11 +268,11 @@ class pgTxx(PolyBase):
             self.txx_err = []
             self.txx1_err = []
             self.txx2_err = []
-            
+
             mc_txx = np.array(mc_txx)
             mc_txx1 = np.array(mc_txx1)
             mc_txx2 = np.array(mc_txx2)
-            
+
             for pi in range(len(self.pstart)):
                 mask = sigma_clip(mc_txx[1:, pi], sigma=5, maxiters=5, stdfunc=mad_std).mask
                 not_mask = list(map(operator.not_, mask))
@@ -190,7 +281,7 @@ class pgTxx(PolyBase):
                 txx_lo, txx_hi = np.percentile(mc_txx_filter, [16, 84])
                 txx_err = np.diff([txx_lo, mc_txx[0, pi], txx_hi])
                 self.txx_err.append([txx_err[0], txx_err[1]])
-                
+
                 mask = sigma_clip(mc_txx1[1:, pi], sigma=5, maxiters=5, stdfunc=mad_std).mask
                 not_mask = list(map(operator.not_, mask))
                 mc_txx1_filter = mc_txx1[1:, pi][not_mask]
@@ -198,7 +289,7 @@ class pgTxx(PolyBase):
                 txx1_lo, txx1_hi = np.percentile(mc_txx1_filter, [16, 84])
                 txx1_err = np.diff([txx1_lo, mc_txx1[0, pi], txx1_hi])
                 self.txx1_err.append([txx1_err[0], txx1_err[1]])
-                
+
                 mask = sigma_clip(mc_txx2[1:, pi], sigma=5, maxiters=5, stdfunc=mad_std).mask
                 not_mask = list(map(operator.not_, mask))
                 mc_txx2_filter = mc_txx2[1:, pi][not_mask]
@@ -206,29 +297,44 @@ class pgTxx(PolyBase):
                 txx2_lo, txx2_hi = np.percentile(mc_txx2_filter, [16, 84])
                 txx2_err = np.diff([txx2_lo, mc_txx2[0, pi], txx2_hi])
                 self.txx2_err.append([txx2_err[0], txx2_err[1]])
-            
-            self.txx_res = {'xx': self.xx, 'txx':self.txx, 'txx1': self.txx1, 'txx2': self.txx2, 
-                            'txx_err': self.txx_err, 'txx1_err': self.txx1_err, 'txx2_err': self.txx2_err, 
+
+            self.txx_res = {'xx': self.xx, 'txx':self.txx, 'txx1': self.txx1, 'txx2': self.txx2,
+                            'txx_err': self.txx_err, 'txx1_err': self.txx1_err, 'txx2_err': self.txx2_err,
                             'csf': self.csf, 'csf1': self.csf1, 'csf2': self.csf2}
-            
+
         print('\n+------------------------------------------------+')
         print(' %-5s%-10s%-8s%-8s%-8s%-8s' % ('id#', 'Txx', 'Txx-', 'Txx+', 'Txx1', 'Txx2'))
         print('+-----------------------------------------------+')
-        _ = list(map(print, [' %-5d%-10.3f%-8.3f%-8.3f%-8.3f%-8.3f' % (i+1, t, t_err[0], t_err[1], t1, t2) 
-                             for i, (t, t_err, t1, t2) in enumerate(zip(self.txx_res['txx'], 
-                                                                        self.txx_res['txx_err'], 
-                                                                        self.txx_res['txx1'], 
+        _ = list(map(print, [' %-5d%-10.3f%-8.3f%-8.3f%-8.3f%-8.3f' % (i+1, t, t_err[0], t_err[1], t1, t2)
+                             for i, (t, t_err, t1, t2) in enumerate(zip(self.txx_res['txx'],
+                                                                        self.txx_res['txx_err'],
+                                                                        self.txx_res['txx1'],
                                                                         self.txx_res['txx2']))]))
         print('+------------------------------------------------+')
 
 
     def save(self, savepath, suffix=''):
-        
+        """Save Txx results and diagnostic plots to disk.
+
+        Serialises ``pulse_res`` and ``txx_res`` as JSON files and writes a
+        two-panel PDF showing the light curve with Txx boundaries (upper
+        panel) and the cumulative count curve with CSF levels (lower panel).
+
+        Args:
+            savepath: Directory path where output files are written; created
+                if it does not exist.
+            suffix: Optional string appended to all output file names before
+                the extension, useful for distinguishing multiple runs.
+
+        Returns:
+            ``False`` if no pulse has been detected; ``None`` on success.
+        """
+
         if len(self.pstart) == 0:
             msg = 'there is no pulse'
             warnings.warn(msg, UserWarning, stacklevel=2)
             return False
-        
+
         if not os.path.exists(savepath):
             os.makedirs(savepath)
 
@@ -287,17 +393,54 @@ class pgTxx(PolyBase):
 
 
 class ppTxx(ppSignal):
+    """Compute Txx durations for a Poisson-source/Poisson-background light curve.
+
+    Extends ``ppSignal`` with pulse detection and Txx duration analysis.
+    Background subtraction uses a scaled Poisson background sample;
+    uncertainties are always estimated via 1000 Monte Carlo realisations.
+
+    Attributes:
+        pulse_res: Dictionary storing detected pulse start/stop edges, or
+            ``None`` before ``find_pulse`` is called.
+        txx_res: Dictionary storing Txx results, or ``None`` before
+            ``calculate`` is called.
+    """
 
     def __init__(self, ts, bts, bins, backscale=1, exp=None):
-        
+        """Initialize ppTxx with source and background event arrays.
+
+        Args:
+            ts: Array of source event arrival times.
+            bts: Array of background event arrival times.
+            bins: Bin edges or bin width used to build the light curve.
+            backscale: Ratio of the source to background region size used
+                for background scaling.
+            exp: Exposure correction array, or ``None`` for uniform exposure.
+        """
+
         super().__init__(ts, bts, bins, backscale=backscale, exp=exp)
-        
+
         self.pulse_res = None
         self.txx_res = None
 
 
     def find_pulse(self, p0=0.05, sigma=3, mp=True):
-        
+        """Detect significant pulse intervals in the net light curve.
+
+        Runs the Bayesian-blocks segmentation if not already done, computes
+        background-subtracted net counts on the rebinned grid, then identifies
+        contiguous blocks whose SNR exceeds ``sigma``.  Results are stored in
+        ``self.pstart``, ``self.pstop``, and ``self.pulse_res``.
+
+        Args:
+            p0: Bayesian-blocks prior probability for a new change point.
+            sigma: Minimum SNR threshold for a block to be classified as
+                a pulse.
+            mp: When ``True``, keep multiple separate pulse intervals.
+                When ``False``, merge all intervals into one and emit a
+                warning if more than one interval is found.
+        """
+
         if self.sort_res is None:
             self.loop(p0=p0, sigma=sigma)
 
@@ -350,15 +493,24 @@ class ppTxx(ppSignal):
                 warnings.warn(msg, UserWarning, stacklevel=2)
             pstart = [pstart[0]]
             pstop = [pstop[-1]]
-        
+
         self.pstart = np.array(pstart)
         self.pstop = np.array(pstop)
 
         self.pulse_res = {'pstart': self.pstart, 'pstop': self.pstop}
-        
-        
+
+
     def mc_simulation(self, nmc):
-        
+        """Generate Monte Carlo realisations of the net count light curve.
+
+        Draws independent Poisson samples for both source and background
+        counts and stacks the net realisation matrix as ``self.mc_ncts``
+        with the observed data in row 0.
+
+        Args:
+            nmc: Number of Monte Carlo realisations to generate.
+        """
+
         self.nmc = int(nmc)
         self.nsample = len(self.time)
 
@@ -366,20 +518,43 @@ class ppTxx(ppSignal):
         bkg_sample = np.random.poisson(lam=self.bcts, size=(self.nmc, self.nsample))
 
         self.mc_ncts = np.vstack([self.ncts, src_sample - bkg_sample * self.backscale])
-        
-        
+
+
     def calculate(self, xx=0.9, pstart=None, pstop=None, lbkg=None, rbkg=None):
-        
+        """Compute Txx duration and its uncertainties for each detected pulse.
+
+        Calls ``find_pulse`` if not already done.  Optionally overrides the
+        detected pulse boundaries.  Uncertainties are always estimated via
+        1000 Monte Carlo realisations.  Results are printed to stdout and
+        stored in ``self.txx_res``.
+
+        Args:
+            xx: Cumulative count fraction defining the duration, e.g. ``0.9``
+                for T90 or ``0.5`` for T50.
+            pstart: Override pulse start time(s).  A scalar is promoted to a
+                length-1 array; a list is sorted in ascending order.
+            pstop: Override pulse stop time(s).  Same promotion rules as
+                ``pstart``.
+            lbkg: Length of the background window to the left of the first
+                pulse.  ``None`` extends to the beginning of the data.
+            rbkg: Length of the background window to the right of the last
+                pulse.  ``None`` extends to the end of the data.
+
+        Returns:
+            ``False`` if no pulse is detected; ``None`` on success (results
+            are stored as instance attributes).
+        """
+
         if self.pulse_res is None: self.find_pulse()
 
         self.xx = xx
-        
+
         if pstart is not None:
             if type(pstart) is not list:
                 self.pstart = np.array([pstart])
             else:
                 self.pstart = np.sort(pstart)
-            
+
         if pstop is not None:
             if type(pstop) is not list:
                 self.pstop = np.array([pstop])
@@ -393,7 +568,7 @@ class ppTxx(ppSignal):
 
         if lbkg is None:
             lbkg = np.inf
-            
+
         if rbkg is None:
             rbkg = np.inf
 
@@ -402,18 +577,18 @@ class ppTxx(ppSignal):
         tmax_ = self.pstop[-1] + rbkg
         tmax = min(tmax_, self.time[-1])
         self.tindex = np.where((self.time >= tmin) & (self.time <= tmax))[0]
-        
+
         self.ccts = np.cumsum(self.ncts)
-        
+
         self.mc_simulation(1000)
-    
+
         mc_csf, mc_csf1, mc_csf2 = [], [], []
         mc_txx, mc_txx1, mc_txx2 = [], [], []
-        
+
         for ncts in self.mc_ncts:
-            
+
             ccts = np.cumsum(ncts)
-            
+
             txx, txx1, txx2, csf, csf1, csf2 \
                 = accumcts(self.time[self.tindex], ccts[self.tindex], self.pstart, self.pstop, self.xx, simple_err=False)
 
@@ -423,11 +598,11 @@ class ppTxx(ppSignal):
             mc_txx.append(txx)
             mc_txx1.append(txx1)
             mc_txx2.append(txx2)
-            
+
         self.csf = mc_csf[0]
         self.csf1 = mc_csf1[0]
         self.csf2 = mc_csf2[0]
-        
+
         self.txx = mc_txx[0]
         self.txx1 = mc_txx1[0]
         self.txx2 = mc_txx2[0]
@@ -435,11 +610,11 @@ class ppTxx(ppSignal):
         self.txx_err = []
         self.txx1_err = []
         self.txx2_err = []
-        
+
         mc_txx = np.array(mc_txx)
         mc_txx1 = np.array(mc_txx1)
         mc_txx2 = np.array(mc_txx2)
-        
+
         for pi in range(len(self.pstart)):
             mask = sigma_clip(mc_txx[1:, pi], sigma=5, maxiters=5, stdfunc=mad_std).mask
             not_mask = list(map(operator.not_, mask))
@@ -448,7 +623,7 @@ class ppTxx(ppSignal):
             txx_lo, txx_hi = np.percentile(mc_txx_filter, [16, 84])
             txx_err = np.diff([txx_lo, mc_txx[0, pi], txx_hi])
             self.txx_err.append([txx_err[0], txx_err[1]])
-            
+
             mask = sigma_clip(mc_txx1[1:, pi], sigma=5, maxiters=5, stdfunc=mad_std).mask
             not_mask = list(map(operator.not_, mask))
             mc_txx1_filter = mc_txx1[1:, pi][not_mask]
@@ -456,7 +631,7 @@ class ppTxx(ppSignal):
             txx1_lo, txx1_hi = np.percentile(mc_txx1_filter, [16, 84])
             txx1_err = np.diff([txx1_lo, mc_txx1[0, pi], txx1_hi])
             self.txx1_err.append([txx1_err[0], txx1_err[1]])
-            
+
             mask = sigma_clip(mc_txx2[1:, pi], sigma=5, maxiters=5, stdfunc=mad_std).mask
             not_mask = list(map(operator.not_, mask))
             mc_txx2_filter = mc_txx2[1:, pi][not_mask]
@@ -464,29 +639,44 @@ class ppTxx(ppSignal):
             txx2_lo, txx2_hi = np.percentile(mc_txx2_filter, [16, 84])
             txx2_err = np.diff([txx2_lo, mc_txx2[0, pi], txx2_hi])
             self.txx2_err.append([txx2_err[0], txx2_err[1]])
-        
-        self.txx_res = {'xx': self.xx, 'txx':self.txx, 'txx1': self.txx1, 'txx2': self.txx2, 
-                        'txx_err': self.txx_err, 'txx1_err': self.txx1_err, 'txx2_err': self.txx2_err, 
+
+        self.txx_res = {'xx': self.xx, 'txx':self.txx, 'txx1': self.txx1, 'txx2': self.txx2,
+                        'txx_err': self.txx_err, 'txx1_err': self.txx1_err, 'txx2_err': self.txx2_err,
                         'csf': self.csf, 'csf1': self.csf1, 'csf2': self.csf2}
-        
+
         print('\n+------------------------------------------------+')
         print(' %-5s%-10s%-8s%-8s%-8s%-8s' % ('id#', 'Txx', 'Txx-', 'Txx+', 'Txx1', 'Txx2'))
         print('+-----------------------------------------------+')
-        _ = list(map(print, [' %-5d%-10.3f%-8.3f%-8.3f%-8.3f%-8.3f' % (i+1, t, t_err[0], t_err[1], t1, t2) 
-                                for i, (t, t_err, t1, t2) in enumerate(zip(self.txx_res['txx'], 
-                                                                        self.txx_res['txx_err'], 
-                                                                        self.txx_res['txx1'], 
+        _ = list(map(print, [' %-5d%-10.3f%-8.3f%-8.3f%-8.3f%-8.3f' % (i+1, t, t_err[0], t_err[1], t1, t2)
+                                for i, (t, t_err, t1, t2) in enumerate(zip(self.txx_res['txx'],
+                                                                        self.txx_res['txx_err'],
+                                                                        self.txx_res['txx1'],
                                                                         self.txx_res['txx2']))]))
         print('+------------------------------------------------+')
 
 
     def save(self, savepath, suffix=''):
-        
+        """Save Txx results and diagnostic plots to disk.
+
+        Serialises ``pulse_res`` and ``txx_res`` as JSON files and writes a
+        two-panel PDF showing the light curve with Txx boundaries (upper
+        panel) and the cumulative count curve with CSF levels (lower panel).
+
+        Args:
+            savepath: Directory path where output files are written; created
+                if it does not exist.
+            suffix: Optional string appended to all output file names before
+                the extension.
+
+        Returns:
+            ``False`` if no pulse has been detected; ``None`` on success.
+        """
+
         if len(self.pstart) == 0:
             msg = 'there is no pulse'
             warnings.warn(msg, UserWarning, stacklevel=2)
             return False
-        
+
         if not os.path.exists(savepath):
             os.makedirs(savepath)
 
@@ -546,17 +736,52 @@ class ppTxx(ppSignal):
 
 
 class ggTxx(ggSignal):
-        
+    """Compute Txx durations for a Gaussian-source/Gaussian-background light curve.
+
+    Extends ``ggSignal`` with pulse detection and Txx duration analysis.
+    The input counts and their errors are treated as Gaussian variates;
+    uncertainties are estimated via 1000 Monte Carlo realisations.
+
+    Attributes:
+        pulse_res: Dictionary storing detected pulse start/stop edges, or
+            ``None`` before ``find_pulse`` is called.
+        txx_res: Dictionary storing Txx results, or ``None`` before
+            ``calculate`` is called.
+    """
+
     def __init__(self, ncts, ncts_err, bins, exp=None):
-        
+        """Initialize ggTxx with pre-background-subtracted count data.
+
+        Args:
+            ncts: Array of net (background-subtracted) counts per bin.
+            ncts_err: Array of uncertainties on ``ncts``.
+            bins: Bin edges or bin width used to build the light curve.
+            exp: Exposure correction array, or ``None`` for uniform exposure.
+        """
+
         super().__init__(ncts, ncts_err, bins, exp=exp)
-        
+
         self.pulse_res = None
         self.txx_res = None
-        
-        
+
+
     def find_pulse(self, p0=0.05, sigma=3, mp=True):
-        
+        """Detect significant pulse intervals in the net light curve.
+
+        Runs the Bayesian-blocks segmentation if not already done, sets up
+        net count arrays on the rebinned grid, then identifies contiguous
+        blocks whose SNR exceeds ``sigma``.  Results are stored in
+        ``self.pstart``, ``self.pstop``, and ``self.pulse_res``.
+
+        Args:
+            p0: Bayesian-blocks prior probability for a new change point.
+            sigma: Minimum SNR threshold for a block to be classified as
+                a pulse.
+            mp: When ``True``, keep multiple separate pulse intervals.
+                When ``False``, merge all intervals into one and emit a
+                warning if more than one interval is found.
+        """
+
         if self.sort_res is None:
             self.loop(p0=p0, sigma=sigma)
 
@@ -564,7 +789,7 @@ class ggTxx(ggSignal):
         self.ncts_err = self.cts_err
         self.net = self.cts / self.exp
         self.net_err = self.cts_err / self.exp
-        
+
         self.re_ncts = self.re_cts
         self.re_ncts_err = self.re_cts_err
         self.re_net = self.re_ncts / self.re_binsize
@@ -613,7 +838,7 @@ class ggTxx(ggSignal):
                 warnings.warn(msg, UserWarning, stacklevel=2)
             pstart = [pstart[0]]
             pstop = [pstop[-1]]
-        
+
         self.pstart = np.array(pstart)
         self.pstop = np.array(pstop)
 
@@ -621,7 +846,16 @@ class ggTxx(ggSignal):
 
 
     def mc_simulation(self, nmc):
-        
+        """Generate Monte Carlo realisations of the net count light curve.
+
+        Draws Gaussian samples using ``self.ncts`` and ``self.ncts_err`` and
+        stacks the realisation matrix as ``self.mc_ncts`` with the observed
+        data in row 0.
+
+        Args:
+            nmc: Number of Monte Carlo realisations to generate.
+        """
+
         self.nmc = int(nmc)
         self.nsample = len(self.time)
 
@@ -631,17 +865,40 @@ class ggTxx(ggSignal):
 
 
     def calculate(self, xx=0.9, pstart=None, pstop=None, lbkg=None, rbkg=None):
-        
+        """Compute Txx duration and its uncertainties for each detected pulse.
+
+        Calls ``find_pulse`` if not already done.  Optionally overrides the
+        detected pulse boundaries.  Uncertainties are always estimated via
+        1000 Monte Carlo realisations.  Results are printed to stdout and
+        stored in ``self.txx_res``.
+
+        Args:
+            xx: Cumulative count fraction defining the duration, e.g. ``0.9``
+                for T90 or ``0.5`` for T50.
+            pstart: Override pulse start time(s).  A scalar is promoted to a
+                length-1 array; a list is sorted in ascending order.
+            pstop: Override pulse stop time(s).  Same promotion rules as
+                ``pstart``.
+            lbkg: Length of the background window to the left of the first
+                pulse.  ``None`` extends to the beginning of the data.
+            rbkg: Length of the background window to the right of the last
+                pulse.  ``None`` extends to the end of the data.
+
+        Returns:
+            ``False`` if no pulse is detected; ``None`` on success (results
+            are stored as instance attributes).
+        """
+
         if self.pulse_res is None: self.find_pulse()
 
         self.xx = xx
-        
+
         if pstart is not None:
             if type(pstart) is not list:
                 self.pstart = np.array([pstart])
             else:
                 self.pstart = np.sort(pstart)
-            
+
         if pstop is not None:
             if type(pstop) is not list:
                 self.pstop = np.array([pstop])
@@ -655,7 +912,7 @@ class ggTxx(ggSignal):
 
         if lbkg is None:
             lbkg = np.inf
-            
+
         if rbkg is None:
             rbkg = np.inf
 
@@ -664,18 +921,18 @@ class ggTxx(ggSignal):
         tmax_ = self.pstop[-1] + rbkg
         tmax = min(tmax_, self.time[-1])
         self.tindex = np.where((self.time >= tmin) & (self.time <= tmax))[0]
-        
+
         self.ccts = np.cumsum(self.ncts)
-        
+
         self.mc_simulation(1000)
-    
+
         mc_csf, mc_csf1, mc_csf2 = [], [], []
         mc_txx, mc_txx1, mc_txx2 = [], [], []
-        
+
         for ncts in self.mc_ncts:
-            
+
             ccts = np.cumsum(ncts)
-            
+
             txx, txx1, txx2, csf, csf1, csf2 \
                 = accumcts(self.time[self.tindex], ccts[self.tindex], self.pstart, self.pstop, self.xx, simple_err=False)
 
@@ -685,11 +942,11 @@ class ggTxx(ggSignal):
             mc_txx.append(txx)
             mc_txx1.append(txx1)
             mc_txx2.append(txx2)
-            
+
         self.csf = mc_csf[0]
         self.csf1 = mc_csf1[0]
         self.csf2 = mc_csf2[0]
-        
+
         self.txx = mc_txx[0]
         self.txx1 = mc_txx1[0]
         self.txx2 = mc_txx2[0]
@@ -697,11 +954,11 @@ class ggTxx(ggSignal):
         self.txx_err = []
         self.txx1_err = []
         self.txx2_err = []
-        
+
         mc_txx = np.array(mc_txx)
         mc_txx1 = np.array(mc_txx1)
         mc_txx2 = np.array(mc_txx2)
-        
+
         for pi in range(len(self.pstart)):
             mask = sigma_clip(mc_txx[1:, pi], sigma=5, maxiters=5, stdfunc=mad_std).mask
             not_mask = list(map(operator.not_, mask))
@@ -710,7 +967,7 @@ class ggTxx(ggSignal):
             txx_lo, txx_hi = np.percentile(mc_txx_filter, [16, 84])
             txx_err = np.diff([txx_lo, mc_txx[0, pi], txx_hi])
             self.txx_err.append([txx_err[0], txx_err[1]])
-            
+
             mask = sigma_clip(mc_txx1[1:, pi], sigma=5, maxiters=5, stdfunc=mad_std).mask
             not_mask = list(map(operator.not_, mask))
             mc_txx1_filter = mc_txx1[1:, pi][not_mask]
@@ -718,7 +975,7 @@ class ggTxx(ggSignal):
             txx1_lo, txx1_hi = np.percentile(mc_txx1_filter, [16, 84])
             txx1_err = np.diff([txx1_lo, mc_txx1[0, pi], txx1_hi])
             self.txx1_err.append([txx1_err[0], txx1_err[1]])
-            
+
             mask = sigma_clip(mc_txx2[1:, pi], sigma=5, maxiters=5, stdfunc=mad_std).mask
             not_mask = list(map(operator.not_, mask))
             mc_txx2_filter = mc_txx2[1:, pi][not_mask]
@@ -726,24 +983,36 @@ class ggTxx(ggSignal):
             txx2_lo, txx2_hi = np.percentile(mc_txx2_filter, [16, 84])
             txx2_err = np.diff([txx2_lo, mc_txx2[0, pi], txx2_hi])
             self.txx2_err.append([txx2_err[0], txx2_err[1]])
-        
-        self.txx_res = {'xx': self.xx, 'txx':self.txx, 'txx1': self.txx1, 'txx2': self.txx2, 
-                        'txx_err': self.txx_err, 'txx1_err': self.txx1_err, 'txx2_err': self.txx2_err, 
+
+        self.txx_res = {'xx': self.xx, 'txx':self.txx, 'txx1': self.txx1, 'txx2': self.txx2,
+                        'txx_err': self.txx_err, 'txx1_err': self.txx1_err, 'txx2_err': self.txx2_err,
                         'csf': self.csf, 'csf1': self.csf1, 'csf2': self.csf2}
-        
+
         print('\n+------------------------------------------------+')
         print(' %-5s%-10s%-8s%-8s%-8s%-8s' % ('id#', 'Txx', 'Txx-', 'Txx+', 'Txx1', 'Txx2'))
         print('+-----------------------------------------------+')
-        _ = list(map(print, [' %-5d%-10.3f%-8.3f%-8.3f%-8.3f%-8.3f' % (i+1, t, t_err[0], t_err[1], t1, t2) 
-                                for i, (t, t_err, t1, t2) in enumerate(zip(self.txx_res['txx'], 
-                                                                        self.txx_res['txx_err'], 
-                                                                        self.txx_res['txx1'], 
+        _ = list(map(print, [' %-5d%-10.3f%-8.3f%-8.3f%-8.3f%-8.3f' % (i+1, t, t_err[0], t_err[1], t1, t2)
+                                for i, (t, t_err, t1, t2) in enumerate(zip(self.txx_res['txx'],
+                                                                        self.txx_res['txx_err'],
+                                                                        self.txx_res['txx1'],
                                                                         self.txx_res['txx2']))]))
         print('+------------------------------------------------+')
 
 
     def save(self, savepath, suffix=''):
-        
+        """Save Txx results and diagnostic plots to disk.
+
+        Serialises ``txx_res`` as a JSON file and writes a two-panel PDF
+        showing the net rate light curve with Txx boundaries (upper panel)
+        and the cumulative count curve with CSF levels (lower panel).
+
+        Args:
+            savepath: Directory path where output files are written; created
+                if it does not exist.
+            suffix: Optional string appended to all output file names before
+                the extension.
+        """
+
         if not os.path.exists(savepath):
             os.makedirs(savepath)
 
@@ -801,7 +1070,33 @@ class ggTxx(ggSignal):
 
 
 def accumcts(time, ccts, pstart, pstop, xx, simple_err=False):
-    
+    """Compute cumulative-count-fraction levels and Txx start/stop times.
+
+    Interpolates the cumulative count curve to 1000-point resolution when
+    the native sampling is too coarse, calculates the background CSF levels
+    between pulses, derives the :math:`(1-xx)/2` and :math:`1-(1-xx)/2`
+    fraction levels (``csf1``, ``csf2``) for each pulse interval, and
+    locates the corresponding times via ``find_txx``.
+
+    Args:
+        time: 1-D time array covering the analysis window.
+        ccts: Cumulative net count array aligned with ``time``.
+        pstart: Array of pulse start times; one entry per pulse.
+        pstop: Array of pulse stop times; one entry per pulse.
+        xx: Cumulative count fraction, e.g. ``0.9`` for T90.
+        simple_err: When ``True``, also compute and return analytic
+            uncertainty estimates on all CSF and Txx values.
+
+    Returns:
+        When ``simple_err`` is ``False``: a tuple
+        ``(txx, txx1, txx2, csf, csf1, csf2)`` where each element is a list
+        with one entry per pulse.
+
+        When ``simple_err`` is ``True``: a tuple
+        ``(txx, txx1, txx2, txx_err, txx1_err, txx2_err,
+        csf, csf1, csf2, csf_err, csf1_err, csf2_err)``.
+    """
+
     idx = np.argsort(pstop - pstart)[0]
     if len(np.where((time >= pstart[idx]) & (time <= pstop[idx]))[0]) < 1000:
         interp_dt = (pstop[idx] - pstart[idx]) / 1000
@@ -815,7 +1110,7 @@ def accumcts(time, ccts, pstart, pstop, xx, simple_err=False):
     csf, csf1, csf2 = [], [], []
     txx, txx1, txx2 = [], [], []
 
-    if simple_err: 
+    if simple_err:
         csf_err, csf1_err, csf2_err = [], [], []
         txx_err, txx1_err, txx2_err = [], [], []
 
@@ -826,14 +1121,14 @@ def accumcts(time, ccts, pstart, pstop, xx, simple_err=False):
         else:
             csf_i = interp_ccts[np.argmin(np.abs(interp_time - l))]
         csf.append(csf_i)
-        
+
         if simple_err:
             if len(idx) >= 1:
                 csf_err_i = np.std(interp_ccts[idx])
             else:
                 csf_err_i = 0.0
             csf_err.append(csf_err_i)
-        
+
     dcsf = np.array(csf[1:]) - np.array(csf[:-1])
 
     for pi, (l, r) in enumerate(zip(np.append(time[0], pstop[:-1]), np.append(pstart[1:], time[-1]))):
@@ -842,14 +1137,14 @@ def accumcts(time, ccts, pstart, pstop, xx, simple_err=False):
 
         csf1_i = csf[pi] + dd
         csf2_i = csf[pi + 1] - dd
-            
+
         csf1.append(csf1_i)
         csf2.append(csf2_i)
-        
+
         if simple_err:
             csf1_err_i = np.sqrt((1 - nn) ** 2 * csf_err[pi] ** 2 + nn ** 2 * csf_err[pi + 1] ** 2)
             csf2_err_i = np.sqrt(nn ** 2 * csf_err[pi] ** 2 + (1 - nn) ** 2 * csf_err[pi + 1] ** 2)
-            
+
             csf1_err.append(csf1_err_i)
             csf2_err.append(csf2_err_i)
 
@@ -857,12 +1152,12 @@ def accumcts(time, ccts, pstart, pstop, xx, simple_err=False):
         pcts = interp_ccts[np.where((interp_time >= l) & (interp_time <= r))]
 
         txx_i, txx1_i, txx2_i = find_txx(pt, pcts, csf1_i, csf2_i)
-        
+
         txx.append(txx_i)
         txx1.append(txx1_i)
         txx2.append(txx2_i)
-        
-        if simple_err: 
+
+        if simple_err:
             _, txx1_lo_i, txx2_lo_i = find_txx(pt, pcts, csf1_i - csf1_err_i, csf2_i - csf2_err_i)
             _, txx1_hi_i, txx2_hi_i = find_txx(pt, pcts, csf1_i + csf1_err_i, csf2_i + csf2_err_i)
             txx1_le_i, txx1_he_i = txx1_i - txx1_lo_i, txx1_hi_i - txx1_i
@@ -876,7 +1171,7 @@ def accumcts(time, ccts, pstart, pstop, xx, simple_err=False):
             txx_err.append([txx_le_i, txx_he_i])
             txx1_err.append([txx1_le_i, txx1_he_i])
             txx2_err.append([txx2_le_i, txx2_he_i])
-            
+
     if simple_err:
         return txx, txx1, txx2, txx_err, txx1_err, txx2_err, csf, csf1, csf2, csf_err, csf1_err, csf2_err
     else:
@@ -885,7 +1180,25 @@ def accumcts(time, ccts, pstart, pstop, xx, simple_err=False):
 
 
 def find_txx(time, ccts, csf1, csf2):
-    
+    """Locate the start and stop times corresponding to CSF thresholds.
+
+    Linearly interpolates the cumulative count curve onto a 1000-point grid,
+    then scans forward to find the time ``txx1`` at which the curve crosses
+    ``csf1`` from below, and ``txx2`` at which it crosses ``csf2`` from
+    below.  The duration ``txx = txx2 - txx1`` is also returned.
+
+    Args:
+        time: 1-D time array for the pulse interval.
+        ccts: Cumulative net count array aligned with ``time``.
+        csf1: Lower cumulative-count-fraction level (start threshold).
+        csf2: Upper cumulative-count-fraction level (stop threshold).
+
+    Returns:
+        A tuple ``(txx, txx1, txx2)`` where ``txx`` is the duration and
+        ``txx1``, ``txx2`` are the start and stop times, respectively.
+        All three values are ``0`` if no valid crossing is found.
+    """
+
     interp_time = np.linspace(time[0], time[-1], 1000)
     interp = interp1d(time, ccts, kind='linear')
     interp_ccts = interp(interp_time)
