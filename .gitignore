@@ -50,14 +50,6 @@ Icon?
 build/
 dist/
 
-# ignore examples
-examples/**
-
-# include .ipynb in examples
-!examples/**/*.ipynb
-!examples/
-!examples/*/
-
 # Local-only docs and Claude Code project config
 docs/
 CLAUDE.md
