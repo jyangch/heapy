@@ -28,7 +28,8 @@ from astropy.stats import bayesian_blocks
 from .signal_utils import *
 from .baseline import Baseline
 from .polynomial import Polynomial, CompositePolynomial
-from ..util.data import union, json_dump
+from ..util.data import union
+from ..util.tools import json_dump
 
 
 
