@@ -205,7 +205,7 @@ class gbmSkyMap(object):
             name: Optional text label placed 3 degrees above the marker.
             marker: Matplotlib marker style string.
             color: Marker and label color as a matplotlib color string.
-            size: Marker size in points\ :sup:`2`.
+            size: Marker size.
         """
 
         self.ax.scatter(ra, dec, transform=ccrs.Geodetic(),
@@ -309,3 +309,4 @@ class gbmSkyMap(object):
 
         plt.tight_layout()
         self.fig.savefig(filename, dpi=dpi)
+        plt.close(self.fig)

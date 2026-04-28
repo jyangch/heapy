@@ -31,7 +31,7 @@ warnings.simplefilter('ignore', MergeConflictWarning)
 from .filter import Filter
 from ..data.retrieve import gbmRetrieve, gecamRetrieve, gridRetrieve
 from ..temp.txx import pgTxx
-from ..auto.polybase import PolyBase
+from ..auto.signal import pgSignal
 from ..util.file import copy_file, remove_file
 from ..util.data import json_dump, rebin, union
 from ..util.time import grid_met_to_utc, grid_utc_to_met
@@ -754,7 +754,7 @@ class Event(object):
     def bs_deg(self):
         """Return the forced polynomial degree for background fitting, or ``None``.
 
-        When ``None``, the degree is chosen automatically by ``PolyBase``.
+        When ``None``, the degree is chosen automatically by ``pgSignal``.
         """
         
         try:
@@ -777,19 +777,19 @@ class Event(object):
     def calc_autobs(self):
         """Run automatic polynomial background estimation for the light curve.
 
-        Fits a polynomial background to the light curve using ``PolyBase``,
+        Fits a polynomial background to the light curve using ``pgSignal``,
         running two sigma-clipping iterations.  The result is stored in
         ``_lc_bs`` and retrieved via the ``lc_bs`` property.
         """
         
-        self._lc_bs = PolyBase(self.lc_ts, self.lc_bins, self.lc_exps, self.bs_ignore)
+        self._lc_bs = pgSignal(self.lc_ts, self.lc_bins, self.lc_exps, self.bs_ignore)
         self._lc_bs.loop(p0=self.bs_p0, sigma=self.bs_sigma, deg=self.bs_deg)
         self._lc_bs.loop(p0=self.bs_p0, sigma=self.bs_sigma, deg=self.bs_deg)
 
 
     @property
     def lc_bs(self):
-        """Return the ``PolyBase`` background-fit result, computing it if needed."""
+        """Return the ``pgSignal`` background-fit result, computing it if needed."""
         
         try:
             self._lc_bs
@@ -884,7 +884,7 @@ class Event(object):
 
         if autobs:
             lc_bs = self.lc_bs
-            lc_bs.save(savepath=savepath + '/polybase')
+            lc_bs.save(savepath=savepath + '/pgsignal')
 
             lc_bkg_rate, lc_bkg_rate_err = lc_bs.poly.val(self.lc_time)
 
@@ -927,9 +927,9 @@ class Event(object):
         fig.update_layout(legend=dict(x=1, y=1, xanchor='right', yanchor='bottom'))
 
         if show: fig.show()
-        fig.write_html(savepath + '/lc.html')
-        json_dump(fig.to_dict(), savepath + '/lc.json')
-
+        fig.write_html(savepath + '/lc.html', include_plotlyjs='cdn')
+        fig.write_image(savepath + '/lc.pdf')
+        
         if autobs:
             fig = go.Figure()
             net = go.Scatter(x=self.lc_time,
@@ -945,8 +945,8 @@ class Event(object):
             fig.update_layout(template='plotly_white', height=600, width=800)
             fig.update_layout(legend=dict(x=1, y=1, xanchor='right', yanchor='bottom'))
 
-            fig.write_html(savepath + '/cum_lc.html')
-            json_dump(fig.to_dict(), savepath + '/cum_lc.json')
+            fig.write_html(savepath + '/cum_lc.html', include_plotlyjs='cdn')
+            fig.write_image(savepath + '/cum_lc.pdf')
 
 
     def calculate_txx(self, mp=True, xx=0.9, pstart=None, pstop=None,
@@ -1107,8 +1107,8 @@ class Event(object):
         fig.update_layout(legend=dict(x=1, y=1, xanchor='right', yanchor='bottom'))
 
         if show: fig.show()
-        fig.write_html(savepath + '/rebin_lc.html')
-        json_dump(fig.to_dict(), savepath + '/rebin_lc.json')
+        fig.write_html(savepath + '/rebin_lc.html', include_plotlyjs='cdn')
+        fig.write_image(savepath + '/rebin_lc.pdf')
 
 
     @property
@@ -1215,7 +1215,7 @@ class Event(object):
             interp_upp = bins[-2]
             interp_time = np.linspace(interp_low, interp_upp, 100)
 
-        bs = PolyBase(self.spec_ts, bins, ignore=self.bs_ignore)
+        bs = pgSignal(self.spec_ts, bins, ignore=self.bs_ignore)
         bs.loop(p0=self.bs_p0, sigma=self.bs_sigma, deg=self.bs_deg)
         bs.loop(p0=self.bs_p0, sigma=self.bs_sigma, deg=self.bs_deg)
 
@@ -1242,7 +1242,7 @@ class Event(object):
 
             bins_i = np.arange(self.spec_t1t2[0], self.spec_t1t2[1] + 1e-5, binsize_i)
 
-            bs_i = PolyBase(ts_i, bins_i, ignore=ignore)
+            bs_i = pgSignal(ts_i, bins_i, ignore=ignore)
             bs_i.polyfit(deg=bs.poly_res['deg'])
 
             brate_i, _ = bs_i.poly.val(interp_time)

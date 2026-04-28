@@ -27,7 +27,7 @@ docs_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + '/docs
 from .filter import Filter
 from ..data.retrieve import epRetrieve, swiftRetrieve
 from ..temp.txx import ppTxx
-from ..auto.ppsignal import ppSignal
+from ..auto.signal import ppSignal
 from ..util.file import copy_file
 from ..util.data import json_dump, rebin, union
 from ..util.time import ep_met_to_utc, ep_utc_to_met
@@ -547,8 +547,8 @@ class Image(object):
         fig.update_layout(template='plotly_white', height=700, width=700)
 
         if show: fig.show()
-        fig.write_html(savepath + '/image.html')
-        json_dump(fig.to_dict(), savepath + '/image.json')
+        fig.write_html(savepath + '/image.html', include_plotlyjs='cdn')
+        fig.write_image(savepath + '/image.pdf')
 
 
     @property
@@ -1038,8 +1038,8 @@ class Image(object):
         fig.update_layout(legend=dict(x=1, y=1, xanchor='right', yanchor='bottom'))
 
         if show: fig.show()
-        fig.write_html(savepath + '/lc.html')
-        json_dump(fig.to_dict(), savepath + '/lc.json')
+        fig.write_html(savepath + '/lc.html', include_plotlyjs='cdn')
+        fig.write_image(savepath + '/lc.pdf')
 
         fig = go.Figure()
         net = go.Scatter(x=self.lc_time,
@@ -1055,8 +1055,8 @@ class Image(object):
         fig.update_layout(template='plotly_white', height=600, width=800)
         fig.update_layout(legend=dict(x=1, y=1, xanchor='right', yanchor='bottom'))
 
-        fig.write_html(savepath + '/cum_lc.html')
-        json_dump(fig.to_dict(), savepath + '/cum_lc.json')
+        fig.write_html(savepath + '/cum_lc.html', include_plotlyjs='cdn')
+        fig.write_image(savepath + '/cum_lc.pdf')
 
 
     def calculate_txx(self, mp=True, xx=0.9, pstart=None, pstop=None,
@@ -1207,8 +1207,8 @@ class Image(object):
         fig.update_layout(legend=dict(x=1, y=1, xanchor='right', yanchor='bottom'))
 
         if show: fig.show()
-        fig.write_html(savepath + '/rebin_lc.html')
-        json_dump(fig.to_dict(), savepath + '/rebin_lc.json')
+        fig.write_html(savepath + '/rebin_lc.html', include_plotlyjs='cdn')
+        fig.write_image(savepath + '/rebin_lc.pdf')
 
 
     def check_pileup(self, std=False, show=False):
@@ -1365,8 +1365,8 @@ class Image(object):
         fig.update_layout(legend=dict(x=1, y=1, xanchor='right', yanchor='bottom'))
 
         if show: fig.show()
-        fig.write_html(psf_savepath + '/psf.html')
-        json_dump(fig.to_dict(), psf_savepath + '/psf.json')
+        fig.write_html(psf_savepath + '/psf.html', include_plotlyjs='cdn')
+        fig.write_image(psf_savepath + '/psf.pdf')
 
 
     @property
