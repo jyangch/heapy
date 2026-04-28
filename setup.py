@@ -37,6 +37,7 @@ setup(
         "matplotlib>=3.2.1",
         "tqdm>=4.64.1",
         "plotly>=5.22.0",
+        "kaleido>=0.2.1",
         "pybaselines>=1.1.0"
     ],
     packages=find_packages(exclude=["examples*"]),
