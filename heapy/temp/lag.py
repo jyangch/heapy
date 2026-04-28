@@ -25,7 +25,7 @@ from scipy.optimize import curve_fit, minimize_scalar
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import RBF, WhiteKernel
 
-from ..util.data import json_dump
+from ..util.tools import json_dump
 
 
 

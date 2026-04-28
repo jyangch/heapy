@@ -29,7 +29,8 @@ from ..data.retrieve import epRetrieve, swiftRetrieve
 from ..temp.txx import ppTxx
 from ..auto.signal import ppSignal
 from ..util.file import copy_file
-from ..util.data import json_dump, rebin, union
+from ..util.data import rebin, union
+from ..util.tools import json_dump
 from ..util.time import ep_met_to_utc, ep_utc_to_met
 from ..util.time import swift_met_to_utc, swift_utc_to_met
 

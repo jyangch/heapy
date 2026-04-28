@@ -3,16 +3,13 @@
 Provides helpers for 2D matrix operations (transpose, pad, pop),
 interval arithmetic (intersection, union), histogram rebinning with
 statistical significance criteria (gstat / cstat / pgstat), array
-utilities (scale, asymmetric Gaussian sampling), LaTeX formatting
-helpers, and JSON serialisation with NumPy / datetime support.
+utilities (scale, asymmetric Gaussian sampling), and LaTeX formatting
+helpers.
 """
 
-import json
 import warnings
 import numpy as np
-from pathlib import Path
 from itertools import zip_longest
-from datetime import datetime, date
 
 from .significance import pgsig, ppsig
 
@@ -701,68 +698,3 @@ def format_message(msg, min_width=30):
         horizontal_border])
 
     return formatted_msg
-
-
-class JsonEncoder(json.JSONEncoder):
-    """Custom JSON encoder with support for NumPy and datetime types.
-
-    Extends the standard ``json.JSONEncoder`` to handle types that are
-    not natively serialisable:
-
-    - ``np.generic`` (NumPy scalars) — converted via ``.item()``.
-    - ``np.ndarray`` — converted to a nested Python list via ``.tolist()``.
-    - ``set`` — converted to a ``list``.
-    - ``datetime`` / ``date`` — converted to an ISO 8601 string via
-      ``.isoformat()``.
-
-    Example:
-        >>> import json, numpy as np
-        >>> json.dumps({"a": np.int32(1)}, cls=JsonEncoder)
-        '{"a": 1}'
-    """
-
-    def default(self, obj):
-        """Return a JSON-serialisable representation of ``obj``.
-
-        Args:
-            obj: The object to serialise.
-
-        Returns:
-            A JSON-serialisable Python object corresponding to ``obj``.
-        """
-        if isinstance(obj, np.generic):
-            return obj.item()
-
-        if isinstance(obj, np.ndarray):
-            return obj.tolist()
-
-        if isinstance(obj, set):
-            return list(obj)
-
-        if isinstance(obj, (datetime, date)):
-            return obj.isoformat()
-
-        return super().default(obj)
-
-
-def json_dump(data, filepath, indent=4, ensure_ascii=False):
-    """Write data to a JSON file using the custom :class:`JsonEncoder`.
-
-    Creates any missing parent directories before writing.
-
-    Args:
-        data: The data to serialise.  May contain NumPy scalars, NumPy
-            arrays, sets, and ``datetime`` / ``date`` objects in addition
-            to standard JSON-compatible types.
-        filepath: Destination file path (``str`` or ``Path``).
-        indent: Number of spaces used for JSON indentation.  Default is
-            ``4``.
-        ensure_ascii: When ``True``, non-ASCII characters are escaped in
-            the output.  Default is ``False``.
-    """
-
-    path = Path(filepath)
-    path.parent.mkdir(parents=True, exist_ok=True)
-
-    with open(path, 'w', encoding='utf-8') as f:
-        json.dump(data, f, indent=indent, ensure_ascii=ensure_ascii, cls=JsonEncoder)

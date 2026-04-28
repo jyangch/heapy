@@ -22,7 +22,8 @@ from scipy.interpolate import interp1d
 from astropy.stats import sigma_clip, mad_std
 
 from ..auto.signal import pgSignal, ppSignal, ggSignal
-from ..util.data import generate_asymmetric_gaussian, json_dump
+from ..util.data import generate_asymmetric_gaussian
+from ..util.tools import json_dump
 
 
 
