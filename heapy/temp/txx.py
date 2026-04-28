@@ -1,7 +1,7 @@
 """Compute Txx duration metrics (T90, T50, etc.) for gamma-ray burst light curves.
 
 Provides three concrete classes — ``pgTxx``, ``ppTxx``, and ``ggTxx`` — that
-inherit from ``PolyBase`` / ``ppSignal`` / ``ggSignal`` and add pulse detection
+inherit from ``pgSignal`` / ``ppSignal`` / ``ggSignal`` and add pulse detection
 and cumulative-count-fraction duration analysis.  Monte Carlo simulation is
 used by default to propagate uncertainties on the start/stop times.
 
@@ -21,17 +21,15 @@ from matplotlib import rcParams
 from scipy.interpolate import interp1d
 from astropy.stats import sigma_clip, mad_std
 
-from ..auto.polybase import PolyBase
-from ..auto.ppsignal import ppSignal
-from ..auto.ggsignal import ggSignal
+from ..auto.signal import pgSignal, ppSignal, ggSignal
 from ..util.data import generate_asymmetric_gaussian, json_dump
 
 
 
-class pgTxx(PolyBase):
+class pgTxx(pgSignal):
     """Compute Txx durations for a Poisson-source/Gaussian-background light curve.
 
-    Extends ``PolyBase`` with pulse detection and cumulative-count-fraction
+    Extends ``pgSignal`` with pulse detection and cumulative-count-fraction
     duration (Txx) analysis.  Background subtraction uses the polynomial fit
     from the parent class; uncertainties are estimated via Monte Carlo
     simulation by default (1000 realisations).

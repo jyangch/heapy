@@ -386,3 +386,52 @@ class Polynomial(object):
             res['covar'] = covar
 
         return res
+
+
+
+class CompositePolynomial(object):
+    """Sum of independent :class:`Polynomial` fits with the same ``val(x)`` API.
+
+    Used to integrate a stacked Poisson-source background when each
+    component carries its own polynomial fit: per-point means add
+    linearly while per-point variances add in quadrature.
+
+    Attributes:
+        polys: List of constituent fitted :class:`Polynomial` instances.
+    """
+
+    def __init__(self, polys):
+        """Store the constituent polynomial fits.
+
+        Args:
+            polys: Iterable of fitted :class:`Polynomial` instances; each
+                must already have a non-``None`` ``ls_res``.
+        """
+        
+        for p in polys:
+            if not isinstance(p, Polynomial):
+                raise TypeError("expected a list of Polynomial instances")
+            if getattr(p, 'ls_res', None) is None:
+                raise ValueError("each constituent Polynomial must already be fitted")
+
+        self.polys = list(polys)
+
+
+    def val(self, x):
+        """Evaluate the summed polynomial and propagated 1-sigma error at ``x``.
+
+        Args:
+            x: Query abscissae.
+
+        Returns:
+            Tuple ``(mo, err)`` — sum of constituent means and the
+            quadrature sum of constituent 1-sigma errors.
+        """
+
+        ys, vars = [], []
+        for p in self.polys:
+            y, ye = p.val(x)
+            ys.append(y)
+            vars.append(np.asarray(ye) ** 2)
+
+        return np.sum(ys, axis=0), np.sqrt(np.sum(vars, axis=0))

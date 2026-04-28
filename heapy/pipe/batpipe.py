@@ -20,7 +20,7 @@ import plotly.graph_objs as go
 
 from ..data.retrieve import swiftRetrieve
 from ..temp.txx import ggTxx
-from ..auto.ggsignal import ggSignal
+from ..auto.signal import ggSignal
 from ..util.data import json_dump, rebin
 from ..util.time import swift_met_to_utc, swift_utc_to_met
 
@@ -863,8 +863,8 @@ class batPipe(object):
         fig.update_layout(legend=dict(x=1, y=1, xanchor='right', yanchor='bottom'))
 
         if show: fig.show()
-        fig.write_html(savepath + '/lc.html')
-        json_dump(fig.to_dict(), savepath + '/lc.json')
+        fig.write_html(savepath + '/lc.html', include_plotlyjs='cdn')
+        fig.write_image(savepath + '/lc.pdf')
 
         fig = go.Figure()
         net = go.Scatter(x=self.lc_time,
@@ -879,8 +879,8 @@ class batPipe(object):
         fig.update_layout(template='plotly_white', height=600, width=800)
         fig.update_layout(legend=dict(x=1, y=1, xanchor='right', yanchor='bottom'))
 
-        fig.write_html(savepath + '/cum_lc.html')
-        json_dump(fig.to_dict(), savepath + '/cum_lc.json')
+        fig.write_html(savepath + '/cum_lc.html', include_plotlyjs='cdn')
+        fig.write_image(savepath + '/cum_lc.pdf')
 
 
     def calculate_txx(self, mp=True, xx=0.9, pstart=None, pstop=None,
@@ -1005,8 +1005,8 @@ class batPipe(object):
         fig.update_layout(legend=dict(x=1, y=1, xanchor='right', yanchor='bottom'))
 
         if show: fig.show()
-        fig.write_html(savepath + '/rebin_lc.html')
-        json_dump(fig.to_dict(), savepath + '/rebin_lc.json')
+        fig.write_html(savepath + '/rebin_lc.html', include_plotlyjs='cdn')
+        fig.write_image(savepath + '/rebin_lc.pdf')
 
 
     @property
