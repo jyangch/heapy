@@ -311,7 +311,7 @@ class pgTxx(pgSignal):
         print('+------------------------------------------------+')
 
 
-    def save(self, savepath, suffix=''):
+    def save(self, savepath):
         """Save Txx results and diagnostic plots to disk.
 
         Serialises ``pulse_res`` and ``txx_res`` as JSON files and writes a
@@ -321,8 +321,6 @@ class pgTxx(pgSignal):
         Args:
             savepath: Directory path where output files are written; created
                 if it does not exist.
-            suffix: Optional string appended to all output file names before
-                the extension, useful for distinguishing multiple runs.
 
         Returns:
             ``False`` if no pulse has been detected; ``None`` on success.
@@ -336,13 +334,15 @@ class pgTxx(pgSignal):
         if not os.path.exists(savepath):
             os.makedirs(savepath)
 
-        json_dump(self.pulse_res, savepath + '/pulse_res%s.json'%suffix)
-        json_dump(self.txx_res, savepath + '/txx_res%s.json'%suffix)
+        json_dump(self.pulse_res, savepath + '/pulse_res.json')
+        json_dump(self.txx_res, savepath + '/txx_res.json')
 
         rcParams['font.family'] = 'serif'
-        rcParams['font.sans-serif'] = 'Georgia'
+        rcParams['font.sans-serif'] = 'STIX Two Text'
+        rcParams['mathtext.fontset'] = 'stix'
         rcParams['font.size'] = 12
         rcParams['pdf.fonttype'] = 42
+        rcParams['ps.fonttype'] = 42
 
         fig = plt.figure(figsize=(7, 6))
         gs = fig.add_gridspec(2, 1, wspace=0, hspace=0)
@@ -385,7 +385,7 @@ class pgTxx(pgSignal):
         ax2.tick_params(which='minor', width=1.0, length=3)
         ax2.xaxis.set_ticks_position('both')
         ax2.yaxis.set_ticks_position('both')
-        fig.savefig(savepath + '/txx%s.pdf'%suffix, bbox_inches='tight', pad_inches=0.1, dpi=300)
+        fig.savefig(savepath + '/txx.pdf', bbox_inches='tight', pad_inches=0.1, dpi=300)
         plt.close(fig)
 
 
@@ -653,7 +653,7 @@ class ppTxx(ppSignal):
         print('+------------------------------------------------+')
 
 
-    def save(self, savepath, suffix=''):
+    def save(self, savepath):
         """Save Txx results and diagnostic plots to disk.
 
         Serialises ``pulse_res`` and ``txx_res`` as JSON files and writes a
@@ -663,8 +663,6 @@ class ppTxx(ppSignal):
         Args:
             savepath: Directory path where output files are written; created
                 if it does not exist.
-            suffix: Optional string appended to all output file names before
-                the extension.
 
         Returns:
             ``False`` if no pulse has been detected; ``None`` on success.
@@ -678,14 +676,15 @@ class ppTxx(ppSignal):
         if not os.path.exists(savepath):
             os.makedirs(savepath)
 
-        json_dump(self.pulse_res, savepath + '/pulse_res%s.json'%suffix)
-        json_dump(self.txx_res, savepath + '/txx_res%s.json'%suffix)
+        json_dump(self.pulse_res, savepath + '/pulse_res.json')
+        json_dump(self.txx_res, savepath + '/txx_res.json')
 
         rcParams['font.family'] = 'serif'
-        rcParams['font.sans-serif'] = 'Georgia'
-        rcParams['text.usetex'] = True
+        rcParams['font.sans-serif'] = 'STIX Two Text'
+        rcParams['mathtext.fontset'] = 'stix'
         rcParams['font.size'] = 12
         rcParams['pdf.fonttype'] = 42
+        rcParams['ps.fonttype'] = 42
 
         fig = plt.figure(figsize=(7, 6))
         gs = fig.add_gridspec(2, 1, wspace=0, hspace=0)
@@ -728,7 +727,7 @@ class ppTxx(ppSignal):
         ax2.tick_params(which='minor', width=1.0, length=3)
         ax2.xaxis.set_ticks_position('both')
         ax2.yaxis.set_ticks_position('both')
-        fig.savefig(savepath + '/txx%s.pdf'%suffix, bbox_inches='tight', pad_inches=0.1, dpi=300)
+        fig.savefig(savepath + '/txx.pdf', bbox_inches='tight', pad_inches=0.1, dpi=300)
         plt.close(fig)
 
 
@@ -997,7 +996,7 @@ class ggTxx(ggSignal):
         print('+------------------------------------------------+')
 
 
-    def save(self, savepath, suffix=''):
+    def save(self, savepath):
         """Save Txx results and diagnostic plots to disk.
 
         Serialises ``txx_res`` as a JSON file and writes a two-panel PDF
@@ -1007,20 +1006,19 @@ class ggTxx(ggSignal):
         Args:
             savepath: Directory path where output files are written; created
                 if it does not exist.
-            suffix: Optional string appended to all output file names before
-                the extension.
         """
 
         if not os.path.exists(savepath):
             os.makedirs(savepath)
 
-        json_dump(self.txx_res, savepath + '/txx_res%s.json'%suffix)
+        json_dump(self.txx_res, savepath + '/txx_res.json')
 
         rcParams['font.family'] = 'serif'
-        rcParams['font.sans-serif'] = 'Georgia'
-        rcParams['text.usetex'] = True
+        rcParams['font.sans-serif'] = 'STIX Two Text'
+        rcParams['mathtext.fontset'] = 'stix'
         rcParams['font.size'] = 12
         rcParams['pdf.fonttype'] = 42
+        rcParams['ps.fonttype'] = 42
 
         fig = plt.figure(figsize=(7, 6))
         gs = fig.add_gridspec(2, 1, wspace=0, hspace=0)
@@ -1062,7 +1060,7 @@ class ggTxx(ggSignal):
         ax2.tick_params(which='minor', width=1.0, length=3)
         ax2.xaxis.set_ticks_position('both')
         ax2.yaxis.set_ticks_position('both')
-        fig.savefig(savepath + '/txx%s.pdf'%suffix, bbox_inches='tight', pad_inches=0.1, dpi=300)
+        fig.savefig(savepath + '/txx.pdf', bbox_inches='tight', pad_inches=0.1, dpi=300)
         plt.close(fig)
 
 
