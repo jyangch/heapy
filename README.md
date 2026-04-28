@@ -33,7 +33,6 @@ _Heapy_ is available via `pip`:
 ```bash
 $ pip3 install heapyx
 ```
-**NOTE**: The package name of _heapy_ in pypi is registered as `heapyx` rather than `heapy`, as the latter has already been taken.
 
 
 ## Documentation
