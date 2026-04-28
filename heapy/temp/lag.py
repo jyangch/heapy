@@ -576,7 +576,7 @@ class Lag(object):
                         'itp_taus': self.itp_taus, 'itp_ccfs': self.itp_ccfs}
 
 
-    def save(self, savepath, suffix=''):
+    def save(self, savepath):
         """Save lag results and diagnostic plots to disk.
 
         Serialises ``lag_res`` as a JSON file and writes two PDF figures:
@@ -587,18 +587,19 @@ class Lag(object):
         Args:
             savepath: Directory path where output files are written; created
                 if it does not exist.
-            suffix: Optional string appended to all output file names before
-                the extension, useful for distinguishing multiple runs.
         """
 
         if not os.path.exists(savepath):
             os.makedirs(savepath)
 
-        json_dump(self.lag_res, savepath + '/lag_res%s.json' % suffix)
+        json_dump(self.lag_res, savepath + '/lag_res.json')
 
         rcParams['font.family'] = 'serif'
+        rcParams['font.sans-serif'] = 'STIX Two Text'
+        rcParams['mathtext.fontset'] = 'stix'
         rcParams['font.size'] = 12
         rcParams['pdf.fonttype'] = 42
+        rcParams['ps.fonttype'] = 42
 
         fig, ax = plt.subplots(1, 1, figsize=(7, 6))
         ax.scatter(self.taus[self.nidx], self.mc_ccfs[0][self.nidx], marker='+',
@@ -614,7 +615,7 @@ class Lag(object):
         ax.tick_params(which='minor', width=1.0, length=3)
         ax.xaxis.set_ticks_position('both')
         ax.yaxis.set_ticks_position('both')
-        fig.savefig(savepath + '/tau_ccf%s.pdf' % suffix, bbox_inches='tight',
+        fig.savefig(savepath + '/tau_ccf.pdf', bbox_inches='tight',
                     pad_inches=0.1, dpi=300)
         plt.close(fig)
 
@@ -637,6 +638,6 @@ class Lag(object):
         ax.tick_params(which='minor', width=1.0, length=3)
         ax.xaxis.set_ticks_position('both')
         ax.yaxis.set_ticks_position('both')
-        fig.savefig(savepath + '/lag_pdf%s.pdf' % suffix, bbox_inches='tight',
+        fig.savefig(savepath + '/lag_pdf.pdf', bbox_inches='tight',
                     pad_inches=0.1, dpi=300)
         plt.close(fig)
