@@ -338,9 +338,9 @@ class pgTxx(pgSignal):
         json_dump(self.pulse_res, savepath + '/pulse_res.json')
         json_dump(self.txx_res, savepath + '/txx_res.json')
 
-        rcParams['font.family'] = 'serif'
-        rcParams['font.sans-serif'] = 'STIX Two Text'
-        rcParams['mathtext.fontset'] = 'stix'
+        rcParams['font.family'] = "serif"
+        rcParams['font.serif'] = ["STIX Two Text"]
+        rcParams['mathtext.fontset'] = "stix"
         rcParams['font.size'] = 12
         rcParams['pdf.fonttype'] = 42
         rcParams['ps.fonttype'] = 42
@@ -680,9 +680,9 @@ class ppTxx(ppSignal):
         json_dump(self.pulse_res, savepath + '/pulse_res.json')
         json_dump(self.txx_res, savepath + '/txx_res.json')
 
-        rcParams['font.family'] = 'serif'
-        rcParams['font.sans-serif'] = 'STIX Two Text'
-        rcParams['mathtext.fontset'] = 'stix'
+        rcParams['font.family'] = "serif"
+        rcParams['font.serif'] = ["STIX Two Text"]
+        rcParams['mathtext.fontset'] = "stix"
         rcParams['font.size'] = 12
         rcParams['pdf.fonttype'] = 42
         rcParams['ps.fonttype'] = 42
@@ -1014,9 +1014,9 @@ class ggTxx(ggSignal):
 
         json_dump(self.txx_res, savepath + '/txx_res.json')
 
-        rcParams['font.family'] = 'serif'
-        rcParams['font.sans-serif'] = 'STIX Two Text'
-        rcParams['mathtext.fontset'] = 'stix'
+        rcParams['font.family'] = "serif"
+        rcParams['font.serif'] = ["STIX Two Text"]
+        rcParams['mathtext.fontset'] = "stix"
         rcParams['font.size'] = 12
         rcParams['pdf.fonttype'] = 42
         rcParams['ps.fonttype'] = 42
