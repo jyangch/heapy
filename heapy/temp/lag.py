@@ -594,9 +594,9 @@ class Lag(object):
 
         json_dump(self.lag_res, savepath + '/lag_res.json')
 
-        rcParams['font.family'] = 'serif'
-        rcParams['font.sans-serif'] = 'STIX Two Text'
-        rcParams['mathtext.fontset'] = 'stix'
+        rcParams['font.family'] = "serif"
+        rcParams['font.serif'] = ["STIX Two Text"]
+        rcParams['mathtext.fontset'] = "stix"
         rcParams['font.size'] = 12
         rcParams['pdf.fonttype'] = 42
         rcParams['ps.fonttype'] = 42
