@@ -12,19 +12,19 @@ Typical usage:
     txx.save('/output/dir')
 """
 
+import operator
 import os
 import warnings
-import operator
-import numpy as np
-import matplotlib.pyplot as plt
+
+from astropy.stats import mad_std, sigma_clip
 from matplotlib import rcParams
+import matplotlib.pyplot as plt
+import numpy as np
 from scipy.interpolate import interp1d
-from astropy.stats import sigma_clip, mad_std
 
-from ..auto.signal import pgSignal, ppSignal, ggSignal
+from ..auto.signal import ggSignal, pgSignal, ppSignal
 from ..util.data import generate_asymmetric_gaussian
-from ..util.tools import json_dump
-
+from ..util.tools import format_message, json_dump
 
 
 class pgTxx(pgSignal):
@@ -57,7 +57,6 @@ class pgTxx(pgSignal):
 
         self.pulse_res = None
         self.txx_res = None
-
 
     def find_pulse(self, p0=0.05, sigma=3, deg=None, mp=True):
         """Detect significant pulse intervals in the net light curve.
@@ -119,13 +118,11 @@ class pgTxx(pgSignal):
                 pstop.append(self.edges[i])
                 flag = False
 
-        if flag:
-            if len(pstart) > 0:
-                pstart.pop()
-        if len(pstart) > 0:
-            if pstart[0] == self.edges[0]:
-                pstart = pstart[1:]
-                pstop = pstop[1:]
+        if flag and len(pstart) > 0:
+            pstart.pop()
+        if len(pstart) > 0 and pstart[0] == self.edges[0]:
+            pstart = pstart[1:]
+            pstop = pstop[1:]
 
         if (not mp) and (len(pstart) > 0):
             if len(pstart) > 1:
@@ -138,7 +135,6 @@ class pgTxx(pgSignal):
         self.pstop = np.array(pstop)
 
         self.pulse_res = {'pstart': self.pstart, 'pstop': self.pstop}
-
 
     def mc_simulation(self, nmc):
         """Generate Monte Carlo realisations of the net count light curve.
@@ -155,10 +151,11 @@ class pgTxx(pgSignal):
         self.nsample = len(self.time)
 
         src_sample = np.random.poisson(lam=self.cts, size=(self.nmc, self.nsample))
-        bkg_sample = np.random.normal(loc=self.bcts, scale=self.bcts_err, size=(self.nmc, self.nsample))
+        bkg_sample = np.random.normal(
+            loc=self.bcts, scale=self.bcts_err, size=(self.nmc, self.nsample)
+        )
 
         self.mc_ncts = np.vstack([self.ncts, src_sample - bkg_sample])
-
 
     def calculate(self, xx=0.9, pstart=None, pstop=None, lbkg=None, rbkg=None, simple_err=False):
         """Compute Txx duration and its uncertainties for each detected pulse.
@@ -189,7 +186,8 @@ class pgTxx(pgSignal):
             are stored as instance attributes).
         """
 
-        if self.pulse_res is None: self.find_pulse()
+        if self.pulse_res is None:
+            self.find_pulse()
 
         self.xx = xx
 
@@ -225,16 +223,43 @@ class pgTxx(pgSignal):
         self.ccts = np.cumsum(self.ncts)
 
         if simple_err:
-            self.txx, self.txx1, self.txx2, \
-                self.txx_err, self.txx1_err, self.txx2_err, \
-                    self.csf, self.csf1, self.csf2, \
-                        self.csf_err, self.csf1_err, self.csf2_err \
-                            = accumcts(self.time[self.tindex], self.ccts[self.tindex], self.pstart, self.pstop, self.xx, simple_err=True)
+            (
+                self.txx,
+                self.txx1,
+                self.txx2,
+                self.txx_err,
+                self.txx1_err,
+                self.txx2_err,
+                self.csf,
+                self.csf1,
+                self.csf2,
+                self.csf_err,
+                self.csf1_err,
+                self.csf2_err,
+            ) = accumcts(
+                self.time[self.tindex],
+                self.ccts[self.tindex],
+                self.pstart,
+                self.pstop,
+                self.xx,
+                simple_err=True,
+            )
 
-            self.txx_res = {'xx': self.xx, 'txx':self.txx, 'txx1': self.txx1, 'txx2': self.txx2,
-                            'txx_err': self.txx_err, 'txx1_err': self.txx1_err, 'txx2_err': self.txx2_err,
-                            'csf': self.csf, 'csf1': self.csf1, 'csf2': self.csf2,
-                            'csf_err': self.csf_err, 'csf1_err': self.csf1_err, 'csf2_err': self.csf2_err}
+            self.txx_res = {
+                'xx': self.xx,
+                'txx': self.txx,
+                'txx1': self.txx1,
+                'txx2': self.txx2,
+                'txx_err': self.txx_err,
+                'txx1_err': self.txx1_err,
+                'txx2_err': self.txx2_err,
+                'csf': self.csf,
+                'csf1': self.csf1,
+                'csf2': self.csf2,
+                'csf_err': self.csf_err,
+                'csf1_err': self.csf1_err,
+                'csf2_err': self.csf2_err,
+            }
 
         else:
             self.mc_simulation(1000)
@@ -243,11 +268,16 @@ class pgTxx(pgSignal):
             mc_txx, mc_txx1, mc_txx2 = [], [], []
 
             for ncts in self.mc_ncts:
-
                 ccts = np.cumsum(ncts)
 
-                txx, txx1, txx2, csf, csf1, csf2 \
-                    = accumcts(self.time[self.tindex], ccts[self.tindex], self.pstart, self.pstop, self.xx, simple_err=False)
+                txx, txx1, txx2, csf, csf1, csf2 = accumcts(
+                    self.time[self.tindex],
+                    ccts[self.tindex],
+                    self.pstart,
+                    self.pstop,
+                    self.xx,
+                    simple_err=False,
+                )
 
                 mc_csf.append(csf)
                 mc_csf1.append(csf1)
@@ -297,20 +327,32 @@ class pgTxx(pgSignal):
                 txx2_err = np.diff([txx2_lo, mc_txx2[0, pi], txx2_hi])
                 self.txx2_err.append([txx2_err[0], txx2_err[1]])
 
-            self.txx_res = {'xx': self.xx, 'txx':self.txx, 'txx1': self.txx1, 'txx2': self.txx2,
-                            'txx_err': self.txx_err, 'txx1_err': self.txx1_err, 'txx2_err': self.txx2_err,
-                            'csf': self.csf, 'csf1': self.csf1, 'csf2': self.csf2}
+            self.txx_res = {
+                'xx': self.xx,
+                'txx': self.txx,
+                'txx1': self.txx1,
+                'txx2': self.txx2,
+                'txx_err': self.txx_err,
+                'txx1_err': self.txx1_err,
+                'txx2_err': self.txx2_err,
+                'csf': self.csf,
+                'csf1': self.csf1,
+                'csf2': self.csf2,
+            }
 
-        print('\n+------------------------------------------------+')
-        print(' %-5s%-10s%-8s%-8s%-8s%-8s' % ('id#', 'Txx', 'Txx-', 'Txx+', 'Txx1', 'Txx2'))
-        print('+-----------------------------------------------+')
-        _ = list(map(print, [' %-5d%-10.3f%-8.3f%-8.3f%-8.3f%-8.3f' % (i+1, t, t_err[0], t_err[1], t1, t2)
-                             for i, (t, t_err, t1, t2) in enumerate(zip(self.txx_res['txx'],
-                                                                        self.txx_res['txx_err'],
-                                                                        self.txx_res['txx1'],
-                                                                        self.txx_res['txx2']))]))
-        print('+------------------------------------------------+')
-
+        msg = [f'{"id#":<5}{"Txx":<10}{"Txx-":<8}{"Txx+":<8}{"Txx1":<8}{"Txx2":<8}'] + [
+            f'{i + 1:<5d}{t:<10.3f}{t_err[0]:<8.3f}{t_err[1]:<8.3f}{t1:<8.3f}{t2:<8.3f}'
+            for i, (t, t_err, t1, t2) in enumerate(
+                zip(
+                    self.txx_res['txx'],
+                    self.txx_res['txx_err'],
+                    self.txx_res['txx1'],
+                    self.txx_res['txx2'],
+                    strict=False,
+                )
+            )
+        ]
+        print(format_message(msg))
 
     def save(self, savepath):
         """Save Txx results and diagnostic plots to disk.
@@ -338,9 +380,9 @@ class pgTxx(pgSignal):
         json_dump(self.pulse_res, savepath + '/pulse_res.json')
         json_dump(self.txx_res, savepath + '/txx_res.json')
 
-        rcParams['font.family'] = "serif"
-        rcParams['font.serif'] = ["STIX Two Text"]
-        rcParams['mathtext.fontset'] = "stix"
+        rcParams['font.family'] = 'serif'
+        rcParams['font.serif'] = ['STIX Two Text']
+        rcParams['mathtext.fontset'] = 'stix'
         rcParams['font.size'] = 12
         rcParams['pdf.fonttype'] = 42
         rcParams['ps.fonttype'] = 42
@@ -390,7 +432,6 @@ class pgTxx(pgSignal):
         plt.close(fig)
 
 
-
 class ppTxx(ppSignal):
     """Compute Txx durations for a Poisson-source/Poisson-background light curve.
 
@@ -421,7 +462,6 @@ class ppTxx(ppSignal):
 
         self.pulse_res = None
         self.txx_res = None
-
 
     def find_pulse(self, p0=0.05, sigma=3, mp=True):
         """Detect significant pulse intervals in the net light curve.
@@ -478,13 +518,11 @@ class ppTxx(ppSignal):
                 pstop.append(self.edges[i])
                 flag = False
 
-        if flag:
-            if len(pstart) > 0:
-                pstart.pop()
-        if len(pstart) > 0:
-            if pstart[0] == self.edges[0]:
-                pstart = pstart[1:]
-                pstop = pstop[1:]
+        if flag and len(pstart) > 0:
+            pstart.pop()
+        if len(pstart) > 0 and pstart[0] == self.edges[0]:
+            pstart = pstart[1:]
+            pstop = pstop[1:]
 
         if (not mp) and (len(pstart) > 0):
             if len(pstart) > 1:
@@ -497,7 +535,6 @@ class ppTxx(ppSignal):
         self.pstop = np.array(pstop)
 
         self.pulse_res = {'pstart': self.pstart, 'pstop': self.pstop}
-
 
     def mc_simulation(self, nmc):
         """Generate Monte Carlo realisations of the net count light curve.
@@ -517,7 +554,6 @@ class ppTxx(ppSignal):
         bkg_sample = np.random.poisson(lam=self.bcts, size=(self.nmc, self.nsample))
 
         self.mc_ncts = np.vstack([self.ncts, src_sample - bkg_sample * self.backscale])
-
 
     def calculate(self, xx=0.9, pstart=None, pstop=None, lbkg=None, rbkg=None):
         """Compute Txx duration and its uncertainties for each detected pulse.
@@ -544,7 +580,8 @@ class ppTxx(ppSignal):
             are stored as instance attributes).
         """
 
-        if self.pulse_res is None: self.find_pulse()
+        if self.pulse_res is None:
+            self.find_pulse()
 
         self.xx = xx
 
@@ -585,11 +622,16 @@ class ppTxx(ppSignal):
         mc_txx, mc_txx1, mc_txx2 = [], [], []
 
         for ncts in self.mc_ncts:
-
             ccts = np.cumsum(ncts)
 
-            txx, txx1, txx2, csf, csf1, csf2 \
-                = accumcts(self.time[self.tindex], ccts[self.tindex], self.pstart, self.pstop, self.xx, simple_err=False)
+            txx, txx1, txx2, csf, csf1, csf2 = accumcts(
+                self.time[self.tindex],
+                ccts[self.tindex],
+                self.pstart,
+                self.pstop,
+                self.xx,
+                simple_err=False,
+            )
 
             mc_csf.append(csf)
             mc_csf1.append(csf1)
@@ -639,20 +681,32 @@ class ppTxx(ppSignal):
             txx2_err = np.diff([txx2_lo, mc_txx2[0, pi], txx2_hi])
             self.txx2_err.append([txx2_err[0], txx2_err[1]])
 
-        self.txx_res = {'xx': self.xx, 'txx':self.txx, 'txx1': self.txx1, 'txx2': self.txx2,
-                        'txx_err': self.txx_err, 'txx1_err': self.txx1_err, 'txx2_err': self.txx2_err,
-                        'csf': self.csf, 'csf1': self.csf1, 'csf2': self.csf2}
+        self.txx_res = {
+            'xx': self.xx,
+            'txx': self.txx,
+            'txx1': self.txx1,
+            'txx2': self.txx2,
+            'txx_err': self.txx_err,
+            'txx1_err': self.txx1_err,
+            'txx2_err': self.txx2_err,
+            'csf': self.csf,
+            'csf1': self.csf1,
+            'csf2': self.csf2,
+        }
 
-        print('\n+------------------------------------------------+')
-        print(' %-5s%-10s%-8s%-8s%-8s%-8s' % ('id#', 'Txx', 'Txx-', 'Txx+', 'Txx1', 'Txx2'))
-        print('+-----------------------------------------------+')
-        _ = list(map(print, [' %-5d%-10.3f%-8.3f%-8.3f%-8.3f%-8.3f' % (i+1, t, t_err[0], t_err[1], t1, t2)
-                                for i, (t, t_err, t1, t2) in enumerate(zip(self.txx_res['txx'],
-                                                                        self.txx_res['txx_err'],
-                                                                        self.txx_res['txx1'],
-                                                                        self.txx_res['txx2']))]))
-        print('+------------------------------------------------+')
-
+        msg = [f'{"id#":<5}{"Txx":<10}{"Txx-":<8}{"Txx+":<8}{"Txx1":<8}{"Txx2":<8}'] + [
+            f'{i + 1:<5d}{t:<10.3f}{t_err[0]:<8.3f}{t_err[1]:<8.3f}{t1:<8.3f}{t2:<8.3f}'
+            for i, (t, t_err, t1, t2) in enumerate(
+                zip(
+                    self.txx_res['txx'],
+                    self.txx_res['txx_err'],
+                    self.txx_res['txx1'],
+                    self.txx_res['txx2'],
+                    strict=False,
+                )
+            )
+        ]
+        print(format_message(msg))
 
     def save(self, savepath):
         """Save Txx results and diagnostic plots to disk.
@@ -680,9 +734,9 @@ class ppTxx(ppSignal):
         json_dump(self.pulse_res, savepath + '/pulse_res.json')
         json_dump(self.txx_res, savepath + '/txx_res.json')
 
-        rcParams['font.family'] = "serif"
-        rcParams['font.serif'] = ["STIX Two Text"]
-        rcParams['mathtext.fontset'] = "stix"
+        rcParams['font.family'] = 'serif'
+        rcParams['font.serif'] = ['STIX Two Text']
+        rcParams['mathtext.fontset'] = 'stix'
         rcParams['font.size'] = 12
         rcParams['pdf.fonttype'] = 42
         rcParams['ps.fonttype'] = 42
@@ -732,7 +786,6 @@ class ppTxx(ppSignal):
         plt.close(fig)
 
 
-
 class ggTxx(ggSignal):
     """Compute Txx durations for a Gaussian-source/Gaussian-background light curve.
 
@@ -761,7 +814,6 @@ class ggTxx(ggSignal):
 
         self.pulse_res = None
         self.txx_res = None
-
 
     def find_pulse(self, p0=0.05, sigma=3, mp=True):
         """Detect significant pulse intervals in the net light curve.
@@ -822,13 +874,11 @@ class ggTxx(ggSignal):
                 pstop.append(self.edges[i])
                 flag = False
 
-        if flag:
-            if len(pstart) > 0:
-                pstart.pop()
-        if len(pstart) > 0:
-            if pstart[0] == self.edges[0]:
-                pstart = pstart[1:]
-                pstop = pstop[1:]
+        if flag and len(pstart) > 0:
+            pstart.pop()
+        if len(pstart) > 0 and pstart[0] == self.edges[0]:
+            pstart = pstart[1:]
+            pstop = pstop[1:]
 
         if (not mp) and (len(pstart) > 0):
             if len(pstart) > 1:
@@ -841,7 +891,6 @@ class ggTxx(ggSignal):
         self.pstop = np.array(pstop)
 
         self.pulse_res = {'pstart': self.pstart, 'pstop': self.pstop}
-
 
     def mc_simulation(self, nmc):
         """Generate Monte Carlo realisations of the net count light curve.
@@ -860,7 +909,6 @@ class ggTxx(ggSignal):
         sample = np.random.normal(loc=self.ncts, scale=self.ncts_err, size=(self.nmc, self.nsample))
 
         self.mc_ncts = np.vstack([self.ncts, sample])
-
 
     def calculate(self, xx=0.9, pstart=None, pstop=None, lbkg=None, rbkg=None):
         """Compute Txx duration and its uncertainties for each detected pulse.
@@ -887,7 +935,8 @@ class ggTxx(ggSignal):
             are stored as instance attributes).
         """
 
-        if self.pulse_res is None: self.find_pulse()
+        if self.pulse_res is None:
+            self.find_pulse()
 
         self.xx = xx
 
@@ -928,11 +977,16 @@ class ggTxx(ggSignal):
         mc_txx, mc_txx1, mc_txx2 = [], [], []
 
         for ncts in self.mc_ncts:
-
             ccts = np.cumsum(ncts)
 
-            txx, txx1, txx2, csf, csf1, csf2 \
-                = accumcts(self.time[self.tindex], ccts[self.tindex], self.pstart, self.pstop, self.xx, simple_err=False)
+            txx, txx1, txx2, csf, csf1, csf2 = accumcts(
+                self.time[self.tindex],
+                ccts[self.tindex],
+                self.pstart,
+                self.pstop,
+                self.xx,
+                simple_err=False,
+            )
 
             mc_csf.append(csf)
             mc_csf1.append(csf1)
@@ -982,20 +1036,32 @@ class ggTxx(ggSignal):
             txx2_err = np.diff([txx2_lo, mc_txx2[0, pi], txx2_hi])
             self.txx2_err.append([txx2_err[0], txx2_err[1]])
 
-        self.txx_res = {'xx': self.xx, 'txx':self.txx, 'txx1': self.txx1, 'txx2': self.txx2,
-                        'txx_err': self.txx_err, 'txx1_err': self.txx1_err, 'txx2_err': self.txx2_err,
-                        'csf': self.csf, 'csf1': self.csf1, 'csf2': self.csf2}
+        self.txx_res = {
+            'xx': self.xx,
+            'txx': self.txx,
+            'txx1': self.txx1,
+            'txx2': self.txx2,
+            'txx_err': self.txx_err,
+            'txx1_err': self.txx1_err,
+            'txx2_err': self.txx2_err,
+            'csf': self.csf,
+            'csf1': self.csf1,
+            'csf2': self.csf2,
+        }
 
-        print('\n+------------------------------------------------+')
-        print(' %-5s%-10s%-8s%-8s%-8s%-8s' % ('id#', 'Txx', 'Txx-', 'Txx+', 'Txx1', 'Txx2'))
-        print('+-----------------------------------------------+')
-        _ = list(map(print, [' %-5d%-10.3f%-8.3f%-8.3f%-8.3f%-8.3f' % (i+1, t, t_err[0], t_err[1], t1, t2)
-                                for i, (t, t_err, t1, t2) in enumerate(zip(self.txx_res['txx'],
-                                                                        self.txx_res['txx_err'],
-                                                                        self.txx_res['txx1'],
-                                                                        self.txx_res['txx2']))]))
-        print('+------------------------------------------------+')
-
+        msg = [f'{"id#":<5}{"Txx":<10}{"Txx-":<8}{"Txx+":<8}{"Txx1":<8}{"Txx2":<8}'] + [
+            f'{i + 1:<5d}{t:<10.3f}{t_err[0]:<8.3f}{t_err[1]:<8.3f}{t1:<8.3f}{t2:<8.3f}'
+            for i, (t, t_err, t1, t2) in enumerate(
+                zip(
+                    self.txx_res['txx'],
+                    self.txx_res['txx_err'],
+                    self.txx_res['txx1'],
+                    self.txx_res['txx2'],
+                    strict=False,
+                )
+            )
+        ]
+        print(format_message(msg))
 
     def save(self, savepath):
         """Save Txx results and diagnostic plots to disk.
@@ -1014,9 +1080,9 @@ class ggTxx(ggSignal):
 
         json_dump(self.txx_res, savepath + '/txx_res.json')
 
-        rcParams['font.family'] = "serif"
-        rcParams['font.serif'] = ["STIX Two Text"]
-        rcParams['mathtext.fontset'] = "stix"
+        rcParams['font.family'] = 'serif'
+        rcParams['font.serif'] = ['STIX Two Text']
+        rcParams['mathtext.fontset'] = 'stix'
         rcParams['font.size'] = 12
         rcParams['pdf.fonttype'] = 42
         rcParams['ps.fonttype'] = 42
@@ -1065,7 +1131,6 @@ class ggTxx(ggSignal):
         plt.close(fig)
 
 
-
 def accumcts(time, ccts, pstart, pstop, xx, simple_err=False):
     """Compute cumulative-count-fraction levels and Txx start/stop times.
 
@@ -1111,7 +1176,7 @@ def accumcts(time, ccts, pstart, pstop, xx, simple_err=False):
         csf_err, csf1_err, csf2_err = [], [], []
         txx_err, txx1_err, txx2_err = [], [], []
 
-    for l, r in zip(np.append(time[0], pstop), np.append(pstart, time[-1])):
+    for l, r in zip(np.append(time[0], pstop), np.append(pstart, time[-1]), strict=False):
         idx = np.where((interp_time >= l) & (interp_time <= r))[0]
         if len(idx) >= 1:
             csf_i = np.mean(interp_ccts[idx])
@@ -1120,15 +1185,14 @@ def accumcts(time, ccts, pstart, pstop, xx, simple_err=False):
         csf.append(csf_i)
 
         if simple_err:
-            if len(idx) >= 1:
-                csf_err_i = np.std(interp_ccts[idx])
-            else:
-                csf_err_i = 0.0
+            csf_err_i = np.std(interp_ccts[idx]) if len(idx) >= 1 else 0.0
             csf_err.append(csf_err_i)
 
     dcsf = np.array(csf[1:]) - np.array(csf[:-1])
 
-    for pi, (l, r) in enumerate(zip(np.append(time[0], pstop[:-1]), np.append(pstart[1:], time[-1]))):
+    for pi, (l, r) in enumerate(
+        zip(np.append(time[0], pstop[:-1]), np.append(pstart[1:], time[-1]), strict=False)
+    ):
         nn = (1 - xx) / 2
         dd = dcsf[pi] * nn
 
@@ -1139,8 +1203,8 @@ def accumcts(time, ccts, pstart, pstop, xx, simple_err=False):
         csf2.append(csf2_i)
 
         if simple_err:
-            csf1_err_i = np.sqrt((1 - nn) ** 2 * csf_err[pi] ** 2 + nn ** 2 * csf_err[pi + 1] ** 2)
-            csf2_err_i = np.sqrt(nn ** 2 * csf_err[pi] ** 2 + (1 - nn) ** 2 * csf_err[pi + 1] ** 2)
+            csf1_err_i = np.sqrt((1 - nn) ** 2 * csf_err[pi] ** 2 + nn**2 * csf_err[pi + 1] ** 2)
+            csf2_err_i = np.sqrt(nn**2 * csf_err[pi] ** 2 + (1 - nn) ** 2 * csf_err[pi + 1] ** 2)
 
             csf1_err.append(csf1_err_i)
             csf2_err.append(csf2_err_i)
@@ -1170,10 +1234,22 @@ def accumcts(time, ccts, pstart, pstop, xx, simple_err=False):
             txx2_err.append([txx2_le_i, txx2_he_i])
 
     if simple_err:
-        return txx, txx1, txx2, txx_err, txx1_err, txx2_err, csf, csf1, csf2, csf_err, csf1_err, csf2_err
+        return (
+            txx,
+            txx1,
+            txx2,
+            txx_err,
+            txx1_err,
+            txx2_err,
+            csf,
+            csf1,
+            csf2,
+            csf_err,
+            csf1_err,
+            csf2_err,
+        )
     else:
         return txx, txx1, txx2, csf, csf1, csf2
-
 
 
 def find_txx(time, ccts, csf1, csf2):
@@ -1204,13 +1280,13 @@ def find_txx(time, ccts, csf1, csf2):
     for i in range(1, len(interp_time)):
         if interp_ccts[i] < csf1:
             continue
-        elif (interp_ccts[i-1] < csf1) and (interp_ccts[i] >= csf1):
+        elif (interp_ccts[i - 1] < csf1) and (interp_ccts[i] >= csf1):
             txx1 = interp_time[i]
             continue
-        elif (csf1 <= interp_ccts[i-1] < csf2) and (csf1 < interp_ccts[i] <= csf2):
+        elif (csf1 <= interp_ccts[i - 1] < csf2) and (csf1 < interp_ccts[i] <= csf2):
             continue
-        elif (csf1 < interp_ccts[i-1] <= csf2) and (interp_ccts[i] > csf2):
-            txx2 = interp_time[i-1]
+        elif (csf1 < interp_ccts[i - 1] <= csf2) and (interp_ccts[i] > csf2):
+            txx2 = interp_time[i - 1]
             break
         else:
             continue
