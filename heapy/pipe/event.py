@@ -34,7 +34,6 @@ from ..temp.txx import pgTxx
 from ..auto.signal import pgSignal
 from ..util.file import copy_file, remove_file
 from ..util.data import rebin, union
-from ..util.tools import json_dump
 from ..util.time import grid_met_to_utc, grid_utc_to_met
 from ..util.time import fermi_met_to_utc, fermi_utc_to_met
 from ..util.time import gecam_met_to_utc, gecam_utc_to_met

@@ -12,7 +12,6 @@ import re
 import shutil
 import warnings
 import numpy as np
-import subprocess as sp
 from pathlib import Path
 
 from .data import transpose_2d_matrix, pad_2d_matrix

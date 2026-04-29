@@ -22,7 +22,6 @@ from ..data.retrieve import swiftRetrieve
 from ..temp.txx import ggTxx
 from ..auto.signal import ggSignal
 from ..util.data import rebin
-from ..util.tools import json_dump
 from ..util.time import swift_met_to_utc, swift_utc_to_met
 
 

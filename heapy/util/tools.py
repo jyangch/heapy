@@ -17,6 +17,62 @@ from datetime import datetime, date
 from collections import OrderedDict
 
 
+def format_message(msg, min_width=30):
+    """Format a message as a bordered box string.
+
+    Every input is reduced to a flat list of independent lines: a
+    ``str`` is split on newlines; a list or tuple has each element
+    coerced to ``str`` and then split on newlines as well.  Each
+    resulting line is rendered as its own row, with a horizontal border
+    separating consecutive rows in addition to the top and bottom.
+
+    Args:
+        msg: The message to format.  A ``str`` is split on newlines; a
+            list or tuple has each element converted to a string and
+            also split on newlines.  Any other type is converted with
+            ``str()`` and split on newlines.
+        min_width: Minimum total width of the box interior.  Default is
+            ``30``.
+
+    Returns:
+        A multi-line string with ``+---+`` borders on top, bottom, and
+        between each line, and ``| ... |`` side borders around the
+        message content.  Returns an empty string if no non-empty lines
+        are found.
+    """
+
+    if isinstance(msg, (list, tuple)):
+        items = [str(item) for item in msg]
+    else:
+        items = [str(msg)]
+
+    lines = [
+        line.strip()
+        for item in items
+        for line in item.split('\n')
+        if line.strip()
+    ]
+
+    if not lines:
+        return ""
+
+    content_width = max(max(len(line) for line in lines) + 2, min_width)
+
+    horizontal_border = f"+{'-' * content_width}+"
+
+    separator = f"\n{horizontal_border}\n"
+    formatted_lines = separator.join(
+        f"| {line.ljust(content_width - 2)} |" for line in lines
+    )
+
+    formatted_msg = "\n".join([
+        "",
+        horizontal_border,
+        formatted_lines,
+        horizontal_border])
+
+    return formatted_msg
+
 
 class JsonEncoder(json.JSONEncoder):
     """JSON encoder that understands numpy, set, datetime, and ``todict``-ables.
