@@ -22,18 +22,27 @@ Typical usage:
 
 import os
 import warnings
-import numpy as np
-from astropy.stats import bayesian_blocks
 
-from .signal_utils import *
-from .baseline import Baseline
-from .polynomial import Polynomial, CompositePolynomial
+from astropy.stats import bayesian_blocks
+import numpy as np
+
 from ..util.data import union
 from ..util.tools import json_dump
+from .baseline import Baseline
+from .polynomial import CompositePolynomial, Polynomial
+from .signal_utils import (
+    SignalPlotter,
+    classify_bins,
+    filter_block_edges,
+    gauss_snr,
+    indices_in_intervals,
+    pg_snr,
+    plt_rc_context,
+    pp_snr,
+)
 
 
-
-class pgSignal(object):
+class pgSignal:
     """Polynomial-background signal pipeline for Poisson event lists.
 
     Two construction paths are supported. The default :meth:`__init__`
@@ -112,18 +121,23 @@ class pgSignal(object):
             self.exp = np.array(exp).astype(float)
 
         if (self.exp.size + 1) != self.bins.size:
-            raise TypeError("expected size(exp) + 1 = size(bins)")
+            raise TypeError('expected size(exp) + 1 = size(bins)')
         if not (self.exp <= self.binsize).all():
-            raise TypeError("expected exp <= binsize")
+            raise TypeError('expected exp <= binsize')
 
         self.ignore = ignore
 
         self.time = (self.lbins + self.rbins) / 2
         self.rate = self.cts / self.exp
 
-        self.ini_res = {'time': self.time, 'cts': self.cts,
-                        'rate': self.rate, 'exp': self.exp,
-                        'bins': self.bins, 'ignore': self.ignore}
+        self.ini_res = {
+            'time': self.time,
+            'cts': self.cts,
+            'rate': self.rate,
+            'exp': self.exp,
+            'bins': self.bins,
+            'ignore': self.ignore,
+        }
 
         self.base_res = None
         self.block_res = None
@@ -132,7 +146,6 @@ class pgSignal(object):
         self.poly_res = None
 
         self.obj_list = None
-
 
     @classmethod
     def frombin(cls, cts, bins, exp=None, ignore=None):
@@ -161,19 +174,18 @@ class pgSignal(object):
         bins = np.array(bins)
 
         if bins.size != (cts.size + 1):
-            raise TypeError("expected size(bins) = size(cts)+1")
+            raise TypeError('expected size(bins) = size(cts)+1')
 
         msg = 'rebuilt the time list, but may not accurate'
         warnings.warn(msg, UserWarning, stacklevel=2)
 
         chunks = []
-        for t1, t2, n in zip(bins[:-1], bins[1:], cts):
+        for t1, t2, n in zip(bins[:-1], bins[1:], cts, strict=False):
             chunks.append(np.random.random(size=int(n)) * (t2 - t1) + t1)
         ts = np.concatenate(chunks) if chunks else np.array([])
 
         sbs_ = cls(ts, bins, exp, ignore)
         return sbs_
-
 
     @classmethod
     def from_components(cls, obj_list):
@@ -206,17 +218,18 @@ class pgSignal(object):
         required = ('bcts', 'bcts_err', 'bak', 'bak_err', 'net', 'net_err')
         for obj in obj_list:
             if not isinstance(obj, pgSignal):
-                raise TypeError("expected obj_list contains pgSignal objects")
+                raise TypeError('expected obj_list contains pgSignal objects')
             missing = [a for a in required if not hasattr(obj, a)]
             if missing:
                 raise RuntimeError(
-                    "each pgSignal in obj_list must have run polyfit() first; "
-                    f"missing attributes: {missing}")
+                    'each pgSignal in obj_list must have run polyfit() first; '
+                    f'missing attributes: {missing}'
+                )
 
         base_bins = obj_list[0].bins
         for obj in obj_list[1:]:
             if not np.array_equal(obj.bins, base_bins):
-                raise ValueError("all pgSignal objects in obj_list must share the same bins")
+                raise ValueError('all pgSignal objects in obj_list must share the same bins')
 
         inst = cls.__new__(cls)
         inst.obj_list = list(obj_list)
@@ -233,12 +246,12 @@ class pgSignal(object):
         inst.rate = np.sum([obj.rate for obj in obj_list], axis=0)
 
         inst.bcts = np.sum([obj.bcts for obj in obj_list], axis=0)
-        inst.bcts_err = np.sqrt(np.sum([obj.bcts_err ** 2 for obj in obj_list], axis=0))
+        inst.bcts_err = np.sqrt(np.sum([obj.bcts_err**2 for obj in obj_list], axis=0))
         inst.bak = np.sum([obj.bak for obj in obj_list], axis=0)
-        inst.bak_err = np.sqrt(np.sum([obj.bak_err ** 2 for obj in obj_list], axis=0))
+        inst.bak_err = np.sqrt(np.sum([obj.bak_err**2 for obj in obj_list], axis=0))
 
         inst.net = np.sum([obj.net for obj in obj_list], axis=0)
-        inst.net_err = np.sqrt(np.sum([obj.net_err ** 2 for obj in obj_list], axis=0))
+        inst.net_err = np.sqrt(np.sum([obj.net_err**2 for obj in obj_list], axis=0))
 
         inst.ignore = None
 
@@ -247,15 +260,16 @@ class pgSignal(object):
         inst.block_res = None
         inst.snr_res = None
         inst.sort_res = None
-        
+
         inst.poly = CompositePolynomial([obj.poly for obj in obj_list])
-        inst.poly_res = {'bcts': inst.bcts,
-                         'bcts_err': inst.bcts_err,
-                         'bak': inst.bak,
-                         'bak_err': inst.bak_err}
+        inst.poly_res = {
+            'bcts': inst.bcts,
+            'bcts_err': inst.bcts_err,
+            'bak': inst.bak,
+            'bak_err': inst.bak_err,
+        }
 
         return inst
-
 
     def bblock(self, p0=0.05):
         """Run ``astropy.stats.bayesian_blocks`` and filter undersized gaps.
@@ -290,7 +304,6 @@ class pgSignal(object):
 
         self.block_res = {'edges': self.edges, 'nblock': self.nblock, 're_binsize': self.re_binsize}
 
-
     def basefit(self, weight=None):
         """Fit a smooth baseline via ``drpls`` to seed the first background.
 
@@ -309,15 +322,15 @@ class pgSignal(object):
         """
 
         if isinstance(getattr(self, 'poly', None), CompositePolynomial):
-            raise RuntimeError("basefit is not applicable on composite instances; "
-                               "the background is already fixed by from_components()")
+            raise RuntimeError(
+                'basefit is not applicable on composite instances; '
+                'the background is already fixed by from_components()'
+            )
 
-        if self.block_res is None: self.bblock()
+        if self.block_res is None:
+            self.bblock()
 
-        if weight is None:
-            weight = np.ones_like(self.time)
-        else:
-            weight = np.array(weight, dtype=float)
+        weight = np.ones_like(self.time) if weight is None else np.array(weight, dtype=float)
 
         if self.ignore is not None:
             ignore_idx = indices_in_intervals(self.lbins, self.rbins, self.ignore)
@@ -331,7 +344,6 @@ class pgSignal(object):
 
         self.base_res = {'bcts': self.bcts + 0, 'bak': self.bak + 0}
 
-
     def calsnr(self):
         """Integrate the background over each block and compute Poisson-Gauss SNR.
 
@@ -342,8 +354,9 @@ class pgSignal(object):
         propagation; otherwise the baseline is integrated. Populates
         :attr:`snr`, :attr:`re_snr`, and :attr:`snr_res`.
         """
-        
-        if self.block_res is None: self.bblock()
+
+        if self.block_res is None:
+            self.bblock()
 
         if self.base_res is None and self.poly_res is None:
             self.basefit()
@@ -351,15 +364,15 @@ class pgSignal(object):
         if self.poly_res is not None:
             self.re_bcts = np.zeros(self.nblock, dtype=float)
             self.re_bcts_err = np.zeros(self.nblock, dtype=float)
-            for i, (l, r) in enumerate(zip(self.edges[:-1], self.edges[1:])):
-                x = np.linspace(l, r, 100)
+            for i, (left, right) in enumerate(zip(self.edges[:-1], self.edges[1:], strict=False)):
+                x = np.linspace(left, right, 100)
                 y, y_err = self.poly.val(x)
                 self.re_bcts[i] = np.trapz(y, x)
-                self.re_bcts_err[i] = np.sqrt(np.trapz(y_err ** 2, x))
+                self.re_bcts_err[i] = np.sqrt(np.trapz(y_err**2, x))
         else:
             self.re_bcts = np.zeros(self.nblock, dtype=float)
-            for i, (l, r) in enumerate(zip(self.edges[:-1], self.edges[1:])):
-                x = np.linspace(l, r, 100)
+            for i, (left, right) in enumerate(zip(self.edges[:-1], self.edges[1:], strict=False)):
+                x = np.linspace(left, right, 100)
                 y = self.bl.val(x)
                 self.re_bcts[i] = np.trapz(y, x)
 
@@ -375,10 +388,14 @@ class pgSignal(object):
             err_i = None if re_bcts_err is None else re_bcts_err[i]
             self.re_snr[i] = pg_snr(self.re_cts[i], self.re_bcts[i], err_i)
 
-        self.snr_res = {'snr': self.snr, 're_snr': self.re_snr,
-                        'cts': self.cts, 'bcts': self.bcts,
-                        're_cts': self.re_cts, 're_bcts': self.re_bcts}
-
+        self.snr_res = {
+            'snr': self.snr,
+            're_snr': self.re_snr,
+            'cts': self.cts,
+            'bcts': self.bcts,
+            're_cts': self.re_cts,
+            're_bcts': self.re_bcts,
+        }
 
     def sorting(self, sigma=3):
         """Classify raw bins and blocks into signal/background/bad by SNR.
@@ -392,12 +409,21 @@ class pgSignal(object):
             sigma: Detection threshold in units of SNR.
         """
 
-        if self.snr_res is None: self.calsnr()
+        if self.snr_res is None:
+            self.calsnr()
 
         self.sigma = sigma
         re = classify_bins(self.re_snr, self.edges[:-1], self.edges[1:], sigma)
-        self.re_sig_idx, self.re_bkg_idx, self.re_bad_idx = re['sig_idx'], re['bkg_idx'], re['bad_idx']
-        self.re_sig_int, self.re_bkg_int, self.re_bad_int = re['sig_int'], re['bkg_int'], re['bad_int']
+        self.re_sig_idx, self.re_bkg_idx, self.re_bad_idx = (
+            re['sig_idx'],
+            re['bkg_idx'],
+            re['bad_idx'],
+        )
+        self.re_sig_int, self.re_bkg_int, self.re_bad_int = (
+            re['sig_int'],
+            re['bkg_int'],
+            re['bad_int'],
+        )
 
         bn = classify_bins(self.snr, self.lbins, self.rbins, sigma)
         self.sig_idx, self.bkg_idx, self.bad_idx = bn['sig_idx'], bn['bkg_idx'], bn['bad_idx']
@@ -408,11 +434,13 @@ class pgSignal(object):
 
         self.ignore_int = union(self.re_bad_int + self.re_sig_int)
 
-        self.sort_res = {'sigma': self.sigma, 'ignore': self.ignore_int,
-                         're_bkg': (self.re_bkg_int, self.re_bkg_idx),
-                         're_sig': (self.re_sig_int, self.re_sig_idx, self.re_sig_index),
-                         're_bad': (self.re_bad_int, self.re_bad_idx, self.re_bad_index)}
-
+        self.sort_res = {
+            'sigma': self.sigma,
+            'ignore': self.ignore_int,
+            're_bkg': (self.re_bkg_int, self.re_bkg_idx),
+            're_sig': (self.re_sig_int, self.re_sig_idx, self.re_sig_index),
+            're_bad': (self.re_bad_int, self.re_bad_idx, self.re_bad_index),
+        }
 
     def polyfit(self, deg=None):
         """Refit the background as a polynomial over non-signal bins.
@@ -432,11 +460,14 @@ class pgSignal(object):
         """
 
         if isinstance(getattr(self, 'poly', None), CompositePolynomial):
-            raise RuntimeError("polyfit is not applicable on composite instances; "
-                               "rebuild the source components instead")
+            raise RuntimeError(
+                'polyfit is not applicable on composite instances; '
+                'rebuild the source components instead'
+            )
 
         if self.ignore is None:
-            if self.sort_res is None: self.sorting()
+            if self.sort_res is None:
+                self.sorting()
             self.ignore = self.sort_res['ignore']
 
         ignore_idx = indices_in_intervals(self.lbins, self.rbins, self.ignore)
@@ -453,18 +484,19 @@ class pgSignal(object):
         self.bcts_err = self.bak_err * self.exp
 
         self.net = self.rate - self.bak
-        self.net_err = np.sqrt(self.rate / self.exp + self.bak_err ** 2)
+        self.net_err = np.sqrt(self.rate / self.exp + self.bak_err**2)
 
         self.ncts = self.net * self.exp
         self.ncts_err = self.net_err * self.exp
 
-        self.poly_res = {'deg': self.poly.best_deg,
-                         'fit': self.poly.ls_res,
-                         'bcts': self.bcts,
-                         'bcts_err': self.bcts_err,
-                         'bak': self.bak,
-                         'bak_err': self.bak_err}
-
+        self.poly_res = {
+            'deg': self.poly.best_deg,
+            'fit': self.poly.ls_res,
+            'bcts': self.bcts,
+            'bcts_err': self.bcts_err,
+            'bak': self.bak,
+            'bak_err': self.bak_err,
+        }
 
     def loop(self, p0=0.05, sigma=3, deg=None):
         """Run the full pipeline.
@@ -483,10 +515,9 @@ class pgSignal(object):
         self.bblock(p0)
         self.calsnr()
         self.sorting(sigma)
-        
+
         if not isinstance(getattr(self, 'poly', None), CompositePolynomial):
             self.polyfit(deg)
-
 
     def save(self, savepath):
         """Dump stage result dicts as JSON and write a diagnostic PDF.
@@ -519,15 +550,13 @@ class pgSignal(object):
         re_net = (self.re_cts - self.re_bcts) / self.re_binsize
         with plt_rc_context():
             fig = SignalPlotter()
-            fig.plot_curve(self.time, self.rate, self.net,
-                           bak=self.bak, bak_err=self.bak_err)
+            fig.plot_curve(self.time, self.rate, self.net, bak=self.bak, bak_err=self.bak_err)
             fig.plot_block(self.edges, re_rate, re_net)
             fig.plot_snr(self.edges, self.re_snr, self.sigma)
             fig.save(savepath + '/signal.pdf')
 
 
-
-class ppSignal(object):
+class ppSignal:
     """Detect and sort signal bins for Poisson data with Poisson background.
 
     Histograms both source and background event time-stamps onto the same
@@ -569,7 +598,7 @@ class ppSignal(object):
             TypeError: If ``exp`` and ``bins`` have mismatched sizes or any
                 exposure exceeds its bin width.
         """
-        
+
         self.ts = np.array(ts).astype(float)
         self.bts = np.array(bts).astype(float)
         self.bins = np.array(bins).astype(float)
@@ -578,7 +607,7 @@ class ppSignal(object):
         cts, _ = np.histogram(self.ts, bins=self.bins)
         self.cts = np.array(cts).astype(int)
         self.cts_err = np.sqrt(self.cts)
-        
+
         bcts, _ = np.histogram(self.bts, bins=self.bins)
         self.bcts = np.array(bcts).astype(int)
         self.bcts_err = np.sqrt(self.bcts)
@@ -592,32 +621,37 @@ class ppSignal(object):
             self.exp = np.array(exp).astype(float)
 
         if (self.exp.size + 1) != self.bins.size:
-            raise TypeError("expected size(exp) + 1 = size(bins)")
+            raise TypeError('expected size(exp) + 1 = size(bins)')
         if not (self.exp <= self.binsize).all():
-            raise TypeError("expected exp <= binsize")
-        
+            raise TypeError('expected exp <= binsize')
+
         self.time = (self.lbins + self.rbins) / 2
         self.rate = self.cts / self.exp
         self.rate_err = self.cts_err / self.exp
-        
+
         self.bak = self.bcts * self.backscale / self.exp
         self.bak_err = self.bcts_err * self.backscale / self.exp
 
         self.net = self.rate - self.bak
         self.net_err = np.sqrt(self.rate_err**2 + self.bak_err**2)
-        
+
         self.ncts = self.net * self.exp
         self.ncts_err = self.net_err * self.exp
 
-        self.ini_res = {'cts': self.cts, 'bcts': self.bcts, 
-                        'time': self.time, 'rate': self.rate, 
-                        'bak': self.bak, 'exp': self.exp, 
-                        'backscale': self.backscale, 'bins': self.bins}
+        self.ini_res = {
+            'cts': self.cts,
+            'bcts': self.bcts,
+            'time': self.time,
+            'rate': self.rate,
+            'bak': self.bak,
+            'exp': self.exp,
+            'backscale': self.backscale,
+            'bins': self.bins,
+        }
 
         self.block_res = None
         self.snr_res = None
         self.sort_res = None
-
 
     @classmethod
     def frombin(cls, cts, bcts, bins, backscale=1, exp=None):
@@ -647,25 +681,24 @@ class ppSignal(object):
         bins = np.array(bins)
 
         if bins.size != (cts.size + 1):
-            raise TypeError("expected size(bins) = size(cts)+1")
-        
+            raise TypeError('expected size(bins) = size(cts)+1')
+
         msg = 'rebuilt the time list, but may not accurate'
         warnings.warn(msg, UserWarning, stacklevel=2)
 
         ts_chunks = []
-        for t1, t2, n in zip(bins[:-1], bins[1:], cts):
+        for t1, t2, n in zip(bins[:-1], bins[1:], cts, strict=False):
             ts_chunks.append(np.random.random(size=int(n)) * (t2 - t1) + t1)
         ts = np.concatenate(ts_chunks) if ts_chunks else np.array([])
 
         bts_chunks = []
-        for t1, t2, n in zip(bins[:-1], bins[1:], bcts):
+        for t1, t2, n in zip(bins[:-1], bins[1:], bcts, strict=False):
             bts_chunks.append(np.random.random(size=int(n)) * (t2 - t1) + t1)
         bts = np.concatenate(bts_chunks) if bts_chunks else np.array([])
 
         cls_ = cls(ts, bts, bins, backscale=backscale, exp=exp)
         return cls_
-    
-    
+
     def bblock(self, p0=0.05):
         """Run ``astropy.stats.bayesian_blocks`` and filter undersized gaps.
 
@@ -682,7 +715,7 @@ class ppSignal(object):
         else:
             pos = np.where(self.cts > 0)[0]
             edges_ = bayesian_blocks(self.time[pos], self.cts[pos], fitness='events', p0=p0)
-            
+
         edges_[0] = max(edges_[0], self.time[0])
         edges_[-1] = min(edges_[-1], self.time[-1])
 
@@ -691,8 +724,7 @@ class ppSignal(object):
         self.re_binsize = self.edges[1:] - self.edges[:-1]
 
         self.block_res = {'edges': self.edges, 'nblock': self.nblock, 're_binsize': self.re_binsize}
-    
-    
+
     def calsnr(self):
         """Compute Poisson-Poisson SNR on raw bins and Bayesian blocks.
 
@@ -701,7 +733,8 @@ class ppSignal(object):
         :attr:`re_snr`, and :attr:`snr_res`.
         """
 
-        if self.block_res is None: self.bblock()
+        if self.block_res is None:
+            self.bblock()
 
         self.re_cts, _ = np.histogram(self.ts, bins=self.edges)
         self.re_bcts, _ = np.histogram(self.bts, bins=self.edges)
@@ -714,11 +747,15 @@ class ppSignal(object):
         for i in range(len(self.re_binsize)):
             self.re_snr[i] = pp_snr(self.re_cts[i], self.re_bcts[i], self.backscale)
 
-        self.snr_res = {'snr': self.snr, 're_snr': self.re_snr, 
-                        'cts': self.cts, 'bcts': self.bcts, 
-                        're_cts': self.re_cts, 're_bcts': self.re_bcts}
-        
-        
+        self.snr_res = {
+            'snr': self.snr,
+            're_snr': self.re_snr,
+            'cts': self.cts,
+            'bcts': self.bcts,
+            're_cts': self.re_cts,
+            're_bcts': self.re_bcts,
+        }
+
     def sorting(self, sigma=3):
         """Classify raw bins and blocks into signal/background/bad by SNR.
 
@@ -729,12 +766,21 @@ class ppSignal(object):
             sigma: Detection threshold in units of SNR.
         """
 
-        if self.snr_res is None: self.calsnr()
+        if self.snr_res is None:
+            self.calsnr()
 
         self.sigma = sigma
         re = classify_bins(self.re_snr, self.edges[:-1], self.edges[1:], sigma)
-        self.re_sig_idx, self.re_bkg_idx, self.re_bad_idx = re['sig_idx'], re['bkg_idx'], re['bad_idx']
-        self.re_sig_int, self.re_bkg_int, self.re_bad_int = re['sig_int'], re['bkg_int'], re['bad_int']
+        self.re_sig_idx, self.re_bkg_idx, self.re_bad_idx = (
+            re['sig_idx'],
+            re['bkg_idx'],
+            re['bad_idx'],
+        )
+        self.re_sig_int, self.re_bkg_int, self.re_bad_int = (
+            re['sig_int'],
+            re['bkg_int'],
+            re['bad_int'],
+        )
 
         bn = classify_bins(self.snr, self.lbins, self.rbins, sigma)
         self.sig_idx, self.bkg_idx, self.bad_idx = bn['sig_idx'], bn['bkg_idx'], bn['bad_idx']
@@ -743,11 +789,12 @@ class ppSignal(object):
         self.re_bad_index = indices_in_intervals(self.lbins, self.rbins, self.re_bad_int)
         self.re_sig_index = indices_in_intervals(self.lbins, self.rbins, self.re_sig_int)
 
-        self.sort_res = {'sigma': self.sigma, 
-                         're_bkg': (self.re_bkg_int, self.re_bkg_idx), 
-                         're_sig': (self.re_sig_int, self.re_sig_idx, self.re_sig_index),
-                         're_bad': (self.re_bad_int, self.re_bad_idx, self.re_bad_index)}
-
+        self.sort_res = {
+            'sigma': self.sigma,
+            're_bkg': (self.re_bkg_int, self.re_bkg_idx),
+            're_sig': (self.re_sig_int, self.re_sig_idx, self.re_sig_index),
+            're_bad': (self.re_bad_int, self.re_bad_idx, self.re_bad_index),
+        }
 
     def loop(self, p0=0.05, sigma=3):
         """Run :meth:`bblock`, :meth:`calsnr`, and :meth:`sorting` in order.
@@ -760,7 +807,6 @@ class ppSignal(object):
         self.bblock(p0)
         self.calsnr()
         self.sorting(sigma)
-
 
     def save(self, savepath):
         """Dump stage results as JSON and write a two-panel diagnostic PDF.
@@ -794,8 +840,7 @@ class ppSignal(object):
             fig.save(savepath + '/signal.pdf')
 
 
-
-class ggSignal(object):
+class ggSignal:
     """Detect and sort signal bins in Gaussian-measured light curves.
 
     Designed for data whose per-bin uncertainties are already Gaussian; do
@@ -850,23 +895,27 @@ class ggSignal(object):
             self.exp = np.array(exp).astype(float)
 
         if (self.exp.size + 1) != self.bins.size:
-            raise TypeError("expected size(exp) + 1 = size(bins)")
+            raise TypeError('expected size(exp) + 1 = size(bins)')
         if not (self.exp <= self.binsize).all():
-            raise TypeError("expected exp <= binsize")
-        
+            raise TypeError('expected exp <= binsize')
+
         self.time = (self.lbins + self.rbins) / 2
         self.rate = self.cts / self.exp
         self.rate_err = self.cts_err / self.exp
 
-        self.ini_res = {'cts': self.cts, 'cts_err': self.cts_err,
-                        'time': self.time, 'rate': self.rate, 
-                        'exp': self.exp, 'bins': self.bins}
+        self.ini_res = {
+            'cts': self.cts,
+            'cts_err': self.cts_err,
+            'time': self.time,
+            'rate': self.rate,
+            'exp': self.exp,
+            'bins': self.bins,
+        }
 
         self.block_res = None
         self.snr_res = None
         self.sort_res = None
-    
-    
+
     def bblock(self, p0=0.05):
         """Run ``astropy.stats.bayesian_blocks`` and filter undersized gaps.
 
@@ -878,7 +927,7 @@ class ggSignal(object):
         """
 
         edges_ = bayesian_blocks(self.time, self.rate, self.rate_err, fitness='measures', p0=p0)
-            
+
         edges_[0] = max(edges_[0], self.time[0])
         edges_[-1] = min(edges_[-1], self.time[-1])
 
@@ -887,8 +936,7 @@ class ggSignal(object):
         self.re_binsize = self.edges[1:] - self.edges[:-1]
 
         self.block_res = {'edges': self.edges, 'nblock': self.nblock, 're_binsize': self.re_binsize}
-    
-    
+
     def calsnr(self):
         """Compute Gaussian SNR on both raw bins and Bayesian blocks.
 
@@ -897,12 +945,15 @@ class ggSignal(object):
         :attr:`re_snr`, and :attr:`snr_res`.
         """
 
-        if self.block_res is None: self.bblock()
+        if self.block_res is None:
+            self.bblock()
 
         self.re_cts, self.re_cts_err = [], []
-        for t1, t2 in zip(self.edges[:-1], self.edges[1:]):
+        for t1, t2 in zip(self.edges[:-1], self.edges[1:], strict=False):
             self.re_cts.append(np.sum(self.cts[(self.time >= t1) & (self.time < t2)]))
-            self.re_cts_err.append(np.sqrt(np.sum(self.cts_err[(self.time >= t1) & (self.time < t2)]**2)))
+            self.re_cts_err.append(
+                np.sqrt(np.sum(self.cts_err[(self.time >= t1) & (self.time < t2)] ** 2))
+            )
         self.re_cts = np.array(self.re_cts)
         self.re_cts_err = np.array(self.re_cts_err)
 
@@ -914,10 +965,13 @@ class ggSignal(object):
         for i in range(len(self.re_binsize)):
             self.re_snr[i] = gauss_snr(self.re_cts[i], self.re_cts_err[i])
 
-        self.snr_res = {'snr': self.snr, 're_snr': self.re_snr,
-                        're_cts': self.re_cts, 're_cts_err': self.re_cts_err}
-        
-        
+        self.snr_res = {
+            'snr': self.snr,
+            're_snr': self.re_snr,
+            're_cts': self.re_cts,
+            're_cts_err': self.re_cts_err,
+        }
+
     def sorting(self, sigma=3):
         """Classify raw bins and blocks into signal/background/bad by SNR.
 
@@ -928,12 +982,21 @@ class ggSignal(object):
             sigma: Detection threshold in units of SNR.
         """
 
-        if self.snr_res is None: self.calsnr()
+        if self.snr_res is None:
+            self.calsnr()
 
         self.sigma = sigma
         re = classify_bins(self.re_snr, self.edges[:-1], self.edges[1:], sigma)
-        self.re_sig_idx, self.re_bkg_idx, self.re_bad_idx = re['sig_idx'], re['bkg_idx'], re['bad_idx']
-        self.re_sig_int, self.re_bkg_int, self.re_bad_int = re['sig_int'], re['bkg_int'], re['bad_int']
+        self.re_sig_idx, self.re_bkg_idx, self.re_bad_idx = (
+            re['sig_idx'],
+            re['bkg_idx'],
+            re['bad_idx'],
+        )
+        self.re_sig_int, self.re_bkg_int, self.re_bad_int = (
+            re['sig_int'],
+            re['bkg_int'],
+            re['bad_int'],
+        )
 
         bn = classify_bins(self.snr, self.lbins, self.rbins, sigma)
         self.sig_idx, self.bkg_idx, self.bad_idx = bn['sig_idx'], bn['bkg_idx'], bn['bad_idx']
@@ -942,11 +1005,12 @@ class ggSignal(object):
         self.re_bad_index = indices_in_intervals(self.lbins, self.rbins, self.re_bad_int)
         self.re_sig_index = indices_in_intervals(self.lbins, self.rbins, self.re_sig_int)
 
-        self.sort_res = {'sigma': self.sigma, 
-                         're_bkg': (self.re_bkg_int, self.re_bkg_idx), 
-                         're_sig': (self.re_sig_int, self.re_sig_idx, self.re_sig_index),
-                         're_bad': (self.re_bad_int, self.re_bad_idx, self.re_bad_index)}
-
+        self.sort_res = {
+            'sigma': self.sigma,
+            're_bkg': (self.re_bkg_int, self.re_bkg_idx),
+            're_sig': (self.re_sig_int, self.re_sig_idx, self.re_sig_index),
+            're_bad': (self.re_bad_int, self.re_bad_idx, self.re_bad_index),
+        }
 
     def loop(self, p0=0.05, sigma=3):
         """Run :meth:`bblock`, :meth:`calsnr`, and :meth:`sorting` in order.
@@ -959,7 +1023,6 @@ class ggSignal(object):
         self.bblock(p0)
         self.calsnr()
         self.sorting(sigma)
-
 
     def save(self, savepath):
         """Dump stage results as JSON and write a two-panel diagnostic PDF.

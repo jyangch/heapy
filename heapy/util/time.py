@@ -6,9 +6,9 @@ own reference epoch and timescale; refer to the individual function pairs for
 details.
 """
 
-import numpy as np
 from astropy.io import fits
 from astropy.time import Time, TimeDelta
+import numpy as np
 
 
 def hxmt_met_to_utc(met):
@@ -117,7 +117,7 @@ def fermi_utc_goback(utc, poshist_file):
 
     G = 6.67428e-11
     M = 5.9722e24
-    r = (np.sum(pos ** 2.0, 1)) ** (1 / 2.0)
+    r = (np.sum(pos**2.0, 1)) ** (1 / 2.0)
     r_avg = np.average(r)
     r_cubed = (r_avg) ** 3.0
     factor = r_cubed / (G * M)

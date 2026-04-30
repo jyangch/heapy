@@ -5,16 +5,17 @@ the dependency-aware memoization decorators (``memoized``,
 ``cached_property``) with content-hashed numpy fingerprinting.
 """
 
-import json
-import hashlib
-import functools
 import collections
-import numpy as np
-from io import BytesIO
-from pathlib import Path
-from itertools import islice
-from datetime import datetime, date
 from collections import OrderedDict
+from datetime import date, datetime
+import functools
+import hashlib
+from io import BytesIO
+from itertools import islice
+import json
+from pathlib import Path
+
+import numpy as np
 
 
 def format_message(msg, min_width=30):
@@ -41,35 +42,21 @@ def format_message(msg, min_width=30):
         are found.
     """
 
-    if isinstance(msg, (list, tuple)):
-        items = [str(item) for item in msg]
-    else:
-        items = [str(msg)]
+    items = [str(item) for item in msg] if isinstance(msg, (list, tuple)) else [str(msg)]
 
-    lines = [
-        line.strip()
-        for item in items
-        for line in item.split('\n')
-        if line.strip()
-    ]
+    lines = [line.strip() for item in items for line in item.split('\n') if line.strip()]
 
     if not lines:
-        return ""
+        return ''
 
     content_width = max(max(len(line) for line in lines) + 2, min_width)
 
-    horizontal_border = f"+{'-' * content_width}+"
+    horizontal_border = f'+{"-" * content_width}+'
 
-    separator = f"\n{horizontal_border}\n"
-    formatted_lines = separator.join(
-        f"| {line.ljust(content_width - 2)} |" for line in lines
-    )
+    separator = f'\n{horizontal_border}\n'
+    formatted_lines = separator.join(f'| {line.ljust(content_width - 2)} |' for line in lines)
 
-    formatted_msg = "\n".join([
-        "",
-        horizontal_border,
-        formatted_lines,
-        horizontal_border])
+    formatted_msg = '\n'.join(['', horizontal_border, formatted_lines, horizontal_border])
 
     return formatted_msg
 
@@ -143,7 +130,7 @@ class SuperDict(OrderedDict):
             real_index = key - 1
 
             if real_index < 0 or real_index >= len(self):
-                raise IndexError("index out of range")
+                raise IndexError('index out of range')
 
             actual_key = next(islice(self.keys(), real_index, None))
 
@@ -154,7 +141,8 @@ class SuperDict(OrderedDict):
 
 _WITH_MEMOIZATION = True
 _DEFAULT_CACHE_SIZE = 10
-_CACHE_ATTR_PREFIX = "_memoized_"
+_CACHE_ATTR_PREFIX = '_memoized_'
+
 
 def get_fingerprint(x):
     """Recursively build a hashable fingerprint of ``x``.
@@ -183,27 +171,24 @@ def get_fingerprint(x):
         A hashable (possibly nested) structure uniquely identifying
         ``x`` for caching purposes.
     """
-    
+
     if isinstance(x, np.ndarray):
         return (
-            "ndarray",
+            'ndarray',
             x.shape,
             x.dtype.str,
-            hashlib.blake2b(x.tobytes(), digest_size=16).digest()
+            hashlib.blake2b(x.tobytes(), digest_size=16).digest(),
         )
-        
+
     if isinstance(x, (list, tuple)):
-        return (
-            type(x).__name__, 
-            tuple(get_fingerprint(i) for i in x)
-        )
-        
+        return (type(x).__name__, tuple(get_fingerprint(i) for i in x))
+
     if isinstance(x, dict):
         return (
-            "dict",
+            'dict',
             tuple(sorted((k, get_fingerprint(v)) for k, v in x.items())),
         )
-        
+
     return x
 
 
@@ -228,26 +213,28 @@ def memoized(dep_getter=None, *, cache_size=None, verbose=False):
     """
 
     if dep_getter is None:
-        dep_getter = lambda self: None
-        
+
+        def dep_getter(self):
+            return None
+
     max_cache_size = cache_size if cache_size is not None else _DEFAULT_CACHE_SIZE
 
     def decorator(func):
-        
-        cache_attr = f"{_CACHE_ATTR_PREFIX}{func.__name__}"
+
+        cache_attr = f'{_CACHE_ATTR_PREFIX}{func.__name__}'
 
         @functools.wraps(func)
         def wrapper(self, *args, **kwargs):
 
             if not _WITH_MEMOIZATION:
                 return func(self, *args, **kwargs)
-            
+
             fingerprint = (
                 get_fingerprint(dep_getter(self)),
                 tuple(get_fingerprint(a) for a in args),
                 tuple(sorted((k, get_fingerprint(v)) for k, v in kwargs.items())),
             )
-            
+
             cache = getattr(self, cache_attr, None)
             if cache is None:
                 cache = collections.OrderedDict()
@@ -255,18 +242,18 @@ def memoized(dep_getter=None, *, cache_size=None, verbose=False):
 
             if fingerprint in cache:
                 if verbose:
-                    print(f"[{func.__name__}] hit")
+                    print(f'[{func.__name__}] hit')
                 cache.move_to_end(fingerprint)
                 return cache[fingerprint]
-            
+
             if verbose:
-                print(f"[{func.__name__}] recompute")
+                print(f'[{func.__name__}] recompute')
             result = func(self, *args, **kwargs)
-            
+
             cache[fingerprint] = result
             if len(cache) > max_cache_size:
                 cache.popitem(last=False)
-                
+
             return result
 
         return wrapper
@@ -285,7 +272,7 @@ def clear_memoized(obj, *names):
 
     if names:
         for name in names:
-            attr = f"{_CACHE_ATTR_PREFIX}{name}"
+            attr = f'{_CACHE_ATTR_PREFIX}{name}'
             if hasattr(obj, attr):
                 delattr(obj, attr)
     else:
@@ -316,29 +303,31 @@ def cached_property(dep_getter=None, *, verbose=False):
     """
 
     if dep_getter is None:
-        dep_getter = lambda self: None
-        
+
+        def dep_getter(self):
+            return None
+
     def decorator(func):
-        
+
         _MISSING = object()
-        
-        cache_attr = f"_cached_{func.__name__}"
-        dep_attr = f"_cached_dep_{func.__name__}"
-        
+
+        cache_attr = f'_cached_{func.__name__}'
+        dep_attr = f'_cached_dep_{func.__name__}'
+
         @property
         @functools.wraps(func)
         def wrapper(self):
             current_dep = get_fingerprint(dep_getter(self))
             last_dep = getattr(self, dep_attr, _MISSING)
-            
+
             if last_dep is _MISSING or last_dep != current_dep:
                 if verbose:
-                    print(f"[{func.__name__}] recompute")
+                    print(f'[{func.__name__}] recompute')
                 value = func(self)
                 setattr(self, cache_attr, value)
                 setattr(self, dep_attr, current_dep)
             elif verbose:
-                print(f"[{func.__name__}] cache hit")
+                print(f'[{func.__name__}] cache hit')
 
             return getattr(self, cache_attr)
 
@@ -358,10 +347,10 @@ def clear_cached_property(obj, *names):
 
     if names:
         for name in names:
-            for attr in (f"_cached_{name}", f"_cached_dep_{name}"):
+            for attr in (f'_cached_{name}', f'_cached_dep_{name}'):
                 if hasattr(obj, attr):
                     delattr(obj, attr)
     else:
         for attr in list(vars(obj).keys()):
-            if attr.startswith("_cached_"):
+            if attr.startswith('_cached_'):
                 delattr(obj, attr)

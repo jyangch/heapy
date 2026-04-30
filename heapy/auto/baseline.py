@@ -7,16 +7,16 @@ arbitrary abscissae via cubic spline interpolation.
 """
 
 import warnings
+
+from astropy.stats import mad_std, sigma_clip
 import numpy as np
 import pybaselines
+from scipy.interpolate import CubicSpline
 import scipy.sparse as sparse
 from scipy.sparse.linalg import spsolve
-from scipy.interpolate import CubicSpline
-from astropy.stats import sigma_clip, mad_std
 
 
-
-class Baseline(object):
+class Baseline:
     """Fit and evaluate a smooth baseline under a 1D signal.
 
     Wraps multiple baseline algorithms behind a single ``fit``/``val``
@@ -45,7 +45,6 @@ class Baseline(object):
 
         self.method = method
 
-
     @classmethod
     def set_method(cls, method='drpls'):
         """Validate ``method`` and return a configured :class:`Baseline`.
@@ -68,7 +67,6 @@ class Baseline(object):
 
         return cls(method=method)
 
-
     def fit(self, x, y, w=None, lam=None, nk=None):
         """Estimate the baseline of ``(x, y)`` using the configured method.
 
@@ -85,7 +83,7 @@ class Baseline(object):
         Raises:
             ValueError: If :attr:`method` is not a recognized algorithm.
         """
-        
+
         self.x = np.array(x).astype(float)
         self.y = np.array(y).astype(float)
 
@@ -112,13 +110,14 @@ class Baseline(object):
             mo = pybaselines.polynomial.goldindec(y, x, poly_order=3, peak_ratio=0.1, weights=w)[0]
 
         elif self.method == 'mixture':
-            mo = pybaselines.spline.mixture_model(y, p=0.001, lam=lam, diff_order=2, num_knots=nk, weights=w)[0]
+            mo = pybaselines.spline.mixture_model(
+                y, p=0.001, lam=lam, diff_order=2, num_knots=nk, weights=w
+            )[0]
 
         else:
             raise ValueError('invalid method')
 
         self.mo = mo
-
 
     def val(self, x):
         """Evaluate the fitted baseline at ``x`` via cubic spline interpolation.
@@ -134,12 +133,11 @@ class Baseline(object):
         x = np.asarray(x)
 
         if x.min() < self.x.min() or x.max() > self.x.max():
-            warnings.warn("Extrapolation may be imprecise", UserWarning, stacklevel=2)
+            warnings.warn('Extrapolation may be imprecise', UserWarning, stacklevel=2)
 
         interp = CubicSpline(self.x, self.mo, extrapolate=True)
 
         return interp(x)
-
 
     @staticmethod
     def speyediff(N, d, format='csc'):
@@ -156,19 +154,18 @@ class Baseline(object):
             A ``(N - d) x N`` sparse difference matrix.
         """
 
-        assert d >= 0, "d must be non-negative"
-        
+        assert d >= 0, 'd must be non-negative'
+
         shape = (N - d, N)
         diagonals = np.zeros(2 * d + 1)
         diagonals[d] = 1.0
-        for i in range(d):
+        for _i in range(d):
             diff = diagonals[:-1] - diagonals[1:]
             diagonals = diff
         offsets = np.arange(d + 1)
         spmat = sparse.diags(diagonals, offsets, shape, format=format)
-        
-        return spmat
 
+        return spmat
 
     def whittaker_smooth(self, y, lmbd, d, w):
         """Solve the weighted Whittaker smoothing normal equations.
@@ -197,7 +194,6 @@ class Baseline(object):
 
         return coefmat, z
 
-
     def get_smooth(self, y, w=None, d=None, lmbd=None):
         """Iteratively sigma-clip large residuals while Whittaker-smoothing.
 
@@ -222,7 +218,7 @@ class Baseline(object):
         if d is None:
             d = 3
         if lmbd is None:
-            lmbd = 10 ** (4*(np.log10(len(y))-1))
+            lmbd = 10 ** (4 * (np.log10(len(y)) - 1))
         _, z = self.whittaker_smooth(y, lmbd, d, w)
 
         cs = y - z
@@ -233,7 +229,6 @@ class Baseline(object):
             cs = y - z
 
         return z
-
 
     def _snip_core(self, y, x, w=None, d=None, lmbd=None, inte=None, pr=None, hwi=None, it=None):
         """Run the SNIP iteration core shared by :meth:`snip` and :meth:`isnip`.
@@ -257,7 +252,7 @@ class Baseline(object):
             Tuple ``(y, idx, poly_z)`` — the input ``y``, the full integer
             index array, and the cubic-fit baseline on the SNIP envelope.
         """
-        
+
         y, x = np.asarray(y), np.asarray(x)
         m = len(y)
         if w is None:
@@ -278,8 +273,9 @@ class Baseline(object):
         if it != 1:
             d1 = np.log10(hwi)
             d2 = 0
-            win = np.ceil(np.concatenate(
-                (10 ** (d1 + np.arange(it - 1) * (d2 - d1) / (it - 1)), [d2])))
+            win = np.ceil(
+                np.concatenate((10 ** (d1 + np.arange(it - 1) * (d2 - d1) / (it - 1)), [d2]))
+            )
             win = win.astype(int)
         else:
             win = np.array([hwi], dtype=int)
@@ -291,19 +287,19 @@ class Baseline(object):
 
         bsl_z = np.zeros(inte)
         for i in range(inte):
-            bsl_z[i] = z[lefts[i]:rights[i] + 1].mean()
+            bsl_z[i] = z[lefts[i] : rights[i] + 1].mean()
 
         # SNIP iteration: symmetric forward + reverse sweeps at shrinking windows
         for i in range(it):
             win0 = win[i]
             for j in range(1, inte - 1):
                 v = min(j, win0, inte - j - 1)
-                a = bsl_z[j - v:j + v + 1].mean()
+                a = bsl_z[j - v : j + v + 1].mean()
                 bsl_z[j] = min(a, bsl_z[j])
             for j in range(1, inte - 1):
                 k = inte - j - 1
                 v = min(j, win0, inte - j - 1)
-                a = bsl_z[k - v:k + v + 1].mean()
+                a = bsl_z[k - v : k + v + 1].mean()
                 bsl_z[k] = min(a, bsl_z[k])
 
         samp_x = np.concatenate(([0], samp_x, [z.size - 1]))
@@ -314,7 +310,6 @@ class Baseline(object):
         poly_z = np.polyval(poly_fit, idx)
 
         return y, idx, poly_z
-
 
     def snip(self, y, x, w=None, d=None, lmbd=None, inte=None, pr=None, hwi=None, it=None):
         """Estimate the baseline via the SNIP algorithm.
@@ -331,7 +326,6 @@ class Baseline(object):
         _, _, poly_z = self._snip_core(y, x, w, d, lmbd, inte, pr, hwi, it)
 
         return poly_z
-
 
     def isnip(self, y, x, w=None, d=None, lmbd=None, inte=None, pr=None, hwi=None, it=None):
         """Estimate the baseline via iteratively refined SNIP.

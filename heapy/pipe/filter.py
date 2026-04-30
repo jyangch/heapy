@@ -16,8 +16,7 @@ from astropy import table
 from astropy.io import fits
 
 
-
-class Filter(object):
+class Filter:
     """Apply sequential boolean filters to a photon event table.
 
     Wraps an ``astropy.table.Table`` and maintains a mutable filtered view
@@ -47,14 +46,13 @@ class Filter(object):
             AssertionError: If ``event`` is not an ``astropy.table.Table``.
         """
 
-        msg = 'evt is not the type of astropy.tabel.Table'
+        msg = 'evt is not the type of astropy.table.Table'
         assert isinstance(event, table.Table), msg
 
         self._evt = event
         self.evt = self._evt.copy()
 
         self.exprs = []
-
 
     @classmethod
     def from_fits(cls, file, idx=None):
@@ -84,13 +82,12 @@ class Filter(object):
             try:
                 evt = hdu['EVENTS']
             except KeyError:
-                raise KeyError('EVENTS extension not found!')
+                raise KeyError('EVENTS extension not found!') from None
 
         evt = table.Table.read(evt)
         hdu.close()
 
         return cls(evt)
-
 
     @property
     def tags(self):
@@ -101,7 +98,6 @@ class Filter(object):
         """
 
         return self._evt.colnames
-
 
     @property
     def base(self):
@@ -116,7 +112,6 @@ class Filter(object):
         """
 
         return {tag: self.evt[tag] for tag in self.tags}
-
 
     def info(self, tag=None):
         """Print metadata about the current filtered event table or a single column.
@@ -135,13 +130,12 @@ class Filter(object):
         if tag is None:
             print(self.evt.info)
         else:
-            msg = '%s is not one of tags' % tag
+            msg = f'{tag} is not one of tags'
             assert tag in self.tags, msg
 
             print(self.evt[tag].info)
 
         print('\n'.join(self.exprs))
-
 
     def eval(self, expr):
         """Evaluate a boolean expression and apply it as a row filter.
@@ -162,12 +156,10 @@ class Filter(object):
         """
 
         if expr is not None:
-
             flt = eval(expr, {}, self.base)
             self.evt = self.evt[flt]
 
             self.exprs.append(expr)
-
 
     def clear(self):
         """Reset ``evt`` to the original unfiltered event table.

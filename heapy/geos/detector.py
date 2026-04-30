@@ -8,18 +8,17 @@ detector in the spacecraft body frame.
 from enum import Enum
 
 
-
 class gbmDetector(Enum):
     """Enumerate all Fermi/GBM detectors with body-frame pointing angles.
 
     Each member stores the detector's long name, sequential index number, and
     its boresight direction expressed as azimuth and zenith angles (in degrees)
-    in the GBM spacecraft body frame.  The 12 NaI (N0–NB) and 2 BGO (B0–B1)
+    in the GBM spacecraft body frame.  The 12 NaI (N0-NB) and 2 BGO (B0-B1)
     scintillation detectors are included.
 
     Attributes:
         long_name: FITS-style long identifier (e.g. ``'NAI_00'``).
-        number: Sequential detector index (0–13).
+        number: Sequential detector index (0-13).
         azimuth: Boresight azimuth angle in the spacecraft frame, in degrees.
         zenith: Boresight zenith angle in the spacecraft frame, in degrees.
     """
@@ -44,16 +43,15 @@ class gbmDetector(Enum):
 
         Args:
             long_name: FITS-style long detector identifier (e.g. ``'NAI_00'``).
-            number: Sequential detector index in the range 0–13.
+            number: Sequential detector index in the range 0-13.
             azimuth: Boresight azimuth in the spacecraft body frame, in degrees.
             zenith: Boresight zenith in the spacecraft body frame, in degrees.
         """
-        
+
         self.long_name = long_name
         self.number = number
         self.azimuth = azimuth
         self.zenith = zenith
-
 
     @classmethod
     def from_name(cls, name):
@@ -71,19 +69,18 @@ class gbmDetector(Enum):
         Raises:
             ValueError: If ``name`` does not correspond to any known detector.
         """
-        
+
         if name.upper() in cls.__members__:
             return cls[name.upper()]
 
-        raise ValueError(f"Unknown detector name: {name}")
-
+        raise ValueError(f'Unknown detector name: {name}')
 
     @classmethod
     def from_index(cls, index):
         """Return the detector member matching a sequential index number.
 
         Args:
-            index: Detector index in the range 0–13.
+            index: Detector index in the range 0-13.
 
         Returns:
             The matching ``gbmDetector`` member.
@@ -91,13 +88,12 @@ class gbmDetector(Enum):
         Raises:
             ValueError: If ``index`` does not correspond to any known detector.
         """
-        
+
         for d in cls:
             if d.number == index:
                 return d
 
-        raise ValueError(f"Unknown detector index: {index}")
-
+        raise ValueError(f'Unknown detector index: {index}')
 
     @classmethod
     def get_nai(cls):
@@ -107,9 +103,8 @@ class gbmDetector(Enum):
             A list of ``gbmDetector`` members whose names begin with ``'N'``
             (N0 through NB, 12 detectors in total).
         """
-        
-        return [d for d in cls if d.name[0] == 'N']
 
+        return [d for d in cls if d.name[0] == 'N']
 
     @classmethod
     def get_bgo(cls):
@@ -119,15 +114,18 @@ class gbmDetector(Enum):
             A list of ``gbmDetector`` members whose names begin with ``'B'``
             (B0 and B1, 2 detectors in total).
         """
-        
-        return [d for d in cls if d.name[0] == 'B']
 
+        return [d for d in cls if d.name[0] == 'B']
 
     def __repr__(self):
 
-        return "Detector(name='{}', long_name='{}', number={}, azimuth={}, zenith={})".format(
-            self.name, self.long_name, self.number, self.azimuth, self.zenith)
-
+        return (
+            f"Detector(name='{self.name}', "
+            f"long_name='{self.long_name}', "
+            f'number={self.number}, '
+            f'azimuth={self.azimuth}, '
+            f'zenith={self.zenith})'
+        )
 
     def __str__(self):
 

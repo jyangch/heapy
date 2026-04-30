@@ -12,20 +12,21 @@ Typical usage:
     prob = hpx.get_probability(ra, dec)
 """
 
+import contextlib
 import os
 import re
-import numpy as np
-import healpy as hp
-from astropy.io import fits
+
 from astropy import units as u
-from matplotlib.figure import Figure
 from astropy.coordinates import angular_separation
+from astropy.io import fits
+import healpy as hp
+from matplotlib.figure import Figure
+import numpy as np
 
 from .skymap import gbmSkyMap
 
 
-
-class HealPix(object):
+class HealPix:
     """Base class for HEALPix probability maps.
 
     Stores a normalized differential probability array (``_prob``) and a
@@ -44,18 +45,15 @@ class HealPix(object):
         self._prob = np.array([], dtype=float)
         self._sig = np.array([], dtype=float)
 
-
     @property
     def prob(self):
 
         return self._prob
 
-
     @property
     def sig(self):
 
         return self._sig
-
 
     @property
     def npix(self):
@@ -63,20 +61,17 @@ class HealPix(object):
 
         return len(self.prob)
 
-
     @property
     def nside(self):
         """Return the HEALPix ``NSIDE`` resolution parameter."""
 
         return hp.npix2nside(self.npix)
 
-
     @property
     def pixel_area(self):
         """Return the solid angle of one pixel in square degrees."""
 
-        return 4.0 * 180.0 ** 2 / (np.pi * self.npix)
-
+        return 4.0 * 180.0**2 / (np.pi * self.npix)
 
     @property
     def centroid(self):
@@ -92,9 +87,8 @@ class HealPix(object):
 
         return self._phi_to_ra(phi), self._theta_to_dec(theta)
 
-
     def get_probability(self, ra, dec, density=True):
-        """Return the interpolated probability at a sky position.
+        r"""Return the interpolated probability at a sky position.
 
         Uses bilinear HEALPix interpolation (``hp.get_interp_val``).
 
@@ -119,7 +113,6 @@ class HealPix(object):
 
         return prob
 
-
     def get_confidence(self, ra, dec):
         """Return the credible level at a sky position.
 
@@ -139,7 +132,6 @@ class HealPix(object):
 
         return 1.0 - hp.get_interp_val(self.sig, theta, phi)
 
-
     def get_confidence_area(self, level):
         """Return the sky area enclosed within a given credible level.
 
@@ -155,9 +147,10 @@ class HealPix(object):
 
         return numpix * self.pixel_area
 
-
-    def get_probability_map(self, numpts_ra=360, numpts_dec=180, density=True, use_significance=False):
-        """Return a gridded probability map on a regular RA/Dec grid.
+    def get_probability_map(
+        self, numpts_ra=360, numpts_dec=180, density=True, use_significance=False
+    ):
+        r"""Return a gridded probability map on a regular RA/Dec grid.
 
         Args:
             numpts_ra: Number of grid points along the RA axis.
@@ -185,7 +178,6 @@ class HealPix(object):
                 prob_grid /= self.pixel_area
 
         return prob_grid, self._phi_to_ra(phi), self._theta_to_dec(theta)
-
 
     def get_confidence_contours(self, level, numpts_ra=360, numpts_dec=180):
         """Return contour vertex arrays at a given credible level.
@@ -222,7 +214,6 @@ class HealPix(object):
 
         return vertices
 
-
     def get_association_probability(self, ra, dec, prior=0.5):
         """Return the Bayesian association probability for a sky position.
 
@@ -258,7 +249,6 @@ class HealPix(object):
             return 0.0
 
         return numerator / denominator
-
 
     def get_overlap_association_probability(self, other_healpix, prior=0.5):
         """Return the overlap-based Bayesian association probability.
@@ -310,30 +300,25 @@ class HealPix(object):
 
         return numerator / denominator
 
-
     @staticmethod
     def _ra_to_phi(ra):
 
         return np.deg2rad(ra)
-
 
     @staticmethod
     def _phi_to_ra(phi):
 
         return np.rad2deg(phi)
 
-
     @staticmethod
     def _dec_to_theta(dec):
 
         return np.deg2rad(90.0 - dec)
 
-
     @staticmethod
     def _theta_to_dec(theta):
 
         return np.rad2deg(np.pi / 2.0 - theta)
-
 
     @staticmethod
     def _get_credible_levels(prob):
@@ -349,7 +334,6 @@ class HealPix(object):
 
         return np.clip(cls_flat.reshape(p.shape), 0.0, 1.0)
 
-
     def _assert_prob(self, prob):
 
         prob[prob < 0.0] = 0.0
@@ -357,14 +341,12 @@ class HealPix(object):
 
         return prob
 
-
     def _assert_sig(self, sig):
 
         if sig is not None:
             sig = np.clip(sig, 0.0, 1.0)
 
         return sig
-
 
     def _mesh_grid(self, num_phi, num_theta):
 
@@ -376,7 +358,6 @@ class HealPix(object):
         grid_pix = hp.ang2pix(self.nside, theta_grid, phi_grid)
 
         return grid_pix, phi, theta
-
 
 
 class gbmHealPix(HealPix):
@@ -398,13 +379,12 @@ class gbmHealPix(HealPix):
         Args:
             file: Path to the GBM HEALPix FITS file.
         """
-        
+
         super().__init__()
 
         self._file = file
 
         self._read()
-
 
     def _read(self):
 
@@ -415,17 +395,13 @@ class gbmHealPix(HealPix):
             self._prob = self._assert_prob(prob)
             self._sig = self._assert_sig(sig)
 
-        try:
+        with contextlib.suppress(KeyError):
             self._set_det_pointing()
-        except KeyError:
-            pass
-
 
     @property
     def file(self):
 
         return self._file
-
 
     @file.setter
     def file(self, new_file):
@@ -434,12 +410,10 @@ class gbmHealPix(HealPix):
 
         self._read()
 
-
     @property
     def headers(self):
 
         return self._headers
-
 
     @property
     def trigtime(self):
@@ -448,12 +422,11 @@ class gbmHealPix(HealPix):
         Returns ``None`` if the ``TRIGTIME`` keyword is absent from the
         PRIMARY header.
         """
-        
+
         try:
             return self.headers['PRIMARY']['TRIGTIME']
         except KeyError:
             return None
-
 
     @property
     def sun_location(self):
@@ -468,7 +441,6 @@ class gbmHealPix(HealPix):
         except KeyError:
             return None
 
-
     @property
     def geo_location(self):
         """Return the geocenter position as ``(ra, dec)`` in degrees.
@@ -481,7 +453,6 @@ class gbmHealPix(HealPix):
             return (self.headers['HEALPIX']['GEO_RA'], self.headers['HEALPIX']['GEO_DEC'])
         except KeyError:
             return None
-
 
     @property
     def geo_radius(self):
@@ -496,7 +467,6 @@ class gbmHealPix(HealPix):
         except KeyError:
             return 67.5
 
-
     @property
     def earth_occulted_probability(self):
         """Return the total probability occulted by the Earth.
@@ -510,7 +480,6 @@ class gbmHealPix(HealPix):
         mask, geo_mask = self._earth_mask()
 
         return np.sum(self.prob[mask][geo_mask])
-
 
     def to_fits(self, filename):
         """Write the probability map to a FITS file.
@@ -528,9 +497,15 @@ class gbmHealPix(HealPix):
         sig_arr = hp.reorder(self.sig, r2n=True)
         column_names = ['PROBABILITY', 'SIGNIFICANCE']
 
-        hp.write_map(filename, (prob_arr, sig_arr), nest=True, coord='C',
-                     overwrite=True, column_names=column_names,
-                     extra_header=self.headers['HEALPIX'].cards)
+        hp.write_map(
+            filename,
+            (prob_arr, sig_arr),
+            nest=True,
+            coord='C',
+            overwrite=True,
+            column_names=column_names,
+            extra_header=self.headers['HEALPIX'].cards,
+        )
 
         with fits.open(filename, mode='update') as hdulist:
             hdulist[0].header.extend(self.headers['PRIMARY'])
@@ -538,7 +513,6 @@ class gbmHealPix(HealPix):
             hdulist[1].header['TTYPE1'] = ('PROBABILITY', 'Differential probability per pixel')
             hdulist[1].header['TTYPE2'] = ('SIGNIFICANCE', 'Integrated probability')
             hdulist.writeto(filename, overwrite=True, checksum=True)
-
 
     def apply_earth_occultation(self):
         """Return a copy of this map with Earth-occulted pixels zeroed.
@@ -570,13 +544,13 @@ class gbmHealPix(HealPix):
         new_sig = self._assert_sig(1.0 - self._get_credible_levels(new_prob))
 
         from copy import deepcopy
+
         new_obj = deepcopy(self)
 
         new_obj._prob = new_prob
         new_obj._sig = new_sig
 
         return new_obj
-
 
     def get_association_probability(self, ra, dec, prior=0.5):
         """Return the Bayesian association probability, accounting for Earth occultation.
@@ -604,8 +578,8 @@ class gbmHealPix(HealPix):
         if self.geo_location is not None:
             geo_ra, geo_dec = self.geo_location
             angle = angular_separation(
-                ra * u.deg, dec * u.deg,
-                geo_ra * u.deg, geo_dec * u.deg).to_value(u.deg)
+                ra * u.deg, dec * u.deg, geo_ra * u.deg, geo_dec * u.deg
+            ).to_value(u.deg)
 
             if angle < self.geo_radius:
                 return 0.0
@@ -623,7 +597,6 @@ class gbmHealPix(HealPix):
             return 0.0
 
         return numerator / denominator
-
 
     def get_overlap_association_probability(self, other_healpix, prior=0.5):
         """Return the overlap-based association probability with Earth occultation applied.
@@ -675,7 +648,6 @@ class gbmHealPix(HealPix):
 
         return numerator / denominator
 
-
     def get_observable_fraction(self, other_healpix):
         """Return the fraction of ``other_healpix`` probability visible to GBM.
 
@@ -712,16 +684,15 @@ class gbmHealPix(HealPix):
 
         geo_ra, geo_dec = self.geo_location
         angle = angular_separation(
-            ra * u.deg, dec * u.deg,
-            geo_ra * u.deg, geo_dec * u.deg).to_value(u.deg)
+            ra * u.deg, dec * u.deg, geo_ra * u.deg, geo_dec * u.deg
+        ).to_value(u.deg)
 
-        visible_mask = (angle > self.geo_radius)
+        visible_mask = angle > self.geo_radius
 
         visible_prob = np.sum(prob_arr[active_mask][visible_mask])
         total_prob = np.sum(prob_arr)
 
         return visible_prob / total_prob
-
 
     def extract_skymap(self, savepath='./geometry'):
 
@@ -734,7 +705,6 @@ class gbmHealPix(HealPix):
 
         skymap.save(savepath + '/sky_map_healpix.pdf')
 
-
     def _set_det_pointing(self):
 
         keys = list(self.headers['HEALPIX'].keys())
@@ -742,13 +712,15 @@ class gbmHealPix(HealPix):
         dets = [key.split('_')[0] for key in keys if re.match(regex, key)]
 
         for det in dets:
-            setattr(self, det.lower() + '_pointing', \
-                (self.headers['HEALPIX'][det + '_RA'], self.headers['HEALPIX'][det + '_DEC']))
-
+            setattr(
+                self,
+                det.lower() + '_pointing',
+                (self.headers['HEALPIX'][det + '_RA'], self.headers['HEALPIX'][det + '_DEC']),
+            )
 
     def _earth_mask(self):
 
-        mask = (self.prob > 0.0)
+        mask = self.prob > 0.0
         theta, phi = hp.pix2ang(self.nside, np.arange(self.npix))
         ra_mask = self._phi_to_ra(phi)[mask]
         dec_mask = self._theta_to_dec(theta)[mask]
@@ -756,9 +728,9 @@ class gbmHealPix(HealPix):
         geo_ra, geo_dec = self.geo_location
 
         angle = angular_separation(
-            geo_ra * u.deg, geo_dec * u.deg,
-            ra_mask * u.deg, dec_mask * u.deg).to_value(u.deg)
+            geo_ra * u.deg, geo_dec * u.deg, ra_mask * u.deg, dec_mask * u.deg
+        ).to_value(u.deg)
 
-        geo_mask = (angle <= self.geo_radius)
+        geo_mask = angle <= self.geo_radius
 
         return mask, geo_mask

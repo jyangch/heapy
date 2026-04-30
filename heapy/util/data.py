@@ -7,9 +7,10 @@ utilities (scale, asymmetric Gaussian sampling), and LaTeX formatting
 helpers.
 """
 
-import warnings
-import numpy as np
 from itertools import zip_longest
+import warnings
+
+import numpy as np
 
 from .significance import pgsig, ppsig
 
@@ -28,7 +29,7 @@ def transpose_2d_matrix(data):
     if not data or not data[0]:
         return data
 
-    return list(map(list, zip(*data)))
+    return list(map(list, zip(*data, strict=False)))
 
 
 def pad_2d_matrix(data, fillvalue='-'):
@@ -52,10 +53,10 @@ def pad_2d_matrix(data, fillvalue='-'):
 
     try:
         transposed = zip_longest(*data, fillvalue=fillvalue)
-        padded_data = list(map(list, zip(*transposed)))
+        padded_data = list(map(list, zip(*transposed, strict=False)))
         return padded_data
     except Exception as e:
-        warnings.warn(f"Padding failed: {e}", UserWarning, stacklevel=2)
+        warnings.warn(f'Padding failed: {e}', UserWarning, stacklevel=2)
         return False
 
 
@@ -79,7 +80,7 @@ def pop_2d_matrix(data, popvalue='-'):
     try:
         return [[item for item in row if item != popvalue] for row in data]
     except Exception as e:
-        warnings.warn(f"Popping failed: {e}", UserWarning, stacklevel=2)
+        warnings.warn(f'Popping failed: {e}', UserWarning, stacklevel=2)
         return False
 
 
@@ -156,16 +157,18 @@ def union(bins):
     return res
 
 
-def rebin(bins,
-          stat,
-          cts,
-          cts_err=None,
-          bcts=None,
-          bcts_err=None,
-          min_sigma=None,
-          min_evt=None,
-          max_bin=None,
-          backscale=None):
+def rebin(
+    bins,
+    stat,
+    cts,
+    cts_err=None,
+    bcts=None,
+    bcts_err=None,
+    min_sigma=None,
+    min_evt=None,
+    max_bin=None,
+    backscale=None,
+):
     """Greedily merge adjacent bins until SNR and event thresholds are met.
 
     Adjacent bins are accumulated until the combined signal-to-noise ratio
@@ -246,8 +249,8 @@ def rebin(bins,
 
         cc += ci
         cb += bi
-        cc_err = np.sqrt(cc_err ** 2 + ci_err ** 2)
-        cb_err = np.sqrt(cb_err ** 2 + bi_err ** 2)
+        cc_err = np.sqrt(cc_err**2 + ci_err**2)
+        cb_err = np.sqrt(cb_err**2 + bi_err**2)
 
         if stat == 'gstat':
             sigma = cc / cc_err
@@ -262,7 +265,7 @@ def rebin(bins,
 
         evt = cc - cb * backscale
 
-        if ((sigma >= min_sigma) and (evt >= min_evt)) or ((j-i+1) == max_bin):
+        if ((sigma >= min_sigma) and (evt >= min_evt)) or ((j - i + 1) == max_bin):
             new_bins.append([bins[j][0], bins[i][1]])
             new_cts.append(cc)
             new_bcts.append(cb)
@@ -272,13 +275,17 @@ def rebin(bins,
             j = i + 1
             k += 1
 
-        if (i == len(bins) - 1) and ((sigma < min_sigma) or (evt < min_evt)) and (j-i+1) < max_bin:
+        if (
+            (i == len(bins) - 1)
+            and ((sigma < min_sigma) or (evt < min_evt))
+            and (j - i + 1) < max_bin
+        ):
             if k >= 1:
-                new_bins[k-1][1] = bins[i][1]
-                new_cts[k-1] = new_cts[k-1] + cc
-                new_bcts[k-1] = new_bcts[k-1] + cb
-                new_cts_err[k-1] = np.sqrt(new_cts_err[k-1] ** 2 + cc_err ** 2)
-                new_bcts_err[k-1] = np.sqrt(new_bcts_err[k-1] ** 2 + cb_err ** 2)
+                new_bins[k - 1][1] = bins[i][1]
+                new_cts[k - 1] = new_cts[k - 1] + cc
+                new_bcts[k - 1] = new_bcts[k - 1] + cb
+                new_cts_err[k - 1] = np.sqrt(new_cts_err[k - 1] ** 2 + cc_err**2)
+                new_bcts_err[k - 1] = np.sqrt(new_bcts_err[k - 1] ** 2 + cb_err**2)
             else:
                 new_bins.append([bins[j][0], bins[i][1]])
                 new_cts.append(cc)
@@ -295,15 +302,17 @@ def rebin(bins,
     return new_bins, new_cts, new_cts_err, new_bcts, new_bcts_err
 
 
-def multi_rebin(bins,
-                stat_list,
-                cts_list,
-                cts_err_list=None,
-                bcts_list=None,
-                bcts_err_list=None,
-                min_sigma_list=None,
-                min_evt_list=None,
-                backscale_list=None):
+def multi_rebin(
+    bins,
+    stat_list,
+    cts_list,
+    cts_err_list=None,
+    bcts_list=None,
+    bcts_err_list=None,
+    min_sigma_list=None,
+    min_evt_list=None,
+    backscale_list=None,
+):
     """Rebin bins by simultaneously satisfying criteria across multiple datasets.
 
     Operates like :func:`rebin` but requires every detector dataset to meet
@@ -368,7 +377,6 @@ def multi_rebin(bins,
         backscale_list = [None] * multi
 
     for n in range(multi):
-
         assert stat_list[n] in _allowed_stat, f'unsupported stat: {stat_list[n]}'
 
         if stat_list[n] == 'gstat':
@@ -399,7 +407,11 @@ def multi_rebin(bins,
         if backscale_list[n] is None:
             backscale_list[n] = 1
 
-    new_bins, new_cts_list, new_cts_err_list = [], [[] for _ in range(multi)], [[] for _ in range(multi)]
+    new_bins, new_cts_list, new_cts_err_list = (
+        [],
+        [[] for _ in range(multi)],
+        [[] for _ in range(multi)],
+    )
     new_bcts_list, new_bcts_err_list = [[] for _ in range(multi)], [[] for _ in range(multi)]
 
     j, k = 0, 0
@@ -417,13 +429,15 @@ def multi_rebin(bins,
 
             cc_list[n] = cc_list[n] + ci
             cb_list[n] = cb_list[n] + bi
-            cc_err_list[n] = np.sqrt(cc_err_list[n] ** 2 + ci_err ** 2)
-            cb_err_list[n] = np.sqrt(cb_err_list[n] ** 2 + bi_err ** 2)
+            cc_err_list[n] = np.sqrt(cc_err_list[n] ** 2 + ci_err**2)
+            cb_err_list[n] = np.sqrt(cb_err_list[n] ** 2 + bi_err**2)
 
             if stat_list[n] == 'gstat':
                 sigma = cc_list[n] / cc_err_list[n]
             elif stat_list[n] == 'pgstat':
-                sigma = pgsig(cc_list[n], cb_list[n] * backscale_list[n], cb_err_list[n] * backscale_list[n])
+                sigma = pgsig(
+                    cc_list[n], cb_list[n] * backscale_list[n], cb_err_list[n] * backscale_list[n]
+                )
             elif stat_list[n] == 'cstat':
                 sigma = ppsig(cc_list[n], cb_list[n] * backscale_list[n], 1)
             elif stat_list[n] is None:
@@ -433,7 +447,7 @@ def multi_rebin(bins,
 
             evt = cc_list[n] - cb_list[n] * backscale_list[n]
 
-            if ((sigma >= min_sigma_list[n]) and (evt >= min_evt_list[n])):
+            if (sigma >= min_sigma_list[n]) and (evt >= min_evt_list[n]):
                 rebin_flag[n] = True
 
             if (i == len(bins) - 1) and ((sigma < min_sigma_list[n]) or (evt < min_evt_list[n])):
@@ -456,11 +470,15 @@ def multi_rebin(bins,
         if True in last_flag:
             if k >= 1:
                 for n in range(multi):
-                    new_bins[k-1][1] = bins[i][1]
-                    new_cts_list[n][k-1] = new_cts_list[n][k-1] + cc_list[n]
-                    new_bcts_list[n][k-1] = new_bcts_list[n][k-1] + cb_list[n]
-                    new_cts_err_list[n][k-1] = np.sqrt(new_cts_err_list[n][k-1] ** 2 + cc_err_list[n] ** 2)
-                    new_bcts_err_list[n][k-1] = np.sqrt(new_bcts_err_list[n][k-1] ** 2 + cb_err_list[n] ** 2)
+                    new_bins[k - 1][1] = bins[i][1]
+                    new_cts_list[n][k - 1] = new_cts_list[n][k - 1] + cc_list[n]
+                    new_bcts_list[n][k - 1] = new_bcts_list[n][k - 1] + cb_list[n]
+                    new_cts_err_list[n][k - 1] = np.sqrt(
+                        new_cts_err_list[n][k - 1] ** 2 + cc_err_list[n] ** 2
+                    )
+                    new_bcts_err_list[n][k - 1] = np.sqrt(
+                        new_bcts_err_list[n][k - 1] ** 2 + cb_err_list[n] ** 2
+                    )
             else:
                 for n in range(multi):
                     new_cts_list[n].append(cc_list[n])
@@ -511,7 +529,7 @@ def split_bool_mask(mask, times, selection_value=False):
         start_idx = boundaries[i]
         if mask[start_idx] == selection_value:
             t_start = times[start_idx]
-            t_stop = times[boundaries[i+1] - 1]
+            t_stop = times[boundaries[i + 1] - 1]
             segs.append((t_start, t_stop))
 
     return segs
@@ -564,19 +582,18 @@ def format_err_latex(value, low, upp, precision=2):
         matplotlib labels or LaTeX documents.
     """
 
-    v, l, u = map(np.longdouble, [value, low, upp])
+    va, lo, up = map(np.longdouble, [value, low, upp])
 
-    if v == 0:
-        return f"${0:.{precision}f}_{{-{l:.{precision}f}}}^{{+{u:.{precision}f}}}$"
+    if va == 0:
+        return f'${0:.{precision}f}_{{-{lo:.{precision}f}}}^{{+{up:.{precision}f}}}$'
 
-    exponent = int(np.floor(np.log10(np.abs(v))))
-    factor = 10.0 ** exponent
+    exponent = int(np.floor(np.log10(np.abs(va))))
+    factor = 10.0**exponent
 
-    v_s, l_s, u_s = v / factor, l / factor, u / factor
+    v_s, l_s, u_s = va / factor, lo / factor, up / factor
 
-    fmt = f".{precision}f"
-    return (f"${v_s:{fmt}}_{{-{l_s:{fmt}}}}^{{+{u_s:{fmt}}}}"
-            f"\\times 10^{{{exponent}}}$")
+    fmt = f'.{precision}f'
+    return f'${v_s:{fmt}}_{{-{l_s:{fmt}}}}^{{+{u_s:{fmt}}}}\\times 10^{{{exponent}}}$'
 
 
 def escape_latex_chars(text):
@@ -620,14 +637,14 @@ def get_items_by_idx(data, indices):
     """
 
     if not isinstance(data, (list, tuple, np.ndarray)):
-        raise TypeError(f"Expected data to be a sequence, got {type(data)}")
+        raise TypeError(f'Expected data to be a sequence, got {type(data)}')
     if not isinstance(indices, (list, tuple, np.ndarray)):
-        raise TypeError(f"Expected indices to be a sequence, got {type(indices)}")
+        raise TypeError(f'Expected indices to be a sequence, got {type(indices)}')
 
     try:
         return np.asanyarray(data)[np.asanyarray(indices)].tolist()
-    except IndexError:
-        raise [data[i] for i in indices]
+    except IndexError as exc:
+        raise IndexError([data[i] for i in indices]) from exc
 
 
 def generate_asymmetric_gaussian(mean, std_left, std_right, size):
