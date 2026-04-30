@@ -12,18 +12,18 @@ Typical usage:
     tte_file = rtv.rtv_res['tte']['n0']
 """
 
-import os
 import gzip
+import os
 import shutil
 import warnings
-import pandas as pd
+
 from astropy.time import Time, TimeDelta
+import pandas as pd
 
 from .filefinder import FileFinder
 
 
-
-class Retrieve(object):
+class Retrieve:
     """Base container for mission data retrieval results.
 
     Stores the dictionary returned by a ``from_*`` factory method and
@@ -45,7 +45,6 @@ class Retrieve(object):
         self.rtv_res = rtv_res
 
 
-
 class gbmRetrieve(Retrieve):
     """Retrieve Fermi GBM data files for a burst or a UTC time window.
 
@@ -62,7 +61,6 @@ class gbmRetrieve(Retrieve):
         """
 
         super().__init__(rtv_res)
-
 
     @classmethod
     def from_burst(cls, burstid, datapath=None, skip_tte=False, skip_healpix=False):
@@ -94,13 +92,14 @@ class gbmRetrieve(Retrieve):
         year = '20' + burstid[2:4]
 
         local_dir = datapath + '/' + year + '/' + burstid + '/current'
-        if not os.path.isdir(local_dir): os.makedirs(local_dir)
+        if not os.path.isdir(local_dir):
+            os.makedirs(local_dir)
 
         ftp_url = dataurl + '/' + year + '/' + burstid + '/current'
 
         ff = FileFinder(local_dir=local_dir, ftp_url=ftp_url)
 
-        dets = ['n0','n1','n2','n3','n4','n5','n6','n7','n8','n9','na','nb','b0','b1']
+        dets = ['n0', 'n1', 'n2', 'n3', 'n4', 'n5', 'n6', 'n7', 'n8', 'n9', 'na', 'nb', 'b0', 'b1']
         tte_dict = {}
 
         if not skip_tte:
@@ -116,13 +115,11 @@ class gbmRetrieve(Retrieve):
         else:
             healpix = None
 
-        rtv_res = {'burstid': burstid, 'datapath': datapath,
-                   'tte': tte_dict, 'healpix': healpix}
+        rtv_res = {'burstid': burstid, 'datapath': datapath, 'tte': tte_dict, 'healpix': healpix}
 
         rtv = cls(rtv_res)
 
         return rtv
-
 
     @classmethod
     def from_utc(cls, utc, t1, t2, datapath=None, skip_tte=False, skip_poshist=False):
@@ -161,7 +158,7 @@ class gbmRetrieve(Retrieve):
 
         ff = FileFinder(local_dir=datapath, ftp_url=dataurl)
 
-        if isinstance(utc, Time) == False:
+        if not isinstance(utc, Time):
             utc = Time(utc, format='isot', scale='utc')
 
         t1 = TimeDelta(t1, format='sec')
@@ -173,8 +170,8 @@ class gbmRetrieve(Retrieve):
         year_start, month_start, day_start, hour_start = list(tstart.ymdhms)[:4]
         year_stop, month_stop, day_stop, hour_stop = list(tstop.ymdhms)[:4]
 
-        start = '%d-%02d-%02d %02d' % (year_start, month_start, day_start, hour_start)+':00:00'
-        stop = '%d-%02d-%02d %02d' % (year_stop, month_stop, day_stop, hour_stop) + ':00:00'
+        start = f'{year_start:01d}-{month_start:02d}-{day_start:02d} {hour_start:02d}:00:00'
+        stop = f'{year_stop:01d}-{month_stop:02d}-{day_stop:02d} {hour_stop:02d}:00:00'
         dates_perH = pd.date_range(start, stop, freq='h')
         dates_perD = pd.date_range(start[:10], stop[:10], freq='D')
 
@@ -183,18 +180,19 @@ class gbmRetrieve(Retrieve):
             warnings.warn(msg, UserWarning, stacklevel=2)
 
         poshist_list = []
-        dets = ['n0','n1','n2','n3','n4','n5','n6','n7','n8','n9','na','nb','b0','b1']
-        tte_dict = {det:[] for det in dets}
+        dets = ['n0', 'n1', 'n2', 'n3', 'n4', 'n5', 'n6', 'n7', 'n8', 'n9', 'na', 'nb', 'b0', 'b1']
+        tte_dict = {det: [] for det in dets}
 
         if not skip_tte:
             for date in dates_perH:
-                year = '%d' % date.year
-                month = '%.2d' % date.month
-                day = '%.2d' % date.day
-                hour = '%.2d' % date.hour
+                year = f'{date.year:d}'
+                month = f'{date.month:02d}'
+                day = f'{date.day:02d}'
+                hour = f'{date.hour:02d}'
 
                 local_dir = datapath + '/' + year + '/' + month + '/' + day + '/current'
-                if not os.path.isdir(local_dir): os.makedirs(local_dir)
+                if not os.path.isdir(local_dir):
+                    os.makedirs(local_dir)
 
                 ftp_url = dataurl + '/' + year + '/' + month + '/' + day + '/current'
 
@@ -202,18 +200,21 @@ class gbmRetrieve(Retrieve):
                 ff.ftp_url = ftp_url
 
                 for det in dets:
-                    tte_feature = 'glg_tte_' + det + '_' + year[-2:] + month + day + '_' + hour + 'z_v*fit.gz'
+                    tte_feature = (
+                        'glg_tte_' + det + '_' + year[-2:] + month + day + '_' + hour + 'z_v*fit.gz'
+                    )
                     tte_file = ff.find(tte_feature)
                     tte_dict[det].append(tte_file[-1] if tte_file else None)
 
         if not skip_poshist:
             for date in dates_perD:
-                year = '%d' % date.year
-                month = '%.2d' % date.month
-                day = '%.2d' % date.day
+                year = f'{date.year:d}'
+                month = f'{date.month:02d}'
+                day = f'{date.day:02d}'
 
                 local_dir = datapath + '/' + year + '/' + month + '/' + day + '/current'
-                if not os.path.isdir(local_dir): os.makedirs(local_dir)
+                if not os.path.isdir(local_dir):
+                    os.makedirs(local_dir)
 
                 ftp_url = dataurl + '/' + year + '/' + month + '/' + day + '/current'
 
@@ -224,13 +225,18 @@ class gbmRetrieve(Retrieve):
                 poshist_file = ff.find(poshist_feature)
                 poshist_list.append(poshist_file[-1] if poshist_file else None)
 
-        rtv_res = {'utc': utc.value, 't1': t1.value, 't2': t2.value, 'datapath': datapath,
-                   'tte': tte_dict, 'poshist': poshist_list}
+        rtv_res = {
+            'utc': utc.value,
+            't1': t1.value,
+            't2': t2.value,
+            'datapath': datapath,
+            'tte': tte_dict,
+            'poshist': poshist_list,
+        }
 
         rtv = cls(rtv_res)
 
         return rtv
-
 
 
 class gecamRetrieve(Retrieve):
@@ -248,7 +254,6 @@ class gecamRetrieve(Retrieve):
         """
 
         super().__init__(rtv_res)
-
 
     @classmethod
     def from_burst(cls, burstid, datapath=None):
@@ -296,14 +301,18 @@ class gecamRetrieve(Retrieve):
         posatt_file = ff.find(posatt_feature)
         posatt = posatt_file[-1] if posatt_file else None
 
-        rtv_res = {'burstid': burstid, 'datapath': datapath,
-                   'grd_evt': grd_evt, 'grd_bspec': grd_bspec,
-                   'grd_btime': grd_btime, 'posatt': posatt}
+        rtv_res = {
+            'burstid': burstid,
+            'datapath': datapath,
+            'grd_evt': grd_evt,
+            'grd_bspec': grd_bspec,
+            'grd_btime': grd_btime,
+            'posatt': posatt,
+        }
 
         rtv = cls(rtv_res)
 
         return rtv
-
 
     @classmethod
     def from_utc(cls, utc, t1, t2, datapath=None):
@@ -337,7 +346,7 @@ class gecamRetrieve(Retrieve):
 
         ff = FileFinder(local_dir=datapath)
 
-        if isinstance(utc, Time) == False:
+        if not isinstance(utc, Time):
             utc = Time(utc, format='isot', scale='utc')
 
         t1 = TimeDelta(t1, format='sec')
@@ -349,8 +358,8 @@ class gecamRetrieve(Retrieve):
         year_start, month_start, day_start, hour_start = list(tstart.ymdhms)[:4]
         year_stop, month_stop, day_stop, hour_stop = list(tstop.ymdhms)[:4]
 
-        start = '%d-%02d-%02d %02d' % (year_start, month_start, day_start, hour_start)+':00:00'
-        stop = '%d-%02d-%02d %02d' % (year_stop, month_stop, day_stop, hour_stop) + ':00:00'
+        start = f'{year_start:d}-{month_start:02d}-{day_start:02d} {hour_start:02d}:00:00'
+        stop = f'{year_stop:d}-{month_stop:02d}-{day_stop:02d} {hour_stop:02d}:00:00'
         dates_perH = pd.date_range(start, stop, freq='h')
 
         if len(dates_perH) > 2:
@@ -363,10 +372,10 @@ class gecamRetrieve(Retrieve):
         posatt_list = []
 
         for date in dates_perH:
-            year = '%d' % date.year
-            month = '%.2d' % date.month
-            day = '%.2d' % date.day
-            hour = '%.2d' % date.hour
+            year = f'{date.year:d}'
+            month = f'{date.month:02d}'
+            day = f'{date.day:02d}'
+            hour = f'{date.hour:02d}'
 
             grd_evt_local_dir = datapath + '/' + year + '/' + month + '/' + day + '/GECAM_B/GRD_evt'
             ff.local_dir = grd_evt_local_dir
@@ -374,32 +383,42 @@ class gecamRetrieve(Retrieve):
             grd_evt_file = ff.find(grd_evt_feature)
             grd_evt_list.append(grd_evt_file[-1] if grd_evt_file else None)
 
-            grd_bspec_local_dir = datapath + '/' + year + '/' + month + '/' + day + '/GECAM_B/GRD_bspec'
+            grd_bspec_local_dir = (
+                datapath + '/' + year + '/' + month + '/' + day + '/GECAM_B/GRD_bspec'
+            )
             ff.local_dir = grd_bspec_local_dir
             grd_bspec_feature = '*g_bspec_' + year[-2:] + month + day + '_' + hour + '*'
             grd_bspec_file = ff.find(grd_bspec_feature)
             grd_bspec_list.append(grd_bspec_file[-1] if grd_bspec_file else None)
 
-            grd_btime_local_dir = datapath + '/' + year + '/' + month + '/' + day + '/GECAM_B/GRD_btime'
+            grd_btime_local_dir = (
+                datapath + '/' + year + '/' + month + '/' + day + '/GECAM_B/GRD_btime'
+            )
             ff.local_dir = grd_btime_local_dir
             grd_btime_feature = '*g_btime_' + year[-2:] + month + day + '_' + hour + '*'
             grd_btime_file = ff.find(grd_btime_feature)
             grd_btime_list.append(grd_btime_file[-1] if grd_btime_file else None)
 
-            posatt_local_dir = datapath+ '/' + year + '/' + month + '/' + day + '/GECAM_B/posatt'
+            posatt_local_dir = datapath + '/' + year + '/' + month + '/' + day + '/GECAM_B/posatt'
             ff.local_dir = posatt_local_dir
             posatt_feature = '*_posatt_' + year[-2:] + month + day + '_' + hour + '*'
             posatt_file = ff.find(posatt_feature)
             posatt_list.append(posatt_file[-1] if posatt_file else None)
 
-        rtv_res = {'utc': utc.value, 't1': t1.value, 't2': t2.value, 'datapath': datapath,
-                   'grd_evt': grd_evt_list, 'grd_bspec': grd_bspec_list,
-                   'grd_btime': grd_btime_list, 'posatt': posatt_list}
+        rtv_res = {
+            'utc': utc.value,
+            't1': t1.value,
+            't2': t2.value,
+            'datapath': datapath,
+            'grd_evt': grd_evt_list,
+            'grd_bspec': grd_bspec_list,
+            'grd_btime': grd_btime_list,
+            'posatt': posatt_list,
+        }
 
         rtv = cls(rtv_res)
 
         return rtv
-
 
 
 class gridRetrieve(Retrieve):
@@ -417,7 +436,6 @@ class gridRetrieve(Retrieve):
         """
 
         super().__init__(rtv_res)
-
 
     @classmethod
     def from_utc(cls, utc, t1, t2, det, datapath=None):
@@ -454,7 +472,7 @@ class gridRetrieve(Retrieve):
 
         ff = FileFinder(local_dir=datapath)
 
-        if isinstance(utc, Time) == False:
+        if not isinstance(utc, Time):
             utc = Time(utc, format='isot', scale='utc')
 
         t1 = TimeDelta(t1, format='sec')
@@ -466,23 +484,23 @@ class gridRetrieve(Retrieve):
         year_start, month_start, day_start, hour_start = list(tstart.ymdhms)[:4]
         year_stop, month_stop, day_stop, hour_stop = list(tstop.ymdhms)[:4]
 
-        start = '%d-%02d-%02d %02d' % (year_start, month_start, day_start, hour_start)+':00:00'
-        stop = '%d-%02d-%02d %02d' % (year_stop, month_stop, day_stop, hour_stop) + ':00:00'
+        start = f'{year_start:d}-{month_start:02d}-{day_start:02d} {hour_start:02d}:00:00'
+        stop = f'{year_stop:d}-{month_stop:02d}-{day_stop:02d} {hour_stop:02d}:00:00'
         dates_perD = pd.date_range(start, stop, freq='D')
 
         if len(dates_perD) > 2:
             msg = 'the time range is too long'
             warnings.warn(msg, UserWarning, stacklevel=2)
 
-        dets = ['%d' % i for i in range(0, 4)]
-        assert det in dets, 'invalid detector: %s' % det
+        dets = [f'{i:d}' for i in range(0, 4)]
+        assert det in dets, f'invalid detector: {det}'
         tte_list = []
         rsp_list = []
 
         for date in dates_perD:
-            year = '%d' % date.year
-            month = '%.2d' % date.month
-            day = '%.2d' % date.day
+            year = f'{date.year:d}'
+            month = f'{date.month:02d}'
+            day = f'{date.day:02d}'
 
             tte_local_dir = datapath + '/' + year + '/' + month + '/' + day
             ff.local_dir = tte_local_dir
@@ -496,13 +514,19 @@ class gridRetrieve(Retrieve):
             rsp_file = ff.find(rsp_feature)
             rsp_list.append(rsp_file[-1] if rsp_file else None)
 
-        rtv_res = {'utc': utc.value, 't1': t1.value, 't2': t2.value, 'det': det,
-                   'datapath': datapath, 'tte': tte_list, 'rsp': rsp_list}
+        rtv_res = {
+            'utc': utc.value,
+            't1': t1.value,
+            't2': t2.value,
+            'det': det,
+            'datapath': datapath,
+            'tte': tte_list,
+            'rsp': rsp_list,
+        }
 
         rtv = cls(rtv_res)
 
         return rtv
-
 
 
 class epRetrieve(Retrieve):
@@ -521,7 +545,6 @@ class epRetrieve(Retrieve):
         """
 
         super().__init__(rtv_res)
-
 
     @classmethod
     def from_wxtobs(cls, obsid, srcid, datapath=None):
@@ -577,23 +600,29 @@ class epRetrieve(Retrieve):
         reg = reg_file[-1] if reg_file else None
 
         if reg is None:
-
             reg = bkreg[:-6] + '.reg'
 
-            with open(bkreg, 'r') as f_obj:
+            with open(bkreg) as f_obj:
                 items = f_obj.readlines()[0].split()
 
             with open(reg, 'w') as f_obj:
                 f_obj.write('circle ' + items[1] + ' 67)')
 
-        rtv_res = {'satelite': 'WXT', 'obsid': obsid, 'srcid': srcid,
-                   'evt': evt, 'rmf': rmf, 'arf': arf,
-                   'armreg': armreg, 'reg': reg, 'bkreg': bkreg}
+        rtv_res = {
+            'satelite': 'WXT',
+            'obsid': obsid,
+            'srcid': srcid,
+            'evt': evt,
+            'rmf': rmf,
+            'arf': arf,
+            'armreg': armreg,
+            'reg': reg,
+            'bkreg': bkreg,
+        }
 
         rtv = cls(rtv_res)
 
         return rtv
-
 
     @classmethod
     def from_fxtobs(cls, obsid, module, datapath=None):
@@ -656,13 +685,20 @@ class epRetrieve(Retrieve):
         bkreg_file = ff.find(bkreg_feature)
         bkreg = bkreg_file[-1] if bkreg_file else None
 
-        rtv_res = {'satelite': 'FXT', 'obsid': obsid, 'module': module,
-                   'evt': evt, 'rmf': rmf, 'arf': arf, 'reg': reg, 'bkreg': bkreg}
+        rtv_res = {
+            'satelite': 'FXT',
+            'obsid': obsid,
+            'module': module,
+            'evt': evt,
+            'rmf': rmf,
+            'arf': arf,
+            'reg': reg,
+            'bkreg': bkreg,
+        }
 
         rtv = cls(rtv_res)
 
         return rtv
-
 
     @classmethod
     def from_fxtsrc(cls, obsid, module, datapath=None):
@@ -715,15 +751,21 @@ class epRetrieve(Retrieve):
         arf_file = ff.find(arf_feature)
         arf = arf_file[-1] if arf_file else None
 
-        rtv_res = {'satelite': 'FXT', 'obsid': obsid, 'module': module,
-                   'src_evt': src_evt, 'bkg_evt': bkg_evt,
-                   'src_spec': src_spec, 'bkg_spec': bkg_spec,
-                   'rmf': rmf, 'arf': arf}
+        rtv_res = {
+            'satelite': 'FXT',
+            'obsid': obsid,
+            'module': module,
+            'src_evt': src_evt,
+            'bkg_evt': bkg_evt,
+            'src_spec': src_spec,
+            'bkg_spec': bkg_spec,
+            'rmf': rmf,
+            'arf': arf,
+        }
 
         rtv = cls(rtv_res)
 
         return rtv
-
 
 
 class swiftRetrieve(Retrieve):
@@ -742,7 +784,6 @@ class swiftRetrieve(Retrieve):
         """
 
         super().__init__(rtv_res)
-
 
     @classmethod
     def from_xrtobs(cls, obsid, mode, datapath=None):
@@ -784,9 +825,8 @@ class swiftRetrieve(Retrieve):
         evt = evtgz[:-3]
 
         if not os.path.exists(evt):
-            with gzip.open(evtgz, 'rb') as f_in:
-                with open(evt, 'wb') as f_out:
-                    shutil.copyfileobj(f_in, f_out)
+            with gzip.open(evtgz, 'rb') as f_in, open(evt, 'wb') as f_out:
+                shutil.copyfileobj(f_in, f_out)
 
         bkreg_feature = f'sw{obsid}x{mode}*pobk.reg'
         bkreg_file = ff.find(bkreg_feature)
@@ -806,13 +846,20 @@ class swiftRetrieve(Retrieve):
         att_file = ff.find(att_feature)
         att = att_file[-1] if att_file else None
 
-        rtv_res = {'satelite': 'XRT', 'obsid': obsid, 'mode': mode,
-                   'evt': evt, 'reg': reg, 'bkreg': bkreg, 'xhd': xhd, 'att': att}
+        rtv_res = {
+            'satelite': 'XRT',
+            'obsid': obsid,
+            'mode': mode,
+            'evt': evt,
+            'reg': reg,
+            'bkreg': bkreg,
+            'xhd': xhd,
+            'att': att,
+        }
 
         rtv = cls(rtv_res)
 
         return rtv
-
 
     @classmethod
     def from_batobs(cls, obsid, datapath=None):
@@ -846,9 +893,8 @@ class swiftRetrieve(Retrieve):
         ufevt = ufevtgz[:-3]
 
         if not os.path.exists(ufevt):
-            with gzip.open(ufevtgz, 'rb') as f_in:
-                with open(ufevt, 'wb') as f_out:
-                    shutil.copyfileobj(f_in, f_out)
+            with gzip.open(ufevtgz, 'rb') as f_in, open(ufevt, 'wb') as f_out:
+                shutil.copyfileobj(f_in, f_out)
 
         ff = FileFinder(local_dir=local_dir + '/bat/hk')
         caldb_feature = 'sw*bgocb.hk.gz'
@@ -870,9 +916,15 @@ class swiftRetrieve(Retrieve):
         aux_file = ff.find(aux_feature)
         aux = aux_file[-1] if aux_file else None
 
-        rtv_res = {'satelite': 'BAT', 'obsid': obsid,
-                   'ufevt': ufevt, 'caldb': caldb,
-                   'detmask': detmask, 'att': att, 'aux': aux}
+        rtv_res = {
+            'satelite': 'BAT',
+            'obsid': obsid,
+            'ufevt': ufevt,
+            'caldb': caldb,
+            'detmask': detmask,
+            'att': att,
+            'aux': aux,
+        }
 
         rtv = cls(rtv_res)
 

@@ -7,12 +7,12 @@ spacecraft body frame and the GCRS sky frame using quaternion attitude data.
 """
 
 import os
-import numpy as np
-from astropy.time import Time
-from astropy import units as u
-from scipy.spatial.transform import Rotation
-from astropy.coordinates import GCRS, ITRS, CartesianRepresentation, EarthLocation, SkyCoord
 
+from astropy import units as u
+from astropy.coordinates import GCRS, ITRS, CartesianRepresentation, EarthLocation, SkyCoord
+from astropy.time import Time
+import numpy as np
+from scipy.spatial.transform import Rotation
 
 
 def gcrs_to_itrs(scpos, utc, utc_format='isot'):
@@ -46,17 +46,15 @@ def gcrs_to_itrs(scpos, utc, utc_format='isot'):
     scpos_arr = np.asarray(scpos)
     utc_arr = np.asarray(utc)
 
-    if scpos_arr.ndim == 1 \
-        and utc_arr.ndim == 0 \
-            and scpos_arr.shape[0] == 3:
+    if scpos_arr.ndim == 1 and utc_arr.ndim == 0 and scpos_arr.shape[0] == 3:
         batch = False
-    elif scpos_arr.ndim == 2 \
-        and utc_arr.ndim == 1 \
-            and scpos_arr.shape[1] == 3:
+    elif scpos_arr.ndim == 2 and utc_arr.ndim == 1 and scpos_arr.shape[1] == 3:
         batch = True
     else:
-        raise ValueError('Invalid input shapes: scpos should be (3,) or (N, 3), \
-            utc should be scalar or (N,)')
+        raise ValueError(
+            'Invalid input shapes: scpos should be (3,) or (N, 3), \
+            utc should be scalar or (N,)'
+        )
 
     scpos_arr = np.atleast_2d(scpos_arr)
     utc_arr = np.atleast_1d(utc_arr)
@@ -66,20 +64,15 @@ def gcrs_to_itrs(scpos, utc, utc_format='isot'):
 
     t = Time(utc_arr, format=utc_format, scale='utc')
     cart_gcrs = CartesianRepresentation(
-        x=scpos_arr[:, 0],
-        y=scpos_arr[:, 1],
-        z=scpos_arr[:, 2],
-        unit=u.m)
+        x=scpos_arr[:, 0], y=scpos_arr[:, 1], z=scpos_arr[:, 2], unit=u.m
+    )
 
     coords_gcrs = GCRS(cart_gcrs, obstime=t)
     coords_itrs = coords_gcrs.transform_to(ITRS(obstime=t))
 
     location = coords_itrs.earth_location
 
-    lla = np.column_stack((
-        location.lat.deg,
-        location.lon.deg,
-        location.height.to(u.km).value))
+    lla = np.column_stack((location.lat.deg, location.lon.deg, location.height.to(u.km).value))
 
     return lla[0] if not batch else lla
 
@@ -115,17 +108,15 @@ def itrs_to_gcrs(lla, utc, utc_format='isot'):
     lla_arr = np.asarray(lla)
     utc_arr = np.asarray(utc)
 
-    if lla_arr.ndim == 1 \
-        and utc_arr.ndim == 0 \
-            and lla_arr.shape[0] == 3:
+    if lla_arr.ndim == 1 and utc_arr.ndim == 0 and lla_arr.shape[0] == 3:
         batch = False
-    elif lla_arr.ndim == 2 \
-        and utc_arr.ndim == 1 \
-            and lla_arr.shape[1] == 3:
+    elif lla_arr.ndim == 2 and utc_arr.ndim == 1 and lla_arr.shape[1] == 3:
         batch = True
     else:
-        raise ValueError('Invalid input shapes: lla should be (3,) or (N, 3), \
-            utc should be scalar or (N,)')
+        raise ValueError(
+            'Invalid input shapes: lla should be (3,) or (N, 3), \
+            utc should be scalar or (N,)'
+        )
 
     lla_arr = np.atleast_2d(lla_arr)
     utc_arr = np.atleast_1d(utc_arr)
@@ -136,17 +127,19 @@ def itrs_to_gcrs(lla, utc, utc_format='isot'):
     t = Time(utc_arr, format=utc_format, scale='utc')
 
     loc = EarthLocation(
-        lat=lla_arr[:, 0] * u.deg,
-        lon=lla_arr[:, 1] * u.deg,
-        height=lla_arr[:, 2] * u.km)
+        lat=lla_arr[:, 0] * u.deg, lon=lla_arr[:, 1] * u.deg, height=lla_arr[:, 2] * u.km
+    )
 
     itrs_coords = loc.get_itrs(obstime=t)
     gcrs_coords = itrs_coords.transform_to(GCRS(obstime=t))
 
-    xyz = np.column_stack((
-        gcrs_coords.cartesian.x.value,
-        gcrs_coords.cartesian.y.value,
-        gcrs_coords.cartesian.z.value))
+    xyz = np.column_stack(
+        (
+            gcrs_coords.cartesian.x.value,
+            gcrs_coords.cartesian.y.value,
+            gcrs_coords.cartesian.z.value,
+        )
+    )
 
     return xyz[0] if not batch else xyz
 
@@ -201,11 +194,9 @@ def get_geocenter_radec(scpos):
 
     scpos_arr = np.asarray(scpos)
 
-    if scpos_arr.ndim == 1 \
-        and scpos_arr.shape[0] == 3:
+    if scpos_arr.ndim == 1 and scpos_arr.shape[0] == 3:
         batch = False
-    elif scpos_arr.ndim == 2 \
-        and scpos_arr.shape[1] == 3:
+    elif scpos_arr.ndim == 2 and scpos_arr.shape[1] == 3:
         batch = True
     else:
         raise ValueError('Invalid input shape: scpos should be (3,) or (N, 3)')
@@ -220,9 +211,7 @@ def get_geocenter_radec(scpos):
 
     coord = SkyCoord(vec_to_earth, frame='gcrs')
 
-    geo = np.column_stack((
-        coord.ra.deg,
-        coord.dec.deg))
+    geo = np.column_stack((coord.ra.deg, coord.dec.deg))
 
     return geo[0] if not batch else geo
 
@@ -253,22 +242,21 @@ def calc_mcilwain_l(latitude, longitude):
     lat = np.asarray(latitude)
     lon = np.asarray(longitude)
 
-    if lat.ndim == 0 \
-        and lon.ndim == 0:
+    if lat.ndim == 0 and lon.ndim == 0:
         batch = False
-    elif lat.ndim == 1 \
-        and lon.ndim == 1 \
-            and lat.shape[0] == lon.shape[0]:
+    elif lat.ndim == 1 and lon.ndim == 1 and lat.shape[0] == lon.shape[0]:
         batch = True
     else:
-        raise ValueError('Invalid input shapes: \
-            latitude and longitude should be scalars or 1D arrays of the same length')
+        raise ValueError(
+            'Invalid input shapes: \
+            latitude and longitude should be scalars or 1D arrays of the same length'
+        )
 
     lat = np.atleast_1d(lat)
     lon = np.atleast_1d(lon) % 360.0
 
     if np.any((lat < -30) | (lat > 30)):
-        raise ValueError("Latitude out of range [-30, 30]")
+        raise ValueError('Latitude out of range [-30, 30]')
 
     idx1 = (lon / 10.0).astype(int)
     idx2 = (idx1 + 1) % 36
@@ -276,7 +264,10 @@ def calc_mcilwain_l(latitude, longitude):
 
     coeffs_file = os.path.join(
         os.path.dirname(os.path.dirname(__file__)),
-        'docs', 'McIlwainL_coeffs', 'McIlwainL_Coeffs.npy')
+        'docs',
+        'McIlwainL_coeffs',
+        'McIlwainL_Coeffs.npy',
+    )
     poly_coeffs = np.load(coeffs_file)
 
     c1 = poly_coeffs[idx1]
@@ -331,17 +322,12 @@ def spacecraft_to_radec(az, zen, quat, deg=True):
     if az_arr.shape != zen_arr.shape:
         raise ValueError('Azimuth and zenith arrays must have the same shape')
 
-    if quat_arr.ndim == 1 and quat_arr.shape[0] != 4:
-        raise ValueError('Quaternion array must have shape (4,) or (N, 4)')
-    elif quat_arr.ndim == 2 and quat_arr.shape[1] != 4:
+    if (quat_arr.ndim == 1 and quat_arr.shape[0] != 4) or (
+        quat_arr.ndim == 2 and quat_arr.shape[1] != 4
+    ):
         raise ValueError('Quaternion array must have shape (4,) or (N, 4)')
 
-    if az_arr.ndim == 0 \
-        and zen_arr.ndim == 0 \
-            and quat_arr.ndim == 1:
-        batch = False
-    else:
-        batch = True
+    batch = not (az_arr.ndim == 0 and zen_arr.ndim == 0 and quat_arr.ndim == 1)
 
     az_arr = np.atleast_1d(az_arr)
     zen_arr = np.atleast_1d(zen_arr)
@@ -354,10 +340,9 @@ def spacecraft_to_radec(az, zen, quat, deg=True):
         az_rad, zen_rad = az_arr, zen_arr
 
     sin_zen = np.sin(zen_rad)
-    pos_body = np.column_stack([
-        sin_zen * np.cos(az_rad),
-        sin_zen * np.sin(az_rad),
-        np.cos(zen_rad)])
+    pos_body = np.column_stack(
+        [sin_zen * np.cos(az_rad), sin_zen * np.sin(az_rad), np.cos(zen_rad)]
+    )
 
     rot = Rotation.from_quat(quat_arr)
     dcm = rot.as_matrix()
@@ -378,8 +363,10 @@ def spacecraft_to_radec(az, zen, quat, deg=True):
         # Matrix (N, 3, 3) multiplied by vector (N, 3) -> (N, 3)
         cart_pos = np.einsum('nij,nj->ni', dcm, pos_body)
     else:
-        raise ValueError(f"Dimension mismatch: Number of \
-            positions ({num_pos}) and quaternions ({num_quat}) must be 1:N, N:1, or N:N")
+        raise ValueError(
+            f'Dimension mismatch: Number of \
+            positions ({num_pos}) and quaternions ({num_quat}) must be 1:N, N:1, or N:N'
+        )
 
     x, y, z = cart_pos[:, 0], cart_pos[:, 1], cart_pos[:, 2]
     z = np.clip(z, -1.0, 1.0)
@@ -437,17 +424,12 @@ def radec_to_spacecraft(ra, dec, quat, deg=True):
     if ra_arr.shape != dec_arr.shape:
         raise ValueError('RA and Dec arrays must have the same shape')
 
-    if quat_arr.ndim == 1 and quat_arr.shape[0] != 4:
-        raise ValueError('Quaternion array must have shape (4,) or (N, 4)')
-    elif quat_arr.ndim == 2 and quat_arr.shape[1] != 4:
+    if (quat_arr.ndim == 1 and quat_arr.shape[0] != 4) or (
+        quat_arr.ndim == 2 and quat_arr.shape[1] != 4
+    ):
         raise ValueError('Quaternion array must have shape (4,) or (N, 4)')
 
-    if ra_arr.ndim == 0 \
-        and dec_arr.ndim == 0 \
-            and quat_arr.ndim == 1:
-        batch = False
-    else:
-        batch = True
+    batch = not (ra_arr.ndim == 0 and dec_arr.ndim == 0 and quat_arr.ndim == 1)
 
     ra_arr = np.atleast_1d(ra_arr)
     dec_arr = np.atleast_1d(dec_arr)
@@ -460,11 +442,7 @@ def radec_to_spacecraft(ra, dec, quat, deg=True):
         ra_rad, dec_rad = ra_arr, dec_arr
 
     cos_dec = np.cos(dec_rad)
-    pos_sky = np.column_stack([
-        cos_dec * np.cos(ra_rad),
-        cos_dec * np.sin(ra_rad),
-        np.sin(dec_rad)
-        ])
+    pos_sky = np.column_stack([cos_dec * np.cos(ra_rad), cos_dec * np.sin(ra_rad), np.sin(dec_rad)])
 
     rot = Rotation.from_quat(quat_arr)
     dcm_inv = rot.inv().as_matrix()
@@ -485,8 +463,10 @@ def radec_to_spacecraft(ra, dec, quat, deg=True):
         # Matrix (N, 3, 3) multiplied by vector (N, 3) -> (N, 3)
         cart_pos_body = np.einsum('nij,nj->ni', dcm_inv, pos_sky)
     else:
-        raise ValueError(f"Dimension mismatch: Number of \
-            positions ({num_pos}) and quaternions ({num_quat}) must be 1:N, N:1, or N:N")
+        raise ValueError(
+            f'Dimension mismatch: Number of \
+            positions ({num_pos}) and quaternions ({num_quat}) must be 1:N, N:1, or N:N'
+        )
 
     x, y, z = cart_pos_body[:, 0], cart_pos_body[:, 1], cart_pos_body[:, 2]
 

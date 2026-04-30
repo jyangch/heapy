@@ -10,8 +10,8 @@ Bundles three groups of utilities consumed by :mod:`heapy.auto.signal`:
   used by every ``save()`` method in :mod:`heapy.auto.signal`.
 """
 
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
 
 from ..util.significance import pgsig, ppsig
 
@@ -33,12 +33,12 @@ def indices_in_intervals(lbins, rbins, intervals):
     """
 
     idx = []
-    for i, (l, u) in enumerate(zip(lbins, rbins)):
+    for i, (left, right) in enumerate(zip(lbins, rbins, strict=False)):
         for low, upp in intervals:
-            if not (u <= low or l >= upp):
+            if not (right <= low or left >= upp):
                 idx.append(i)
                 break
-            
+
     return np.unique(idx).astype(int) if idx else np.array([], dtype=int)
 
 
@@ -57,14 +57,14 @@ def filter_block_edges(edges_raw, min_binsize, margin=1.8):
     Returns:
         Sorted unique edges with undersized neighbors removed.
     """
-    
+
     edges = [edges_raw[0], edges_raw[-1]]
     for i in range(1, len(edges_raw) - 1):
         flag1 = (edges_raw[i] - edges_raw[i - 1]) > min_binsize / margin
         flag2 = (edges_raw[i + 1] - edges_raw[i]) > min_binsize / margin
         if flag1 and flag2:
             edges.append(edges_raw[i])
-            
+
     return np.unique(edges)
 
 
@@ -89,7 +89,7 @@ def classify_bins(snr, left, right, sigma, bad_sentinel=-5):
         of ``int``) and ``sig_int``/``bkg_int``/``bad_int`` (lists of
         ``[left[i], right[i]]`` pairs).
     """
-    
+
     sig_idx, bkg_idx, bad_idx = [], [], []
     sig_int, bkg_int, bad_int = [], [], []
     for i, s in enumerate(snr):
@@ -103,7 +103,7 @@ def classify_bins(snr, left, right, sigma, bad_sentinel=-5):
         else:
             bad_idx.append(i)
             bad_int.append(pair)
-            
+
     return {
         'sig_idx': np.array(sig_idx, dtype=int),
         'bkg_idx': np.array(bkg_idx, dtype=int),
@@ -135,10 +135,10 @@ def pg_snr(cts_i, bcts_i, bcts_err_i=None):
         if bcts_i <= 0 or cts_i <= 0:
             return -5
         return ppsig(cts_i, bcts_i, 1)
-    
+
     if bcts_i <= 0 or cts_i <= 0 or bcts_err_i == 0:
         return -5
-    
+
     return pgsig(cts_i, bcts_i, bcts_err_i)
 
 
@@ -193,18 +193,18 @@ def plt_rc_context():
     """
 
     plt_rc = {
-        "font.family": "serif",
-        "font.serif": ["STIX Two Text"],
-        "mathtext.fontset": "stix",
+        'font.family': 'serif',
+        'font.serif': ['STIX Two Text'],
+        'mathtext.fontset': 'stix',
         'font.size': 12,
         'pdf.fonttype': 42,
-        'ps.fonttype': 42
-        }
+        'ps.fonttype': 42,
+    }
 
     return plt.rc_context(plt_rc)
 
 
-class SignalPlotter(object):
+class SignalPlotter:
     """Composable two-panel diagnostic figure for signal classification.
 
     Top panel (``ax_top``) hosts total quantities (raw rate, total
@@ -242,7 +242,6 @@ class SignalPlotter(object):
         self._style_axis(self.ax_top)
         self._style_axis(self.ax_bot)
 
-
     @staticmethod
     def _style_axis(ax):
 
@@ -251,7 +250,6 @@ class SignalPlotter(object):
         ax.yaxis.set_ticks_position('both')
         ax.tick_params(axis='x', which='both', direction='in', labelcolor='k', colors='k')
         ax.tick_params(axis='y', which='both', direction='in', labelcolor='k', colors='k')
-
 
     @staticmethod
     def _align_zero(ax_left, ax_right):
@@ -284,7 +282,6 @@ class SignalPlotter(object):
         ax_left.set_ylim(scale * hi_l, hi_l)
         ax_right.set_ylim(scale * hi_r, hi_r)
 
-
     def plot_curve(self, time, rate, net, bak=None, bak_err=None):
         """Draw raw light curves on both panels.
 
@@ -306,8 +303,9 @@ class SignalPlotter(object):
         if bak is not None:
             self.ax_top.plot(time, bak, lw=1.0, c='r', label='Background')
             if bak_err is not None:
-                self.ax_top.fill_between(time, bak - bak_err, bak + bak_err,
-                                         facecolor='red', alpha=0.5)
+                self.ax_top.fill_between(
+                    time, bak - bak_err, bak + bak_err, facecolor='red', alpha=0.5
+                )
         self.ax_top.set_xlim([min(time), max(time)])
         self.ax_top.set_ylabel('Rate (cts/s)')
         self.ax_top.legend(frameon=False)
@@ -319,7 +317,6 @@ class SignalPlotter(object):
         self.ax_bot.legend(frameon=False)
 
         self._net = net
-
 
     def plot_block(self, edges, re_rate, re_net):
         """Overlay Bayesian-block step traces on both panels.
@@ -334,17 +331,26 @@ class SignalPlotter(object):
             re_net: Net block rate per block (bottom panel).
         """
 
-        self.ax_top.plot(edges, np.append(re_rate, [re_rate[-1]]),
-                         lw=1.0, c='c', drawstyle='steps-post',
-                         label='Bayesian block')
+        self.ax_top.plot(
+            edges,
+            np.append(re_rate, [re_rate[-1]]),
+            lw=1.0,
+            c='c',
+            drawstyle='steps-post',
+            label='Bayesian block',
+        )
         self.ax_top.legend(frameon=False)
 
-        line, = self.ax_bot.plot(edges, np.append(re_net, [re_net[-1]]),
-                                 lw=1.0, c='c', drawstyle='steps-post',
-                                 label='Bayesian block')
+        (line,) = self.ax_bot.plot(
+            edges,
+            np.append(re_net, [re_net[-1]]),
+            lw=1.0,
+            c='c',
+            drawstyle='steps-post',
+            label='Bayesian block',
+        )
         self.ax_bot_block_line = line
         self.ax_bot.legend(frameon=False)
-
 
     def plot_snr(self, edges, re_snr, sigma):
         """Replace the bottom net-block trace with a twin-axis SNR overlay.
@@ -372,9 +378,15 @@ class SignalPlotter(object):
             self.ax_bot_twinx = self.ax_bot.twinx()
 
         ax = self.ax_bot_twinx
-        ax.plot(edges, np.append(re_snr, [re_snr[-1]]), lw=1.0, c='c',
-                drawstyle='steps-post', label='Bayesian block SNR')
-        ax.axhline(sigma, lw=1.0, c='grey', ls='--', label='%.1f$\\sigma$' % sigma)
+        ax.plot(
+            edges,
+            np.append(re_snr, [re_snr[-1]]),
+            lw=1.0,
+            c='c',
+            drawstyle='steps-post',
+            label='Bayesian block SNR',
+        )
+        ax.axhline(sigma, lw=1.0, c='grey', ls='--', label=f'{sigma:.1f}$\\sigma$')
         ax.set_ylabel('Significance (sigma)')
 
         bot_legend = self.ax_bot.get_legend()
@@ -387,13 +399,11 @@ class SignalPlotter(object):
 
         self._align_zero(self.ax_bot, self.ax_bot_twinx)
 
-
     def show(self):
         """Display the figure interactively."""
 
         plt.tight_layout()
         plt.show()
-
 
     def save(self, filename, dpi=300):
         """Save the figure to ``filename`` and close it.

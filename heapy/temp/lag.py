@@ -15,21 +15,21 @@ Typical usage:
 """
 
 import os
-import numpy as np
-import matplotlib.pyplot as plt
+
 from matplotlib import rcParams
-from scipy.linalg import cho_solve
+import matplotlib.pyplot as plt
+import numpy as np
+from scipy.fft import irfft, next_fast_len, rfft
 from scipy.interpolate import UnivariateSpline
-from scipy.fft import rfft, irfft, next_fast_len
+from scipy.linalg import cho_solve
 from scipy.optimize import curve_fit, minimize_scalar
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import RBF, WhiteKernel
 
-from ..util.tools import json_dump
+from ..util.tools import format_message, json_dump
 
 
-
-class Lag(object):
+class Lag:
     """Estimate the cross-correlation lag between two light curves.
 
     Computes the normalised CCF via FFT for the observed data and for
@@ -59,7 +59,8 @@ class Lag(object):
         xtype='pg',
         ytype='pg',
         nmc=1000,
-        M=1):
+        M=1,
+    ):
         """Initialize the Lag estimator with two light curves.
 
         Args:
@@ -126,18 +127,20 @@ class Lag(object):
         self.xtype = xtype
         self.ytype = ytype
 
-        self.xcts_err, self.xbcts, self.xbcts_err = \
-            self._validate(xtype, xcts, xcts_err, xbcts, xbcts_err, 'x')
-        self.ycts_err, self.ybcts, self.ybcts_err = \
-            self._validate(ytype, ycts, ycts_err, ybcts, ybcts_err, 'y')
+        self.xcts_err, self.xbcts, self.xbcts_err = self._validate(
+            xtype, xcts, xcts_err, xbcts, xbcts_err, 'x'
+        )
+        self.ycts_err, self.ybcts, self.ybcts_err = self._validate(
+            ytype, ycts, ycts_err, ybcts, ybcts_err, 'y'
+        )
 
         self.model_funcs = {
             'gaussian': Lag.gaussian,
             'asymmetric_gaussian': Lag.asymmetric_gaussian,
             'double_gaussian': Lag.double_gaussian,
             'lorentzian': Lag.lorentzian,
-            'pseudo_voigt': Lag.pseudo_voigt}
-
+            'pseudo_voigt': Lag.pseudo_voigt,
+        }
 
     @property
     def dt_analysis(self):
@@ -148,7 +151,6 @@ class Lag(object):
         """
 
         return self.M * self.dt
-
 
     @staticmethod
     def _validate(dtype, cts, cts_err, bcts, bcts_err, label):
@@ -177,7 +179,6 @@ class Lag(object):
 
         return cts_err, bcts, bcts_err
 
-
     @staticmethod
     def _box_smooth(arr, M):
 
@@ -185,7 +186,6 @@ class Lag(object):
             return np.asarray(arr, dtype=float).copy()
 
         return np.convolve(arr, np.ones(M), mode='valid')
-
 
     @staticmethod
     def _box_smooth_batch(arr2d, M):
@@ -195,13 +195,11 @@ class Lag(object):
 
         arr2d = np.asarray(arr2d, dtype=float)
 
-        cumsum = np.concatenate([
-            np.zeros((arr2d.shape[0], 1), dtype=arr2d.dtype),
-            np.cumsum(arr2d, axis=1)
-            ], axis=1)
+        cumsum = np.concatenate(
+            [np.zeros((arr2d.shape[0], 1), dtype=arr2d.dtype), np.cumsum(arr2d, axis=1)], axis=1
+        )
 
         return cumsum[:, M:] - cumsum[:, :-M]
-
 
     @staticmethod
     def gaussian(x, cons, amp, mu, sigma):
@@ -218,8 +216,7 @@ class Lag(object):
             Array of profile values at each point in ``x``.
         """
 
-        return cons + amp * np.exp(-((x - mu) ** 2) / (2 * sigma ** 2))
-
+        return cons + amp * np.exp(-((x - mu) ** 2) / (2 * sigma**2))
 
     @staticmethod
     def asymmetric_gaussian(x, cons, amp, mu, sigma_l, sigma_r):
@@ -240,11 +237,10 @@ class Lag(object):
             Array of profile values at each point in ``x``.
         """
 
-        gaussian_l = cons + amp * np.exp(-((x - mu) ** 2) / (2 * sigma_l ** 2))
-        gaussian_r = cons + amp * np.exp(-((x - mu) ** 2) / (2 * sigma_r ** 2))
+        gaussian_l = cons + amp * np.exp(-((x - mu) ** 2) / (2 * sigma_l**2))
+        gaussian_r = cons + amp * np.exp(-((x - mu) ** 2) / (2 * sigma_r**2))
 
         return gaussian_l * (x <= mu) + gaussian_r * (x > mu)
-
 
     @staticmethod
     def double_gaussian(x, cons, amp1, mu1, sigma1, amp2, mu2, sigma2):
@@ -264,11 +260,10 @@ class Lag(object):
             Array of profile values at each point in ``x``.
         """
 
-        gaussian1 = amp1 * np.exp(-((x - mu1) ** 2) / (2 * sigma1 ** 2))
-        gaussian2 = amp2 * np.exp(-((x - mu2) ** 2) / (2 * sigma2 ** 2))
+        gaussian1 = amp1 * np.exp(-((x - mu1) ** 2) / (2 * sigma1**2))
+        gaussian2 = amp2 * np.exp(-((x - mu2) ** 2) / (2 * sigma2**2))
 
         return cons + gaussian1 + gaussian2
-
 
     @staticmethod
     def lorentzian(x, cons, amp, mu, gamma):
@@ -285,8 +280,7 @@ class Lag(object):
             Array of profile values at each point in ``x``.
         """
 
-        return cons + amp * (gamma ** 2 / ((x - mu) ** 2 + gamma ** 2))
-
+        return cons + amp * (gamma**2 / ((x - mu) ** 2 + gamma**2))
 
     @staticmethod
     def pseudo_voigt(x, cons, amp, mu, sigma, eta):
@@ -310,11 +304,10 @@ class Lag(object):
         """
 
         gamma = sigma * np.sqrt(2 * np.log(2))
-        gaussian_part = np.exp(-((x - mu) ** 2) / (2 * sigma ** 2))
-        lorentzian_part = (gamma ** 2) / ((x - mu) ** 2 + gamma ** 2)
+        gaussian_part = np.exp(-((x - mu) ** 2) / (2 * sigma**2))
+        lorentzian_part = (gamma**2) / ((x - mu) ** 2 + gamma**2)
 
         return cons + amp * (eta * lorentzian_part + (1 - eta) * gaussian_part)
-
 
     def _mc_sample(self, dtype, cts, cts_err, bcts, bcts_err):
 
@@ -333,21 +326,21 @@ class Lag(object):
             bkg = np.random.normal(loc=bcts, scale=bcts_err, size=size)
 
         else:
-            raise TypeError(f"invalid dtype: {dtype}")
+            raise TypeError(f'invalid dtype: {dtype}')
 
         return src - bkg
 
-
     def _mc_simulation(self):
 
-        xncts_sample = self._mc_sample(self.xtype, self.xcts, self.xcts_err,
-                                       self.xbcts, self.xbcts_err)
+        xncts_sample = self._mc_sample(
+            self.xtype, self.xcts, self.xcts_err, self.xbcts, self.xbcts_err
+        )
         self.mc_xncts = np.vstack([self.xncts, xncts_sample])
 
-        yncts_sample = self._mc_sample(self.ytype, self.ycts, self.ycts_err,
-                                       self.ybcts, self.ybcts_err)
+        yncts_sample = self._mc_sample(
+            self.ytype, self.ycts, self.ycts_err, self.ybcts, self.ybcts_err
+        )
         self.mc_yncts = np.vstack([self.yncts, yncts_sample])
-
 
     def _ccfs_batch(self):
 
@@ -356,10 +349,9 @@ class Lag(object):
 
         X_rev = rfft(self.mc_xncts[:, ::-1].copy(), n=nfft, axis=1)
         Y = rfft(self.mc_yncts, n=nfft, axis=1)
-        all_ccfs = irfft(Y * X_rev, n=nfft, axis=1)[:, :2 * n - 1]
+        all_ccfs = irfft(Y * X_rev, n=nfft, axis=1)[:, : 2 * n - 1]
 
-        norms = np.sqrt(np.sum(self.mc_xncts ** 2, axis=1) *
-                         np.sum(self.mc_yncts ** 2, axis=1))
+        norms = np.sqrt(np.sum(self.mc_xncts**2, axis=1) * np.sum(self.mc_yncts**2, axis=1))
         zero_mask = norms == 0
         norms[zero_mask] = 1.0
         all_ccfs /= norms[:, np.newaxis]
@@ -367,9 +359,15 @@ class Lag(object):
 
         return all_ccfs
 
-
-    def calculate(self, method=None, width=None, threshold=None,
-                  poly_deg=None, spline_s=None, point_estimate='observed'):
+    def calculate(
+        self,
+        method=None,
+        width=None,
+        threshold=None,
+        poly_deg=None,
+        spline_s=None,
+        point_estimate='observed',
+    ):
         """Compute the CCF lag and its Monte Carlo uncertainties.
 
         Performs background subtraction, applies MCCF box-smoothing when
@@ -454,8 +452,8 @@ class Lag(object):
 
         if point_estimate not in ('observed', 'mean', 'median'):
             raise ValueError(
-                f"point_estimate must be 'observed'|'mean'|'median', "
-                f"got {point_estimate!r}")
+                f"point_estimate must be 'observed'|'mean'|'median', got {point_estimate!r}"
+            )
 
         self.nrange = (self.taus[self.nidx[0]], self.taus[self.nidx[-1]])
 
@@ -492,15 +490,17 @@ class Lag(object):
 
                 elif method == 'polyfit':
                     polyfit = np.polyfit(fit_taus, fit_ccfs, deg=poly_deg)
-                    lag_i = minimize_scalar(lambda x: -np.polyval(polyfit, x),
-                                            bounds=self.nrange, method='bounded').x
+                    lag_i = minimize_scalar(
+                        lambda x, p=polyfit: -np.polyval(p, x), bounds=self.nrange, method='bounded'
+                    ).x
                     if i == 0:
                         self.itp_ccfs = np.polyval(polyfit, self.itp_taus)
 
                 elif method == 'spline':
                     spline = UnivariateSpline(fit_taus, fit_ccfs, s=spline_s)
-                    lag_i = minimize_scalar(lambda x: -spline(x),
-                                            bounds=self.nrange, method='bounded').x
+                    lag_i = minimize_scalar(
+                        lambda x, s=spline: -s(x), bounds=self.nrange, method='bounded'
+                    ).x
                     if i == 0:
                         self.itp_ccfs = spline(self.itp_taus)
 
@@ -512,8 +512,8 @@ class Lag(object):
                         fitted_kernel = gpr.kernel_
                         gp_L = gpr.L_
                         gp_K_star = fitted_kernel(
-                            self.itp_taus.reshape(-1, 1),
-                            fit_taus.reshape(-1, 1))
+                            self.itp_taus.reshape(-1, 1), fit_taus.reshape(-1, 1)
+                        )
 
                     alpha = cho_solve((gp_L, True), fit_ccfs)
                     mu = gp_K_star @ alpha
@@ -533,8 +533,9 @@ class Lag(object):
                 elif method in self.model_funcs:
                     func = self.model_funcs[method]
                     popt, _ = curve_fit(func, fit_taus, fit_ccfs, maxfev=5000)
-                    lag_i = minimize_scalar(lambda x: -func(x, *popt),
-                                            bounds=self.nrange, method='bounded').x
+                    lag_i = minimize_scalar(
+                        lambda x, f=func, p=popt: -f(x, *p), bounds=self.nrange, method='bounded'
+                    ).x
                     if i == 0:
                         self.itp_ccfs = func(self.itp_taus, *popt)
 
@@ -543,9 +544,11 @@ class Lag(object):
 
                 self.mc_fit_lags.append(lag_i)
 
-            except Exception:
+            except Exception as err:
                 if i == 0:
-                    raise RuntimeError('failed to fit the CCF for the original light curves')
+                    raise RuntimeError(
+                        'failed to fit the CCF for the original light curves'
+                    ) from err
                 continue
 
         mc_fit_lags_filter = np.asarray(self.mc_fit_lags[1:])
@@ -561,20 +564,27 @@ class Lag(object):
         lag_err = np.diff([lag_lo, lag_bv, lag_hi])
         self.lag = [lag_bv, lag_err[0], lag_err[1]]
 
-        print('\n+---------------------------------------------------+')
-        print(' %-15s%-15s%-15s' % ('lag (s)', 'lag_le (s)', 'lag_he (s)'))
-        print(' %-15.6g%-15.6g%-15.6g' % (self.lag[0], self.lag[1], self.lag[2]))
-        print(' method=%s, M=%d, dt=%.3g s, point_estimate=%s' %
-              (method, self.M, self.dt, point_estimate))
-        print('+---------------------------------------------------+\n')
+        msg = [
+            f'{"lag (s)":<15}{"lag_le (s)":<15}{"lag_he (s)":<15}',
+            f'{self.lag[0]:<15.6g}{self.lag[1]:<15.6g}{self.lag[2]:<15.6g}',
+            f'method={method}, M={self.M:d}, dt={self.dt:.3g} s, point_estimate={point_estimate}',
+        ]
+        print(format_message(msg))
 
-        self.lag_res = {'lag': self.lag, 'mc_fit_lags': self.mc_fit_lags,
-                        'width': width, 'threshold': threshold, 'method': method,
-                        'point_estimate': point_estimate,
-                        'M': self.M, 'dt': self.dt,
-                        'taus': self.taus, 'ccfs': self.ccfs,
-                        'itp_taus': self.itp_taus, 'itp_ccfs': self.itp_ccfs}
-
+        self.lag_res = {
+            'lag': self.lag,
+            'mc_fit_lags': self.mc_fit_lags,
+            'width': width,
+            'threshold': threshold,
+            'method': method,
+            'point_estimate': point_estimate,
+            'M': self.M,
+            'dt': self.dt,
+            'taus': self.taus,
+            'ccfs': self.ccfs,
+            'itp_taus': self.itp_taus,
+            'itp_ccfs': self.itp_ccfs,
+        }
 
     def save(self, savepath):
         """Save lag results and diagnostic plots to disk.
@@ -594,16 +604,23 @@ class Lag(object):
 
         json_dump(self.lag_res, savepath + '/lag_res.json')
 
-        rcParams['font.family'] = "serif"
-        rcParams['font.serif'] = ["STIX Two Text"]
-        rcParams['mathtext.fontset'] = "stix"
+        rcParams['font.family'] = 'serif'
+        rcParams['font.serif'] = ['STIX Two Text']
+        rcParams['mathtext.fontset'] = 'stix'
         rcParams['font.size'] = 12
         rcParams['pdf.fonttype'] = 42
         rcParams['ps.fonttype'] = 42
 
         fig, ax = plt.subplots(1, 1, figsize=(7, 6))
-        ax.scatter(self.taus[self.nidx], self.mc_ccfs[0][self.nidx], marker='+',
-                   color='r', s=10, linewidths=0.5, alpha=1.0)
+        ax.scatter(
+            self.taus[self.nidx],
+            self.mc_ccfs[0][self.nidx],
+            marker='+',
+            color='r',
+            s=10,
+            linewidths=0.5,
+            alpha=1.0,
+        )
         if self.itp_taus is not None:
             ax.plot(self.itp_taus, self.itp_ccfs, c='b', lw=0.5, alpha=1.0)
         ax.set_xlabel('Time delay (s)')
@@ -615,22 +632,21 @@ class Lag(object):
         ax.tick_params(which='minor', width=1.0, length=3)
         ax.xaxis.set_ticks_position('both')
         ax.yaxis.set_ticks_position('both')
-        fig.savefig(savepath + '/tau_ccf.pdf', bbox_inches='tight',
-                    pad_inches=0.1, dpi=300)
+        fig.savefig(savepath + '/tau_ccf.pdf', bbox_inches='tight', pad_inches=0.1, dpi=300)
         plt.close(fig)
 
         fig, ax = plt.subplots(1, 1, figsize=(7, 6))
         mc_only = self.mc_fit_lags[1:]
         lag_bins = np.linspace(min(mc_only), max(mc_only), 30)
-        ax.hist(mc_only, lag_bins, density=False, histtype='step',
-                color='b', lw=1.0)
+        ax.hist(mc_only, lag_bins, density=False, histtype='step', color='b', lw=1.0)
         ax.axvline(self.lag[0], c='grey', lw=1.0)
         ax.axvline(self.lag[0] - self.lag[1], c='grey', ls='--', lw=1.0)
         ax.axvline(self.lag[0] + self.lag[2], c='grey', ls='--', lw=1.0)
         ax.set_xlabel('Lags (sec)')
         ax.set_ylabel('Counts')
-        ax.set_title(r'$\tau=%.4g_{-%.4g}^{+%.4g}~{\rm s}$' %
-                     (self.lag[0], self.lag[1], self.lag[2]))
+        ax.set_title(
+            rf'$\tau={self.lag[0]:.4g}_{{-{self.lag[1]:.4g}}}^{{+{self.lag[2]:.4g}}}~{{\rm s}}$'
+        )
         ax.minorticks_on()
         ax.tick_params(axis='x', which='both', direction='in')
         ax.tick_params(axis='y', which='both', direction='in')
@@ -638,6 +654,5 @@ class Lag(object):
         ax.tick_params(which='minor', width=1.0, length=3)
         ax.xaxis.set_ticks_position('both')
         ax.yaxis.set_ticks_position('both')
-        fig.savefig(savepath + '/lag_pdf.pdf', bbox_inches='tight',
-                    pad_inches=0.1, dpi=300)
+        fig.savefig(savepath + '/lag_pdf.pdf', bbox_inches='tight', pad_inches=0.1, dpi=300)
         plt.close(fig)

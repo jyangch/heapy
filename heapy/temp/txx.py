@@ -152,7 +152,7 @@ class pgTxx(pgSignal):
 
         src_sample = np.random.poisson(lam=self.cts, size=(self.nmc, self.nsample))
         bkg_sample = np.random.normal(
-            loc=self.bcts, scale=self.bcts_err, size=(self.nmc, self.nsample)
+            loc=np.real(self.bcts), scale=np.real(self.bcts_err), size=(self.nmc, self.nsample)
         )
 
         self.mc_ncts = np.vstack([self.ncts, src_sample - bkg_sample])
@@ -1176,12 +1176,12 @@ def accumcts(time, ccts, pstart, pstop, xx, simple_err=False):
         csf_err, csf1_err, csf2_err = [], [], []
         txx_err, txx1_err, txx2_err = [], [], []
 
-    for l, r in zip(np.append(time[0], pstop), np.append(pstart, time[-1]), strict=False):
-        idx = np.where((interp_time >= l) & (interp_time <= r))[0]
+    for left, right in zip(np.append(time[0], pstop), np.append(pstart, time[-1]), strict=False):
+        idx = np.where((interp_time >= left) & (interp_time <= right))[0]
         if len(idx) >= 1:
             csf_i = np.mean(interp_ccts[idx])
         else:
-            csf_i = interp_ccts[np.argmin(np.abs(interp_time - l))]
+            csf_i = interp_ccts[np.argmin(np.abs(interp_time - left))]
         csf.append(csf_i)
 
         if simple_err:
@@ -1190,7 +1190,7 @@ def accumcts(time, ccts, pstart, pstop, xx, simple_err=False):
 
     dcsf = np.array(csf[1:]) - np.array(csf[:-1])
 
-    for pi, (l, r) in enumerate(
+    for pi, (left, right) in enumerate(
         zip(np.append(time[0], pstop[:-1]), np.append(pstart[1:], time[-1]), strict=False)
     ):
         nn = (1 - xx) / 2
@@ -1209,8 +1209,8 @@ def accumcts(time, ccts, pstart, pstop, xx, simple_err=False):
             csf1_err.append(csf1_err_i)
             csf2_err.append(csf2_err_i)
 
-        pt = interp_time[np.where((interp_time >= l) & (interp_time <= r))]
-        pcts = interp_ccts[np.where((interp_time >= l) & (interp_time <= r))]
+        pt = interp_time[np.where((interp_time >= left) & (interp_time <= right))]
+        pcts = interp_ccts[np.where((interp_time >= left) & (interp_time <= right))]
 
         txx_i, txx1_i, txx2_i = find_txx(pt, pcts, csf1_i, csf2_i)
 

@@ -6,11 +6,11 @@ two-pass fitting recipe used for Poisson-rate backgrounds.
 """
 
 import warnings
+
 import numpy as np
 
 
-
-class Polynomial(object):
+class Polynomial:
     """Fit a polynomial background via BIC-selected weighted least squares.
 
     The default ``'2pass'`` method iterates a uniform-weight pass followed
@@ -41,7 +41,6 @@ class Polynomial(object):
 
         self.method = method
 
-
     @classmethod
     def set_method(cls, method='2pass'):
         """Validate ``method`` and return a configured :class:`Polynomial`.
@@ -63,7 +62,6 @@ class Polynomial(object):
 
         return cls(method=method)
 
-
     def fit(self, x, y, deg=None, dx=None):
         """Fit a polynomial background to ``(x, y)`` using the configured method.
 
@@ -80,7 +78,7 @@ class Polynomial(object):
         Raises:
             ValueError: If :attr:`method` is not ``'2pass'``.
         """
-        
+
         self.x = np.array(x).astype(float)
         self.y = np.array(y).astype(float)
         self.deg = deg
@@ -92,7 +90,6 @@ class Polynomial(object):
             self.two_pass()
         else:
             raise ValueError('invalid method')
-
 
     def val(self, x):
         """Evaluate the fitted polynomial and its 1-sigma uncertainty at ``x``.
@@ -112,20 +109,19 @@ class Polynomial(object):
         """
 
         x = np.array(x)
-        
+
         if min(x) < min(self.x):
-            msg = "Extrapolation may be imprecise: %f < %f" % (min(x), min(self.x))
+            msg = f'Extrapolation may be imprecise: {min(x):f} < {min(self.x):f}'
             warnings.warn(msg, UserWarning, stacklevel=2)
 
         if max(x) > max(self.x):
-            msg = "Extrapolation may be imprecise: %f > %f" % (max(x), max(self.x))
+            msg = f'Extrapolation may be imprecise: {max(x):f} > {max(self.x):f}'
             warnings.warn(msg, UserWarning, stacklevel=2)
 
         assert self.ls_res is not None, 'you should first perform fitting'
 
         mo, err = self.ls_polyval(x, coeff=self.ls_res['coeff'], covar=self.ls_res['covar'])
         return mo, err
-
 
     def two_pass(self):
         """Run the GBM/GECAM-style two-pass polynomial fit with BIC selection.
@@ -136,7 +132,7 @@ class Polynomial(object):
 
         Populates :attr:`deg_list`, :attr:`bic_list`, :attr:`best_bic`,
         :attr:`best_deg`, and :attr:`ls_res`.
-        
+
         Weighting scheme follows the GBM / GECAM background-fitting recipe:
         first pass is unweighted, second pass re-weights by model-rate
         variance so poorly-fit bins don't anchor the solution.
@@ -147,7 +143,7 @@ class Polynomial(object):
             TypeError: If ``self.dx`` is a non-scalar array with a shape
                 that does not match ``self.x``.
         """
-        
+
         time = self.x
         rate = self.y
 
@@ -161,11 +157,11 @@ class Polynomial(object):
         else:
             dt = np.array(self.dx)
             if dt.ndim != 0 and dt.shape != time.shape:
-                raise TypeError("if dt is array, expected dt and time to have same length")
+                raise TypeError('if dt is array, expected dt and time to have same length')
 
         # First pass: uniform weight (scale cancels out in WLS coefficients/covariance)
         weight = np.ones_like(rate)
-        
+
         self.bic_list = []
         self.best_bic = np.inf
         self.best_deg = None
@@ -173,20 +169,19 @@ class Polynomial(object):
             for ipass in range(2):
                 ls_res = self.ls_polyfit(time, rate, deg, w=weight, cov=True)
                 mo, _ = self.ls_polyval(time, coeff=ls_res['coeff'], covar=ls_res['covar'])
-                
+
                 if ipass == 0:
                     variance = mo / dt
-                    zero = (variance <= 0)
+                    zero = variance <= 0
                     weight = np.zeros_like(variance)
                     weight[~zero] = np.sqrt(1.0 / variance[~zero])
-                    
+
             self.bic_list.append(ls_res['bic'])
-                    
+
             if ls_res['bic'] < self.best_bic:
                 self.best_bic = ls_res['bic']
                 self.best_deg = deg
                 self.ls_res = ls_res
-
 
     @staticmethod
     def ls_polyval(x, coeff, covar=None):
@@ -210,13 +205,13 @@ class Polynomial(object):
         """
 
         if x.ndim != 1:
-            raise TypeError("expected 1D vector for x")
+            raise TypeError('expected 1D vector for x')
         if x.size == 0:
-            raise TypeError("expected non-empty vector for x")
+            raise TypeError('expected non-empty vector for x')
         if coeff.ndim != 1:
-            raise TypeError("expected 1D vector for coeff")
+            raise TypeError('expected 1D vector for coeff')
         if coeff.size == 0:
-            raise TypeError("expected non-empty vector for coeff")
+            raise TypeError('expected non-empty vector for coeff')
 
         order = coeff.shape[0]
 
@@ -234,11 +229,11 @@ class Polynomial(object):
 
         if covar is not None:
             if covar.ndim != 2:
-                raise TypeError("expected 2D vector for covar")
+                raise TypeError('expected 2D vector for covar')
             if covar.shape[0] != covar.shape[1]:
-                raise TypeError("expected m*m matrix for covar")
+                raise TypeError('expected m*m matrix for covar')
             if covar.shape[0] != order:
-                raise TypeError("expected each dim of covar and coeff have same length")
+                raise TypeError('expected each dim of covar and coeff have same length')
 
             # evaluate the model uncertainty at given x
             # M (i.e. var) = X M_\beta (i.e. covar) X^T
@@ -249,7 +244,6 @@ class Polynomial(object):
 
         else:
             return mo
-
 
     @staticmethod
     def ls_polyfit(x, y, deg, rcond=None, w=None, cov=True):
@@ -286,18 +280,18 @@ class Polynomial(object):
         order = int(deg) + 1
         x = np.asarray(x) + 0.0
         y = np.asarray(y) + 0.0
-        
+
         if deg < 0:
-            raise ValueError("expected deg >= 0")
+            raise ValueError('expected deg >= 0')
         if x.ndim != 1:
-            raise TypeError("expected 1D vector for x")
+            raise TypeError('expected 1D vector for x')
         if x.size == 0:
-            raise TypeError("expected non-empty vector for x")
+            raise TypeError('expected non-empty vector for x')
         if y.ndim < 1 or y.ndim > 2:
-            raise TypeError("expected 1D or 2D array for y")
+            raise TypeError('expected 1D or 2D array for y')
         if x.shape[0] != y.shape[0]:
-            raise TypeError("expected x and y to have same length")
-        
+            raise TypeError('expected x and y to have same length')
+
         if rcond is None:
             rcond = len(x) * np.finfo(x.dtype).eps
 
@@ -311,45 +305,45 @@ class Polynomial(object):
 
         lhs = np.vander(x, order)
         rhs = y
-        
+
         if w is not None:
             w = np.asarray(w) + 0.0
             if w.ndim != 1:
-                raise TypeError("expected a 1-d array for weights")
+                raise TypeError('expected a 1-d array for weights')
             if w.shape[0] != y.shape[0]:
-                raise TypeError("expected w and y to have the same length")
+                raise TypeError('expected w and y to have the same length')
         else:
             w = np.ones_like(y) + 0.0
-            
+
         dof = np.sum(w != 0) - order
         if dof <= 0:
             msg = 'The degree of freedom should be greater than zero'
             warnings.warn(msg, UserWarning, stacklevel=2)
-            
+
         # X' = diag(w)X, see "Weighted least squares" in Wikipedia for details
         lhs *= w[:, np.newaxis]
-        
+
         # y' = diag(w)y, see "Weighted least squares" in Wikipedia for details
         if rhs.ndim == 2:
             rhs *= w[:, np.newaxis]
         else:
             rhs *= w
-            
+
         # scale lhs to improve condition number and solve
         scale = np.sqrt((lhs * lhs).sum(axis=0))
         lhs /= scale
-        
+
         # solve WX@\beta = Wy, minimize sum((w*yi - w*f(xi, \beta))^2)
         # ==> X^TWy = (X^TWX)\beta ==> X'^Ty' = (X'^TX')\beta (uncorrelated w=sqrt(W))
         # see "Weighted least squares" in Wikipedia for details
         coeff, resids, rank, svs = np.linalg.lstsq(lhs, rhs, rcond)
-        
+
         # broadcast scale coefficients
         coeff = (coeff.T / scale).T
 
         # warn on rank reduction, which indicates an ill conditioned matrix
         if rank != order:
-            msg = "Polyfit may be poorly conditioned"
+            msg = 'Polyfit may be poorly conditioned'
             warnings.warn(msg, UserWarning, stacklevel=2)
 
         # np.linalg.lstsq returns empty `resids` when rank < order or n <= order;
@@ -364,21 +358,27 @@ class Polynomial(object):
 
         aic = resids + 2 * order
         bic = resids + order * np.log(len(x))
-        
-        res = {'coeff': coeff, 'chi2': resids, 'rank': rank, 'svs': svs, 'rcond': rcond, 
-               'order': order,'dof': dof, 'aic': aic, 'bic': bic}
-        
+
+        res = {
+            'coeff': coeff,
+            'chi2': resids,
+            'rank': rank,
+            'svs': svs,
+            'rcond': rcond,
+            'order': order,
+            'dof': dof,
+            'aic': aic,
+            'bic': bic,
+        }
+
         if cov:
             # M^\beta (i.e. covar) = (X^TWX)^{-1} = (X'^TX)^{-1}
             # see "Weighted least squares" in Wikipedia for details
             covar = np.linalg.inv(np.dot(lhs.T, lhs))
             covar /= np.outer(scale, scale)
-            if cov == "unscaled":
-                fac = 1
-            else:
-                # Guard against dof <= 0 (already warned above): fall back to 1
-                # so the returned covariance stays finite rather than inf/negative.
-                fac = resids / dof if dof > 0 else 1.0
+            # Guard against dof <= 0 (already warned above): fall back to 1
+            # so the returned covariance stays finite rather than inf/negative.
+            fac = 1 if cov == 'unscaled' else resids / dof if dof > 0 else 1.0
             if y.ndim == 1:
                 covar *= fac
             else:
@@ -388,8 +388,7 @@ class Polynomial(object):
         return res
 
 
-
-class CompositePolynomial(object):
+class CompositePolynomial:
     """Sum of independent :class:`Polynomial` fits with the same ``val(x)`` API.
 
     Used to integrate a stacked Poisson-source background when each
@@ -407,15 +406,14 @@ class CompositePolynomial(object):
             polys: Iterable of fitted :class:`Polynomial` instances; each
                 must already have a non-``None`` ``ls_res``.
         """
-        
+
         for p in polys:
             if not isinstance(p, Polynomial):
-                raise TypeError("expected a list of Polynomial instances")
+                raise TypeError('expected a list of Polynomial instances')
             if getattr(p, 'ls_res', None) is None:
-                raise ValueError("each constituent Polynomial must already be fitted")
+                raise ValueError('each constituent Polynomial must already be fitted')
 
         self.polys = list(polys)
-
 
     def val(self, x):
         """Evaluate the summed polynomial and propagated 1-sigma error at ``x``.

@@ -8,13 +8,14 @@ formatted plain-text files.
 """
 
 import os
+from pathlib import Path
 import re
 import shutil
 import warnings
-import numpy as np
-from pathlib import Path
 
-from .data import transpose_2d_matrix, pad_2d_matrix
+import numpy as np
+
+from .data import pad_2d_matrix, transpose_2d_matrix
 
 
 def cat_file(file_path, encoding='utf-8'):
@@ -33,13 +34,13 @@ def cat_file(file_path, encoding='utf-8'):
         raise FileNotFoundError(f"File '{file_path}' not found.")
 
     try:
-        with open(file_path, mode='r', encoding=encoding) as f:
+        with open(file_path, encoding=encoding) as f:
             for line in f:
                 print(line.rstrip())
     except UnicodeDecodeError:
         print(f"Error: Could not decode '{file_path}' using {encoding}. Try a different encoding.")
     except Exception as e:
-        print(f"An unexpected error occurred: {e}")
+        print(f'An unexpected error occurred: {e}')
 
 
 def copy_file(src, dst):
@@ -65,10 +66,10 @@ def copy_file(src, dst):
                 dst_path.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(src_path, dst_path)
         except Exception as e:
-            warnings.warn(f"Copy failed from {src} to {dst}: {e}", UserWarning)
+            warnings.warn(f'Copy failed from {src} to {dst}: {e}', UserWarning, stacklevel=2)
 
     else:
-        msg = f"FILE NOT FOUND: {src}"
+        msg = f'FILE NOT FOUND: {src}'
         warnings.warn(msg, UserWarning, stacklevel=2)
 
 
@@ -89,12 +90,14 @@ def remove_file(file_path):
         try:
             path.unlink()
         except PermissionError:
-            warnings.warn(f"PERMISSION DENIED: Could not remove {file_path}", RuntimeWarning)
+            warnings.warn(
+                f'PERMISSION DENIED: Could not remove {file_path}', RuntimeWarning, stacklevel=2
+            )
         except Exception as e:
-            warnings.warn(f"FAILED TO REMOVE {file_path}: {e}", RuntimeWarning)
+            warnings.warn(f'FAILED TO REMOVE {file_path}: {e}', RuntimeWarning, stacklevel=2)
 
     else:
-        msg = f"FILE NOT FOUND: {file_path}"
+        msg = f'FILE NOT FOUND: {file_path}'
         warnings.warn(msg, UserWarning, stacklevel=2)
 
 
@@ -123,7 +126,7 @@ def find_file(root_dir, pattern, recursive=True):
 
     root = Path(root_dir)
     if not root.exists():
-        warnings.warn(f"Path not found: {root_dir}", UserWarning, stacklevel=2)
+        warnings.warn(f'Path not found: {root_dir}', UserWarning, stacklevel=2)
         return None
 
     if isinstance(pattern, str):
@@ -142,7 +145,7 @@ def find_file(root_dir, pattern, recursive=True):
                     matches.append(str(path.absolute()))
 
         if not matches:
-            msg = f"No files found matching: {pattern} in {root_dir}"
+            msg = f'No files found matching: {pattern} in {root_dir}'
             warnings.warn(msg, UserWarning, stacklevel=2)
             return None
 
@@ -151,7 +154,7 @@ def find_file(root_dir, pattern, recursive=True):
         return matches
 
     except Exception as e:
-        warnings.warn(f"Error during search: {e}", UserWarning, stacklevel=2)
+        warnings.warn(f'Error during search: {e}', UserWarning, stacklevel=2)
         return None
 
 
@@ -182,9 +185,7 @@ def savetxt(file, data, fmt=None, trans=False, header=None):
         header validation error occurred.
     """
 
-    if data is None:
-        data = [[]]
-    elif len(data) == 0:
+    if data is None or len(data) == 0:
         data = [[]]
     elif (type(data[0]) is not list) and (type(data[0]) is not np.ndarray):
         msg = 'data is 1-D array or list'
@@ -192,14 +193,14 @@ def savetxt(file, data, fmt=None, trans=False, header=None):
         data = [data]
 
     data = pad_2d_matrix(data)
-    if trans: data = transpose_2d_matrix(data)
+    if trans:
+        data = transpose_2d_matrix(data)
     row = len(data)
     col = len(data[0])
 
     if col == 0:
-        f = open(file, 'w+')
-        _ = [f.write(''.join(data[r]) + '\n') for r in range(row)]
-        f.close()
+        with open(file, 'w+') as f:
+            _ = [f.write(''.join(data[r]) + '\n') for r in range(row)]
         return True
 
     if fmt is None:
@@ -214,7 +215,8 @@ def savetxt(file, data, fmt=None, trans=False, header=None):
         else:
             fmt = [fmt] * row
     elif (type(fmt) is list) and (type(fmt[0]) is list):
-        if trans: fmt = transpose_2d_matrix(fmt)
+        if trans:
+            fmt = transpose_2d_matrix(fmt)
         if len(fmt) != row or len(fmt[0]) != col:
             msg = 'the fmt shape should be same with data'
             warnings.warn(msg, UserWarning, stacklevel=2)
@@ -224,7 +226,10 @@ def savetxt(file, data, fmt=None, trans=False, header=None):
         warnings.warn(msg, UserWarning, stacklevel=2)
         return False
 
-    data = [['--' if data[r][c] == '--' else ('%'+fmt[r][c])%data[r][c] for c in range(col)] for r in range(row)]
+    data = [
+        ['--' if data[r][c] == '--' else ('%' + fmt[r][c]) % data[r][c] for c in range(col)]
+        for r in range(row)
+    ]
 
     if header is None:
         header = []
@@ -235,16 +240,20 @@ def savetxt(file, data, fmt=None, trans=False, header=None):
             warnings.warn(msg, UserWarning, stacklevel=2)
             return False
         else:
-            header = ['%s' % h for h in header]
-            length = [max([len(data[r][c]) for r in range(row)] + [len(header[c])]) for c in range(col)]
+            header = [f'{h}' for h in header]
+            length = [
+                max([len(data[r][c]) for r in range(row)] + [len(header[c])]) for c in range(col)
+            ]
 
     header = [h + ' ' * (length[c] + 4 - len(h)) for c, h in enumerate(header)]
-    data = [[data[r][c] + ' ' * (length[c] + 4 - len(data[r][c])) for c in range(col)] for r in range(row)]
+    data = [
+        [data[r][c] + ' ' * (length[c] + 4 - len(data[r][c])) for c in range(col)]
+        for r in range(row)
+    ]
 
-    f = open(file, 'w+')
-    f.write('' if len(header) == 0 else ''.join(header) + '\n')
-    _ = [f.write(''.join(data[r]) + '\n') for r in range(row)]
-    f.close()
+    with open(file, 'w+') as f:
+        f.write('' if len(header) == 0 else ''.join(header) + '\n')
+        _ = [f.write(''.join(data[r]) + '\n') for r in range(row)]
     return True
 
 
@@ -272,10 +281,9 @@ def loadtxt(file, fmt=None, trans=False):
     """
 
     data = []
-    f = open(file, 'r')
-    for line in f:
-        data.append([i for i in re.split(r'[\t\n\s]', line) if i != ''])
-    f.close()
+    with open(file) as f:
+        for line in f:
+            data.append([i for i in re.split(r'[\t\n\s]', line) if i != ''])
 
     row = len(data)
     col = len(data[0])
@@ -317,7 +325,8 @@ def loadtxt(file, fmt=None, trans=False):
                 try:
                     data[r][c] = ('%' + fmt[r][c]) % data[r][c]
                 except TypeError:
-                    msg = 'format %s is not suitable for data %s'%(fmt[r][c], data[r][c])
+                    msg = f'format {fmt[r][c]} is not suitable for data {data[r][c]}'
                     warnings.warn(msg, UserWarning, stacklevel=2)
-    if trans: data = transpose_2d_matrix(data)
+    if trans:
+        data = transpose_2d_matrix(data)
     return data
