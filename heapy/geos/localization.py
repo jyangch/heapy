@@ -5,7 +5,7 @@ stored in the HEALPix pixelization scheme, and ``gbmHealPix``, a
 GBM-specific subclass that reads from FITS files and applies Earth-
 occultation corrections.
 
-Typical usage:
+Example:
     from heapy.geos.localization import gbmHealPix
     hpx = gbmHealPix('glg_healpix_all_bn210101000_v00.fit')
     ra, dec = hpx.centroid

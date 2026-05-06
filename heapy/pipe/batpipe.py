@@ -4,7 +4,7 @@ Provides the ``batPipe`` class, which automates event energy conversion,
 detector-plane image generation, mask weighting, light curve extraction,
 and spectral product generation for Swift BAT gamma-ray burst observations.
 
-Typical usage:
+Example:
     pipe = batPipe.from_batobs('00012345678', datapath='/data/swift')
     pipe.timezero = '2024-01-01T12:00:00'
     pipe.filter_energy([15, 150])
@@ -1007,9 +1007,9 @@ class batPipe:
 
         Runs three HEASOFT tools in sequence:
 
-        1. ``batbinevt`` — bins events into a 80-channel CALDB PHA file.
-        2. ``batphasyserr`` — adds CALDB systematic errors to the spectrum.
-        3. ``batupdatephakw`` — updates header keywords from the auxiliary file.
+        1. ``batbinevt`` -- bins events into a 80-channel CALDB PHA file.
+        2. ``batphasyserr`` -- adds CALDB systematic errors to the spectrum.
+        3. ``batupdatephakw`` -- updates header keywords from the auxiliary file.
 
         The output file is written to ``self.specfile``, which must be set
         before calling this method (``extract_spectrum`` does this

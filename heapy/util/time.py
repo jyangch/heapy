@@ -90,7 +90,7 @@ def fermi_utc_to_met(utc, format='isot'):
 
 
 def fermi_utc_goback(utc, poshist_file):
-    """Return the UTC time approximately 30 orbital periods before ``utc``.
+    r"""Return the UTC time approximately 30 orbital periods before ``utc``.
 
     Computes the Fermi orbital period from spacecraft position vectors stored
     in ``poshist_file`` using Kepler's third law

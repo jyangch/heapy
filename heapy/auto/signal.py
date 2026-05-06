@@ -4,16 +4,16 @@ Exposes three sibling classes that share the
 ``bblock`` → ``calsnr`` → ``sorting`` → ``save`` lifecycle but differ in
 their statistical assumptions:
 
-- :class:`pgSignal` — Poisson source with a polynomial-modelled Gaussian
+- :class:`pgSignal` -- Poisson source with a polynomial-modelled Gaussian
   background; supports a :meth:`pgSignal.from_components` factory that
   stacks multiple already-polyfit'd instances into a composite pipeline.
-- :class:`ppSignal` — Poisson source with a Poisson background.
-- :class:`ggSignal` — Gaussian-measured rates (no separate background).
+- :class:`ppSignal` -- Poisson source with a Poisson background.
+- :class:`ggSignal` -- Gaussian-measured rates (no separate background).
 
 All three reuse the helpers and the :class:`~.signal_utils.SignalPlotter`
 diagnostic figure from :mod:`heapy.auto.signal_utils`.
 
-Typical usage:
+Example:
     from heapy.auto.signal import pgSignal
     sig = pgSignal(ts, bins)
     sig.loop(p0=0.05, sigma=3)
@@ -197,7 +197,7 @@ class pgSignal:
         returned instance carries summed per-bin arrays, a
         :class:`~.polynomial.CompositePolynomial` background model, and
         is ready for :meth:`bblock` → :meth:`calsnr` → :meth:`sorting`
-        — :meth:`polyfit`/:meth:`basefit` are not applicable.
+        -- :meth:`polyfit`/:meth:`basefit` are not applicable.
 
         Args:
             obj_list: Non-empty list of polyfit'd :class:`pgSignal`
@@ -348,8 +348,8 @@ class pgSignal:
         """Integrate the background over each block and compute Poisson-Gauss SNR.
 
         Runs :meth:`basefit` first when baseline results are missing
-        (raw-events path only). When :attr:`poly_res` is populated —
-        either by :meth:`polyfit` or by :meth:`from_components` —
+        (raw-events path only). When :attr:`poly_res` is populated --
+        either by :meth:`polyfit` or by :meth:`from_components` --
         ``self.poly.val(x)`` provides the background model with error
         propagation; otherwise the baseline is integrated. Populates
         :attr:`snr`, :attr:`re_snr`, and :attr:`snr_res`.

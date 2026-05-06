@@ -107,7 +107,7 @@ def size_one_or_n(value, other_array, name):
 
 
 def pgsig(n, b, sigma):
-    """Compute Gaussian-background significance for observed counts.
+    r"""Compute Gaussian-background significance for observed counts.
 
     Returns the significance (in standard deviations) for observing ``n``
     counts when the expected background ``b`` is measured with Gaussian
@@ -227,7 +227,7 @@ _get_TS_by_numerical_optimization_v = np.vectorize(_get_TS_by_numerical_optimiza
 
 
 def ppsig(n, b, alpha, sigma=0, k=0):
-    """Compute Poisson-background significance with optional systematic uncertainty.
+    r"""Compute Poisson-background significance with optional systematic uncertainty.
 
     Returns the significance (z score) for detecting ``n`` source counts when
     :math:`\\alpha \\times B` background counts are expected.  The method applied

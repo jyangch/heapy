@@ -5,7 +5,7 @@ photon events and applies user-supplied boolean expressions to select subsets
 of rows.  Filters accumulate in sequence and can be cleared to restore the
 original event list.
 
-Typical usage:
+Example:
     flt = Filter.from_fits('events.fits')
     flt.eval("(base['ENERGY'] > 15) & (base['ENERGY'] < 150)")
     flt.eval("base['TIME'] > 12345.0")

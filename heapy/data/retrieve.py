@@ -1,12 +1,12 @@
 """Retrieve data files from high-energy astrophysics mission archives.
 
-Provides mission-specific retrieval classes — ``gbmRetrieve``,
+Provides mission-specific retrieval classes -- ``gbmRetrieve``,
 ``gecamRetrieve``, ``gridRetrieve``, ``epRetrieve``, and
-``swiftRetrieve`` — all inheriting from the base ``Retrieve`` class.
+``swiftRetrieve`` -- all inheriting from the base ``Retrieve`` class.
 Each class exposes one or more ``from_*`` classmethods that locate or
 download the required data files and return a populated instance.
 
-Typical usage:
+Example:
     from heapy.data.retrieve import gbmRetrieve
     rtv = gbmRetrieve.from_burst('bn180703949')
     tte_file = rtv.rtv_res['tte']['n0']

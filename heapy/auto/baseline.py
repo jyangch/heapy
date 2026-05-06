@@ -179,7 +179,7 @@ class Baseline:
             w: Per-point weights matching ``y``.
 
         Returns:
-            Tuple ``(coefmat, z)`` — the coefficient matrix and the
+            Tuple ``(coefmat, z)`` -- the coefficient matrix and the
             smoothed signal.
         """
 
@@ -249,7 +249,7 @@ class Baseline:
             it: Number of SNIP iterations.
 
         Returns:
-            Tuple ``(y, idx, poly_z)`` — the input ``y``, the full integer
+            Tuple ``(y, idx, poly_z)`` -- the input ``y``, the full integer
             index array, and the cubic-fit baseline on the SNIP envelope.
         """
 

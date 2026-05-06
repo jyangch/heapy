@@ -5,7 +5,7 @@ automatic background estimation, and OGIP-compliant PHA spectrum output.
 The module exposes a generic ``Event`` base class and four instrument-specific
 subclasses: ``gbmTTE``, ``gecamEVT``, ``gridTTE``, and ``gridgroundTTE``.
 
-Typical usage:
+Example:
     from heapy.pipe.event import gbmTTE
     tte = gbmTTE(file='glg_tte_n0_bn210101_v00.fit')
     tte.lc_t1t2 = [-10, 60]
@@ -14,6 +14,7 @@ Typical usage:
 """
 
 import os
+from types import MappingProxyType
 import warnings
 
 from astropy import table, units
@@ -1453,19 +1454,8 @@ class gbmTTE(Event):
             ``'NAI_00'``) to short identifiers (e.g. ``'n0'``).
     """
 
-    def __init__(self, file, posfile=None):
-        """Initialize gbmTTE and read the TTE FITS file(s).
-
-        Args:
-            file: Path (or list of paths) to GBM TTE FITS file(s).
-            posfile: Path (or list of paths) to GBM position history
-                (poshist) FITS file(s), or ``None`` if response generation
-                is not needed.
-        """
-
-        self._file = file
-        self._posfile = posfile
-        self.det_name_lookup = {
+    det_name_lookup = MappingProxyType(
+        {
             'NAI_00': 'n0',
             'NAI_01': 'n1',
             'NAI_02': 'n2',
@@ -1481,6 +1471,20 @@ class gbmTTE(Event):
             'BGO_00': 'b0',
             'BGO_01': 'b1',
         }
+    )
+
+    def __init__(self, file, posfile=None):
+        """Initialize gbmTTE and read the TTE FITS file(s).
+
+        Args:
+            file: Path (or list of paths) to GBM TTE FITS file(s).
+            posfile: Path (or list of paths) to GBM position history
+                (poshist) FITS file(s), or ``None`` if response generation
+                is not needed.
+        """
+
+        self._file = file
+        self._posfile = posfile
 
         self._read()
 

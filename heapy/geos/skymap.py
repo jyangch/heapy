@@ -5,7 +5,7 @@ sky-localization information (Earth occultation, detector pointings,
 Sun position, Galactic plane, HEALPix probability maps) in a Mollweide
 equal-area projection.
 
-Typical usage:
+Example:
     from heapy.geos.skymap import gbmSkyMap
     sm = gbmSkyMap()
     sm.plot_galactic()

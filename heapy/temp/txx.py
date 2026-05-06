@@ -1,11 +1,11 @@
 """Compute Txx duration metrics (T90, T50, etc.) for gamma-ray burst light curves.
 
-Provides three concrete classes — ``pgTxx``, ``ppTxx``, and ``ggTxx`` — that
+Provides three concrete classes -- ``pgTxx``, ``ppTxx``, and ``ggTxx`` -- that
 inherit from ``pgSignal`` / ``ppSignal`` / ``ggSignal`` and add pulse detection
 and cumulative-count-fraction duration analysis.  Monte Carlo simulation is
 used by default to propagate uncertainties on the start/stop times.
 
-Typical usage:
+Example:
     from heapy.temp.txx import pgTxx
     txx = pgTxx(ts, bins)
     txx.calculate(xx=0.9)

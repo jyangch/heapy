@@ -73,9 +73,9 @@ def classify_bins(snr, left, right, sigma, bad_sentinel=-5):
 
     Classification:
 
-    - ``snr > sigma`` — signal.
-    - ``bad_sentinel < snr <= sigma`` — background.
-    - otherwise (typically ``snr <= bad_sentinel``) — bad.
+    - ``snr > sigma`` -- signal.
+    - ``bad_sentinel < snr <= sigma`` -- background.
+    - otherwise (typically ``snr <= bad_sentinel``) -- bad.
 
     Args:
         snr: Per-bin signal-to-noise values.
@@ -180,9 +180,9 @@ def gauss_snr(cts_i, cts_err_i):
 def plt_rc_context():
     """Return the rc-context preset wrapped around every ``SignalPlotter`` save.
 
-    Bundles the project's PDF-friendly overrides — Inter sans-serif
+    Bundles the project's PDF-friendly overrides -- Inter sans-serif
     body text, ``stixsans`` math, and TrueType (type-42) embedding for
-    the ``pdf`` and ``ps`` backends — so saved figures stay
+    the ``pdf`` and ``ps`` backends -- so saved figures stay
     typographically consistent regardless of the global rcParams at
     call time.
 

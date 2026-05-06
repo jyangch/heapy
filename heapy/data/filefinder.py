@@ -5,7 +5,7 @@ directory for files matching a glob-like feature string and, when no local
 match is found, falls back to an FTP source.  An FTP_TLS connection is
 reused across multiple calls and reconnected automatically on failure.
 
-Typical usage:
+Example:
     from heapy.data.filefinder import FileFinder
     ff = FileFinder(local_dir='/data/gbm', ftp_url='ftp://host/path')
     files = ff.find('glg_tte_n0_bn*_v00.fit')
