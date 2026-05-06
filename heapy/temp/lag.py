@@ -6,7 +6,7 @@ peak to locate the lag, and propagates uncertainties via Monte Carlo
 simulation.  The Modified CCF (MCCF) variant is supported through the ``M``
 box-smoothing parameter.
 
-Typical usage:
+Example:
     from heapy.temp.lag import Lag
     lag = Lag(xcts, ycts, dt=0.064, xbcts=xbkg, ybcts=ybkg,
               xbcts_err=xbkg_err, ybcts_err=ybkg_err)
@@ -220,7 +220,7 @@ class Lag:
 
     @staticmethod
     def asymmetric_gaussian(x, cons, amp, mu, sigma_l, sigma_r):
-        """Evaluate an asymmetric Gaussian profile with a constant baseline.
+        r"""Evaluate an asymmetric Gaussian profile with a constant baseline.
 
         Uses ``sigma_l`` for the left wing (:math:`x \\leq \\mu`) and
         ``sigma_r`` for the right wing (:math:`x > \\mu`).
@@ -284,7 +284,7 @@ class Lag:
 
     @staticmethod
     def pseudo_voigt(x, cons, amp, mu, sigma, eta):
-        """Evaluate a pseudo-Voigt profile with a constant baseline.
+        r"""Evaluate a pseudo-Voigt profile with a constant baseline.
 
         Mixes a Lorentzian and a Gaussian component with mixing fraction
         ``eta``.  The Lorentzian HWHM is derived from ``sigma`` via

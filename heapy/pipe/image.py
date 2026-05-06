@@ -7,7 +7,7 @@ module exposes a generic ``Image`` base class and two instrument-specific
 subclasses: ``epImage`` (Einstein Probe WXT/FXT) and ``swiftImage``
 (Swift/XRT).
 
-Typical usage:
+Example:
     from heapy.pipe.image import epImage
     img = epImage(file='ep_evt.fits', regfile='src.reg', bkregfile='bkg.reg')
     img.lc_t1t2 = [0, 1000]

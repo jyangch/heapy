@@ -2,9 +2,9 @@
 
 Provides ``gbmGeometry``, which reads one or more GBM position-history
 (poshist) FITS files, stacks them into a single timeline, and exposes
-spline-interpolated spacecraft state — quaternion, GCRS/ITRS position,
+spline-interpolated spacecraft state -- quaternion, GCRS/ITRS position,
 velocity, angular velocity, Earth angular radius, geocenter direction,
-and Sun/SAA flag — evaluated at arbitrary Mission Elapsed Time (MET)
+and Sun/SAA flag -- evaluated at arbitrary Mission Elapsed Time (MET)
 values.
 """
 

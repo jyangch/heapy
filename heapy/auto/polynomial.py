@@ -101,7 +101,7 @@ class Polynomial:
             x: Query abscissae.
 
         Returns:
-            Tuple ``(mo, err)`` — model values and their 1-sigma errors
+            Tuple ``(mo, err)`` -- model values and their 1-sigma errors
             propagated from the coefficient covariance.
 
         Raises:
@@ -422,7 +422,7 @@ class CompositePolynomial:
             x: Query abscissae.
 
         Returns:
-            Tuple ``(mo, err)`` — sum of constituent means and the
+            Tuple ``(mo, err)`` -- sum of constituent means and the
             quadrature sum of constituent 1-sigma errors.
         """
 
