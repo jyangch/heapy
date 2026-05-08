@@ -40,6 +40,7 @@ from ..util.time import (
     grid_met_to_utc,
     grid_utc_to_met,
 )
+from ..util.tools import cached_property, clear_cached_property
 from .filter import Filter
 
 warnings.simplefilter('ignore', UnitsWarning)
@@ -82,13 +83,14 @@ class Event:
 
     def _read(self):
 
+        clear_cached_property(self)
+
         if self.file is not None:
             hdu = fits.open(self.file)
             self._event = table.Table.read(hdu['EVENTS'])
             self._ebound = table.Table.read(hdu['EBOUNDS'])
             self._gti = table.Table.read(hdu['GTI'])
 
-            self._timezero = np.min(self._event['TIME'])
             self._filter = Filter(self._event)
             self._filter_info = {'time': None, 'energy': None, 'tag': None}
 
@@ -135,6 +137,7 @@ class Event:
 
         return self._filter.evt
 
+    @property
     def gti(self):
         """Return the merged good-time intervals as an (N, 2) array.
 
@@ -173,15 +176,28 @@ class Event:
         return 'None'
 
     @property
+    def mintime(self):
+        """Return the minimum event time in MET seconds."""
+
+        return np.min(self._event['TIME'])
+
+    @property
     def timezero(self):
-        """Return the reference time in MET seconds."""
+        """Return the reference time in MET seconds.
 
-        return self._timezero
+        Falls back to :attr:`mintime` when no explicit value has been set
+        through :meth:`filter_time` or when it was reset to ``None``.
+        """
 
-    @timezero.setter
-    def timezero(self, new_timezero):
-
-        self._timezero = new_timezero
+        try:
+            _ = self._timezero
+        except AttributeError:
+            return self.mintime
+        else:
+            if self._timezero is not None:
+                return self._timezero
+            else:
+                return self.mintime
 
     @property
     def timezero_utc(self):
@@ -189,63 +205,114 @@ class Event:
 
         return None
 
-    def slice_time(self, t1t2):
+    def slice_time(self, t1t2, timezero):
         """Trim the event table in-place to a time window relative to ``timezero``.
 
-        Unlike ``filter_time``, this permanently discards events outside
-        ``[t1, t2]`` and resets all active filters.
+        Unlike :meth:`filter_time`, this permanently discards events outside
+        ``[t1, t2]``, rebuilds the underlying :class:`Filter` view from the
+        trimmed table, resets all active filters, and clears every cached
+        property.
 
         Args:
             t1t2: Two-element sequence ``[t1, t2]`` in seconds relative to
                 ``timezero``.
+            timezero: Reference epoch in MET seconds used to convert
+                ``t1t2`` into absolute event times.
+
+        Raises:
+            ValueError: If ``t1t2`` is neither a list nor a tuple, or if
+                ``timezero`` is neither a ``float`` nor an ``int``.
         """
+
+        if not isinstance(t1t2, (list, tuple)):
+            raise ValueError('t1t2 is expected to be list or tuple')
+
+        if not isinstance(timezero, (float, int)):
+            raise ValueError('timezero is expected to be float or int')
 
         t1, t2 = t1t2
 
-        met_t1 = self.timezero + t1
-        met_t2 = self.timezero + t2
+        met_t1 = timezero + t1
+        met_t2 = timezero + t2
 
         met_ts = self._event['TIME']
         flt = (met_ts >= met_t1) & (met_ts <= met_t2)
         self._event = self._event[flt]
 
+        self._filter = Filter(self._event)
+
         self._clear_filter()
 
-    def filter_time(self, t1t2):
-        """Apply a reversible time filter to the event table.
+        clear_cached_property(self)
 
-        Passing ``None`` removes the current time filter and restores all
-        previously excluded events.
+    def _utc_to_met(self, utc):
+        """Convert a UTC string to mission elapsed time (MET) seconds.
+
+        Subclasses override this hook to support ``timezero='YYYY-MM-...'``
+        in :meth:`filter_time`. The base ``Event`` class has no associated
+        mission, so it raises ``NotImplementedError``.
 
         Args:
-            t1t2: Two-element list ``[t1, t2]`` in seconds relative to
-                ``timezero``, or ``None`` to clear the filter.
+            utc: UTC timestamp string in ISO-like format.
 
         Raises:
-            ValueError: If ``t1t2`` is neither a list nor ``None``.
+            NotImplementedError: Always, on the base class; subclasses
+                must override this hook.
         """
+
+        raise NotImplementedError(
+            'UTC string timezero is not supported by the base Event class; '
+            'use a mission-specific subclass.'
+        )
+
+    def filter_time(self, t1t2=None, timezero=None):
+        """Apply a reversible time filter to the event table.
+
+        Passing ``None`` for ``t1t2`` removes the current time filter and
+        restores all previously excluded events. ``timezero`` is stored
+        and reused by every relative-time accessor; passing ``None`` resets
+        it so :attr:`timezero` falls back to :attr:`mintime`.
+
+        Args:
+            t1t2: Two-element ``[t1, t2]`` in seconds relative to
+                ``timezero``, or ``None`` to clear the filter.
+            timezero: Reference epoch as MET seconds (``float`` / ``int``)
+                or as a UTC string (converted via :meth:`_utc_to_met`).
+                ``None`` falls back to :attr:`mintime`.
+
+        Raises:
+            ValueError: If ``t1t2`` is not a list, tuple, or ``None``, or
+                if ``timezero`` is not a number, string, or ``None``.
+            NotImplementedError: If ``timezero`` is a string and the
+                concrete subclass does not implement :meth:`_utc_to_met`.
+        """
+
+        if not isinstance(t1t2, (list, tuple, type(None))):
+            raise ValueError('t1t2 is expected to be list, tuple, or None')
+
+        if not isinstance(timezero, (float, int, str, type(None))):
+            raise ValueError('timezero is expected to be float, int, str, or None')
+
+        if isinstance(timezero, str):
+            timezero = self._utc_to_met(timezero)
+
+        self._time_filter = t1t2
+        self._timezero = timezero
 
         if t1t2 is None:
             expr = None
 
-        elif isinstance(t1t2, list):
+        else:
             t1, t2 = t1t2
-
             met_t1 = self.timezero + t1
             met_t2 = self.timezero + t2
-
             expr = f'(TIME >= {met_t1}) * (TIME <= {met_t2})'
-
-        else:
-            raise ValueError('t1t2 is extected to be list or None')
-
-        self._time_filter = t1t2
 
         self._filter_info['time'] = expr
 
         self._filter_update()
 
-    def filter_energy(self, e1e2):
+    def filter_energy(self, e1e2=None):
         """Apply a reversible energy filter to the event table.
 
         Passing ``None`` removes the current energy filter.
@@ -258,15 +325,15 @@ class Event:
             ValueError: If ``e1e2`` is neither a list nor ``None``.
         """
 
+        if not isinstance(e1e2, (list, tuple, type(None))):
+            raise ValueError('e1e2 is expected to be list, tuple, or None')
+
         if e1e2 is None:
             expr = None
 
-        elif isinstance(e1e2, list):
+        else:
             e1, e2 = e1e2
             expr = f'(ENERGY >= {e1}) * (ENERGY <= {e2})'
-
-        else:
-            raise ValueError('e1e2 is extected to be list or None')
 
         self._filter_info['energy'] = expr
 
@@ -290,6 +357,8 @@ class Event:
 
     def _filter_update(self):
 
+        clear_cached_property(self)
+
         self._clear_filter()
 
         self._filter.eval(self._filter_info['time'])
@@ -306,7 +375,7 @@ class Event:
 
         return self._filter_info
 
-    @property
+    @cached_property()
     def time_filter(self):
         """Return the active time-filter window ``[t1, t2]`` in seconds.
 
@@ -322,12 +391,12 @@ class Event:
         else:
             return self._time_filter
 
-    @property
+    @cached_property()
     def _ts(self):
 
         return np.array(self._event['TIME']) - self.timezero
 
-    @property
+    @cached_property()
     def _pha(self):
 
         try:
@@ -335,18 +404,18 @@ class Event:
         except KeyError:
             return np.array(self._event['PI']).astype(int)
 
-    @property
+    @cached_property()
     def _dtime(self):
 
         return np.array(self._event['DEAD_TIME'])
 
-    @property
+    @cached_property()
     def ts(self):
         """Return filtered event times in seconds relative to ``timezero``."""
 
         return np.array(self.event['TIME']) - self.timezero
 
-    @property
+    @cached_property()
     def pha(self):
         """Return filtered pulse-height channel indices as integers."""
 
@@ -355,19 +424,19 @@ class Event:
         except KeyError:
             return np.array(self.event['PI']).astype(int)
 
-    @property
+    @cached_property()
     def channel(self):
         """Return detector channel numbers from the EBOUNDS table."""
 
         return np.array(self.ebound['CHANNEL'], dtype=int)
 
-    @property
+    @cached_property()
     def channel_emin(self):
         """Return lower energy boundary of each channel in keV."""
 
         return np.array(self.ebound['E_MIN'])
 
-    @property
+    @cached_property()
     def channel_emax(self):
         """Return upper energy boundary of each channel in keV.
 
@@ -469,6 +538,12 @@ class Event:
             raise ValueError('lc_binsize is extected to be int, float or None')
 
     @property
+    def lc_params(self):
+        """Return the light-curve cache key as ``(lc_t1t2, lc_binsize)``."""
+
+        return (self.lc_t1t2, self.lc_binsize)
+
+    @property
     def spec_binsize(self):
         """Return the per-channel background fitting bin width in seconds.
 
@@ -494,6 +569,12 @@ class Event:
             raise ValueError('spec_binsize is extected to be int, float or None')
 
     @property
+    def spec_params(self):
+        """Return the spectrum cache key as ``(spec_t1t2, spec_binsize)``."""
+
+        return (self.spec_t1t2, self.spec_binsize)
+
+    @cached_property(lambda self: self.lc_params)
     def lc_ts(self):
         """Return event times within the light curve window in seconds."""
 
@@ -501,7 +582,7 @@ class Event:
 
         return self.ts[idx]
 
-    @property
+    @cached_property(lambda self: self.spec_params)
     def spec_ts(self):
         """Return unfiltered event times within the spectrum window in seconds."""
 
@@ -509,7 +590,7 @@ class Event:
 
         return self._ts[idx]
 
-    @property
+    @cached_property(lambda self: self.lc_params)
     def lc_pha(self):
         """Return PHA channel indices for events within the light curve window."""
 
@@ -517,7 +598,7 @@ class Event:
 
         return self.pha[idx]
 
-    @property
+    @cached_property(lambda self: self.spec_params)
     def spec_pha(self):
         """Return unfiltered PHA channel indices within the spectrum window."""
 
@@ -575,13 +656,13 @@ class Event:
 
         return binsize - dead_time
 
-    @property
+    @cached_property(lambda self: self.lc_params)
     def lc_bins(self):
         """Return the light curve bin edges array in seconds."""
 
         return np.arange(self.lc_t1t2[0], self.lc_t1t2[1] + 1e-5, self.lc_binsize)
 
-    @property
+    @cached_property(lambda self: self.lc_params)
     def lc_bin_list(self):
         """Return light curve bin boundaries as an (N, 2) array in seconds."""
 
@@ -589,19 +670,19 @@ class Event:
 
         return np.vstack((lbins, rbins)).T
 
-    @property
+    @cached_property(lambda self: self.lc_params)
     def lc_exps(self):
         """Return light curve bin exposures in seconds (no dead-time correction)."""
 
         return self.calc_exposure(self.lc_bin_list, dead=False)
 
-    @property
+    @cached_property(lambda self: self.lc_params)
     def lc_time(self):
         """Return light curve bin center times in seconds."""
 
         return np.mean(self.lc_bin_list, axis=1)
 
-    @property
+    @cached_property(lambda self: self.lc_params)
     def lc_time_err(self):
         """Return half-widths of light curve bins in seconds."""
 
@@ -609,25 +690,25 @@ class Event:
 
         return (rbins - lbins) / 2
 
-    @property
+    @cached_property(lambda self: self.lc_params)
     def lc_src_cts(self):
         """Return source counts per light curve bin."""
 
         return np.histogram(self.lc_ts, bins=self.lc_bins)[0]
 
-    @property
+    @cached_property(lambda self: self.lc_params)
     def lc_src_cts_err(self):
         """Return Poisson 1-sigma uncertainties on source counts per bin."""
 
         return np.sqrt(self.lc_src_cts)
 
-    @property
+    @cached_property(lambda self: self.lc_params)
     def lc_src_rate(self):
         """Return source count rate per light curve bin in counts per second."""
 
         return self.lc_src_cts / self.lc_exps
 
-    @property
+    @cached_property(lambda self: self.lc_params)
     def lc_src_rate_err(self):
         """Return 1-sigma uncertainties on source count rate in counts per second."""
 
@@ -720,6 +801,19 @@ class Event:
         else:
             raise ValueError('bs_deg is extected to be int or None')
 
+    @property
+    def lc_bs_params(self):
+        """Return the background-fit cache key as a tuple of all bs inputs."""
+
+        return (
+            self.lc_t1t2,
+            self.lc_binsize,
+            self.bs_ignore,
+            self.bs_p0,
+            self.bs_sigma,
+            self.bs_deg,
+        )
+
     def calc_autobs(self):
         """Run automatic polynomial background estimation for the light curve.
 
@@ -732,67 +826,63 @@ class Event:
         self._lc_bs.loop(p0=self.bs_p0, sigma=self.bs_sigma, deg=self.bs_deg)
         self._lc_bs.loop(p0=self.bs_p0, sigma=self.bs_sigma, deg=self.bs_deg)
 
-    @property
+    @cached_property(lambda self: self.lc_bs_params)
     def lc_bs(self):
         """Return the ``pgSignal`` background-fit result, computing it if needed."""
 
-        try:
-            _ = self._lc_bs
-        except AttributeError:
-            self.calc_autobs()
-            return self._lc_bs
-        else:
-            return self._lc_bs
+        self.calc_autobs()
 
-    @property
+        return self._lc_bs
+
+    @cached_property(lambda self: self.lc_bs_params)
     def lc_bkg_rate(self):
         """Return background count rate at light curve bin centers in counts per second."""
 
         return self.lc_bs.poly.val(self.lc_time)[0]
 
-    @property
+    @cached_property(lambda self: self.lc_bs_params)
     def lc_bkg_rate_err(self):
         """Return 1-sigma uncertainty on background rate in counts per second."""
 
         return self.lc_bs.poly.val(self.lc_time)[1]
 
-    @property
+    @cached_property(lambda self: self.lc_bs_params)
     def lc_bkg_cts(self):
         """Return background counts per light curve bin."""
 
         return self.lc_bkg_rate * self.lc_exps
 
-    @property
+    @cached_property(lambda self: self.lc_bs_params)
     def lc_bkg_cts_err(self):
         """Return 1-sigma uncertainty on background counts per light curve bin."""
 
         return self.lc_bkg_rate_err * self.lc_exps
 
-    @property
+    @cached_property(lambda self: self.lc_bs_params)
     def lc_net_rate(self):
         """Return background-subtracted net count rate in counts per second."""
 
         return self.lc_src_rate - self.lc_bkg_rate
 
-    @property
+    @cached_property(lambda self: self.lc_bs_params)
     def lc_net_rate_err(self):
         """Return 1-sigma uncertainty on net count rate in counts per second."""
 
         return np.sqrt(self.lc_src_rate_err**2 + self.lc_bkg_rate_err**2)
 
-    @property
+    @cached_property(lambda self: self.lc_bs_params)
     def lc_net_cts(self):
         """Return net (background-subtracted) counts per light curve bin."""
 
         return self.lc_net_rate * self.lc_exps
 
-    @property
+    @cached_property(lambda self: self.lc_bs_params)
     def lc_net_cts_err(self):
         """Return 1-sigma uncertainty on net counts per light curve bin."""
 
         return self.lc_net_rate_err * self.lc_exps
 
-    @property
+    @cached_property(lambda self: self.lc_bs_params)
     def lc_net_ccts(self):
         """Return cumulative net counts over the light curve bins."""
 
@@ -818,15 +908,7 @@ class Event:
             os.makedirs(savepath)
 
         if autobs:
-            lc_bs = self.lc_bs
-            lc_bs.save(savepath=savepath + '/pgsignal')
-
-            lc_bkg_rate, lc_bkg_rate_err = lc_bs.poly.val(self.lc_time)
-
-            lc_net_rate = self.lc_src_rate - lc_bkg_rate
-            lc_net_cts = lc_net_rate * self.lc_exps
-
-            lc_net_ccts = np.cumsum(lc_net_cts)
+            self.lc_bs.save(savepath=savepath + '/pgsignal')
 
         fig = go.Figure()
         src = go.Scatter(
@@ -843,11 +925,11 @@ class Event:
         if autobs:
             bkg = go.Scatter(
                 x=self.lc_time,
-                y=lc_bkg_rate,
+                y=self.lc_bkg_rate,
                 mode='lines+markers',
                 name='background lightcurve',
                 showlegend=True,
-                error_y=dict(type='data', array=lc_bkg_rate_err, thickness=1.5, width=0),
+                error_y=dict(type='data', array=self.lc_bkg_rate_err, thickness=1.5, width=0),
                 marker=dict(symbol='cross-thin', size=0),
             )
             fig.add_trace(bkg)
@@ -860,13 +942,13 @@ class Event:
         if show:
             fig.show()
         fig.write_html(savepath + '/lc.html', include_plotlyjs='cdn')
-        fig.write_image(savepath + '/lc.pdf')
+        # fig.write_image(savepath + '/lc.pdf')
 
         if autobs:
             fig = go.Figure()
             net = go.Scatter(
                 x=self.lc_time,
-                y=lc_net_ccts,
+                y=self.lc_net_ccts,
                 mode='lines',
                 name='net cumulated counts',
                 showlegend=True,
@@ -880,7 +962,7 @@ class Event:
             fig.update_layout(legend=dict(x=1, y=1, xanchor='right', yanchor='bottom'))
 
             fig.write_html(savepath + '/cum_lc.html', include_plotlyjs='cdn')
-            fig.write_image(savepath + '/cum_lc.pdf')
+            # fig.write_image(savepath + '/cum_lc.pdf')
 
     def calculate_txx(
         self,
@@ -1061,7 +1143,7 @@ class Event:
         if show:
             fig.show()
         fig.write_html(savepath + '/rebin_lc.html', include_plotlyjs='cdn')
-        fig.write_image(savepath + '/rebin_lc.pdf')
+        # fig.write_image(savepath + '/rebin_lc.pdf')
 
     @property
     def spec_slices(self):
@@ -1528,6 +1610,8 @@ class gbmTTE(Event):
 
     def _read(self):
 
+        clear_cached_property(self)
+
         if isinstance(self._file, str):
             self._file = [self._file]
 
@@ -1567,8 +1651,6 @@ class gbmTTE(Event):
 
         self._event.sort('TIME')
         self._gti.sort('START')
-
-        self._timezero = np.min(self._event['TIME'])
 
         self._filter = Filter(self._event)
         self._filter_info = {'time': None, 'energy': None, 'pha': None, 'tag': None}
@@ -1638,30 +1720,17 @@ class gbmTTE(Event):
         return self._pos_t1t2_list
 
     @property
-    def timezero(self):
-        """Return the reference time in Fermi MET seconds."""
-
-        return self._timezero
-
-    @timezero.setter
-    def timezero(self, new_timezero):
-
-        if isinstance(new_timezero, float):
-            self._timezero = new_timezero
-
-        elif isinstance(new_timezero, str):
-            self._timezero = fermi_utc_to_met(new_timezero)
-
-        else:
-            raise ValueError('not expected type for timezero')
-
-    @property
     def timezero_utc(self):
         """Return the reference time as a Fermi UTC string."""
 
         return fermi_met_to_utc(self.timezero)
 
-    def filter_pha(self, p1p2):
+    def _utc_to_met(self, utc):
+        """Convert a UTC string to Fermi MET seconds."""
+
+        return fermi_utc_to_met(utc)
+
+    def filter_pha(self, p1p2=None):
         """Apply a reversible PHA channel range filter to the event table.
 
         Args:
@@ -1672,21 +1741,23 @@ class gbmTTE(Event):
             ValueError: If ``p1p2`` is neither a list nor ``None``.
         """
 
+        if not isinstance(p1p2, (list, tuple, type(None))):
+            raise ValueError('p1p2 is extected to be list or None')
+
         if p1p2 is None:
             expr = None
 
-        elif isinstance(p1p2, list):
+        else:
             p1, p2 = p1p2
             expr = f'(PHA >= {p1}) * (PHA <= {p2})'
-
-        else:
-            raise ValueError('p1p2 is extected to be list or None')
 
         self._filter_info['pha'] = expr
 
         self._filter_update()
 
     def _filter_update(self):
+
+        clear_cached_property(self)
 
         self._clear_filter()
 
@@ -1808,6 +1879,8 @@ class gecamEVT(Event):
 
     def _read(self):
 
+        clear_cached_property(self)
+
         if isinstance(self._file, str):
             self._file = [self._file]
 
@@ -1843,8 +1916,6 @@ class gecamEVT(Event):
 
         self._event.sort('TIME')
         self._gti.sort('START')
-
-        self._timezero = np.min(self._event['TIME'])
 
         self._filter = Filter(self._event)
         self._filter_info = {'time': None, 'energy': None, 'pi': None, 'tag': None}
@@ -1898,30 +1969,17 @@ class gecamEVT(Event):
         return 'GRD'
 
     @property
-    def timezero(self):
-        """Return the reference time in GECAM MET seconds."""
-
-        return self._timezero
-
-    @timezero.setter
-    def timezero(self, new_timezero):
-
-        if isinstance(new_timezero, float):
-            self._timezero = new_timezero
-
-        elif isinstance(new_timezero, str):
-            self._timezero = gecam_utc_to_met(new_timezero)
-
-        else:
-            raise ValueError('not expected type for timezero')
-
-    @property
     def timezero_utc(self):
         """Return the reference time as a GECAM UTC string."""
 
         return gecam_met_to_utc(self.timezero)
 
-    def filter_pi(self, p1p2):
+    def _utc_to_met(self, utc):
+        """Convert a UTC string to GECAM MET seconds."""
+
+        return gecam_utc_to_met(utc)
+
+    def filter_pi(self, p1p2=None):
         """Apply a reversible PI channel range filter to the event table.
 
         Args:
@@ -1932,21 +1990,23 @@ class gecamEVT(Event):
             ValueError: If ``p1p2`` is neither a list nor ``None``.
         """
 
+        if not isinstance(p1p2, (list, tuple, type(None))):
+            raise ValueError('p1p2 is extected to be list or None')
+
         if p1p2 is None:
             expr = None
 
-        elif isinstance(p1p2, list):
+        else:
             p1, p2 = p1p2
             expr = f'(PI >= {p1}) * (PI <= {p2})'
-
-        else:
-            raise ValueError('p1p2 is extected to be list or None')
 
         self._filter_info['pi'] = expr
 
         self._filter_update()
 
     def _filter_update(self):
+
+        clear_cached_property(self)
 
         self._clear_filter()
 
@@ -2014,6 +2074,8 @@ class gridTTE(Event):
 
     def _read(self):
 
+        clear_cached_property(self)
+
         if isinstance(self._file, str):
             self._file = [self._file]
         if isinstance(self._rspfile, str):
@@ -2050,8 +2112,6 @@ class gridTTE(Event):
 
         self._event = table.unique(self._event, keys=['TIME', 'PI'])
         self._event.sort('TIME')
-
-        self._timezero = np.min(self._event['TIME'])
 
         self._filter = Filter(self._event)
         self._filter_info = {'time': None, 'energy': None, 'pi': None, 'tag': None}
@@ -2103,30 +2163,17 @@ class gridTTE(Event):
         return 'GRID'
 
     @property
-    def timezero(self):
-        """Return the reference time in GRID MET seconds."""
-
-        return self._timezero
-
-    @timezero.setter
-    def timezero(self, new_timezero):
-
-        if isinstance(new_timezero, float):
-            self._timezero = new_timezero
-
-        elif isinstance(new_timezero, str):
-            self._timezero = grid_utc_to_met(new_timezero)
-
-        else:
-            raise ValueError('not expected type for timezero')
-
-    @property
     def timezero_utc(self):
         """Return the reference time as a GRID UTC string."""
 
         return grid_met_to_utc(self.timezero)
 
-    def filter_pi(self, p1p2):
+    def _utc_to_met(self, utc):
+        """Convert a UTC string to GRID MET seconds."""
+
+        return grid_utc_to_met(utc)
+
+    def filter_pi(self, p1p2=None):
         """Apply a reversible PI channel range filter to the event table.
 
         Args:
@@ -2137,21 +2184,23 @@ class gridTTE(Event):
             ValueError: If ``p1p2`` is neither a list nor ``None``.
         """
 
+        if not isinstance(p1p2, (list, tuple, type(None))):
+            raise ValueError('p1p2 is extected to be list or None')
+
         if p1p2 is None:
             expr = None
 
-        elif isinstance(p1p2, list):
+        else:
             p1, p2 = p1p2
             expr = f'(PI >= {p1}) * (PI <= {p2})'
-
-        else:
-            raise ValueError(f'p1p2 is expected to be list or None, got {type(p1p2)}')
 
         self._filter_info['pi'] = expr
 
         self._filter_update()
 
     def _filter_update(self):
+
+        clear_cached_property(self)
 
         self._clear_filter()
 
@@ -2185,6 +2234,8 @@ class gridgroundTTE(Event):
 
     def _read(self):
 
+        clear_cached_property(self)
+
         if isinstance(self._file, str):
             self._file = [self._file]
 
@@ -2213,8 +2264,6 @@ class gridgroundTTE(Event):
 
         self._event = table.unique(self._event, keys=['TIME', 'PI'])
         self._event.sort('TIME')
-
-        self._timezero = np.min(self._event['TIME'])
 
         self._filter = Filter(self._event)
         self._filter_info = {'time': None, 'energy': None, 'pi': None, 'tag': None}
@@ -2253,30 +2302,17 @@ class gridgroundTTE(Event):
         return 'GRID'
 
     @property
-    def timezero(self):
-        """Return the reference time in GRID MET seconds."""
-
-        return self._timezero
-
-    @timezero.setter
-    def timezero(self, new_timezero):
-
-        if isinstance(new_timezero, float):
-            self._timezero = new_timezero
-
-        elif isinstance(new_timezero, str):
-            self._timezero = grid_utc_to_met(new_timezero)
-
-        else:
-            raise ValueError('not expected type for timezero')
-
-    @property
     def timezero_utc(self):
         """Return the reference time as a GRID UTC string."""
 
         return grid_met_to_utc(self.timezero)
 
-    def filter_pi(self, p1p2):
+    def _utc_to_met(self, utc):
+        """Convert a UTC string to GRID MET seconds."""
+
+        return grid_utc_to_met(utc)
+
+    def filter_pi(self, p1p2=None):
         """Apply a reversible PI channel range filter to the event table.
 
         Args:
@@ -2287,21 +2323,23 @@ class gridgroundTTE(Event):
             ValueError: If ``p1p2`` is neither a list nor ``None``.
         """
 
+        if not isinstance(p1p2, (list, tuple, type(None))):
+            raise ValueError('p1p2 is extected to be list or None')
+
         if p1p2 is None:
             expr = None
 
-        elif isinstance(p1p2, list):
+        else:
             p1, p2 = p1p2
             expr = f'(PI >= {p1}) * (PI <= {p2})'
-
-        else:
-            raise ValueError(f'p1p2 is expected to be list or None, got {type(p1p2)}')
 
         self._filter_info['pi'] = expr
 
         self._filter_update()
 
     def _filter_update(self):
+
+        clear_cached_property(self)
 
         self._clear_filter()
 

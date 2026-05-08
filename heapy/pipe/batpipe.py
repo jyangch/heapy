@@ -6,7 +6,7 @@ and spectral product generation for Swift BAT gamma-ray burst observations.
 
 Example:
     pipe = batPipe.from_batobs('00012345678', datapath='/data/swift')
-    pipe.timezero = '2024-01-01T12:00:00'
+    pipe.filter_time([-50, 200], timezero='2024-01-01T12:00:00')
     pipe.filter_energy([15, 150])
     pipe.extract_curve(savepath='./output/curve')
     pipe.extract_spectrum(savepath='./output/spectrum')
@@ -24,6 +24,7 @@ from ..data.retrieve import swiftRetrieve
 from ..temp.txx import ggTxx
 from ..util.data import rebin
 from ..util.time import swift_met_to_utc, swift_utc_to_met
+from ..util.tools import cached_property, clear_cached_property
 
 
 class batPipe:
@@ -294,6 +295,8 @@ class batPipe:
 
     def _general_processing(self):
 
+        clear_cached_property(self)
+
         self.general_savepath = os.path.dirname(os.path.dirname(self.ufevtfile)) + '/batpipe'
 
         self.dpifile = self.general_savepath + '/grb.dpi'
@@ -374,7 +377,7 @@ class batPipe:
         self._batbinevt_image(std=std)
         self._batfftimage(std=std)
 
-    @property
+    @cached_property()
     def utcf(self):
         """Return the UTC correction factor stored in the event file header.
 
@@ -391,7 +394,7 @@ class batPipe:
 
         return val
 
-    @property
+    @cached_property()
     def trigtime(self):
         """Return the trigger time in Swift Mission Elapsed Time (MET).
 
@@ -407,7 +410,7 @@ class batPipe:
 
         return val
 
-    @property
+    @cached_property()
     def tstart(self):
         """Return the observation start time in Swift MET seconds.
 
@@ -423,7 +426,7 @@ class batPipe:
 
         return val
 
-    @property
+    @cached_property()
     def tstop(self):
         """Return the observation stop time in Swift MET seconds.
 
@@ -443,29 +446,22 @@ class batPipe:
     def timezero(self):
         """Return the reference time used as t=0 for all relative time axes.
 
-        Defaults to ``trigtime`` when no explicit value has been set via the
-        setter.  Can be overridden by assigning a MET float or a UTC string.
+        Falls back to :attr:`trigtime` when no explicit value has been set
+        through :meth:`filter_time` or when it was reset to ``None``.
 
         Returns:
             Reference time in seconds (MET).
         """
 
         try:
-            return self._timezero
+            _ = self._timezero
         except AttributeError:
             return self.trigtime
-
-    @timezero.setter
-    def timezero(self, new_timezero):
-
-        if isinstance(new_timezero, float):
-            self._timezero = new_timezero
-
-        elif isinstance(new_timezero, str):
-            self._timezero = swift_utc_to_met(new_timezero, self.utcf)
-
         else:
-            raise ValueError('not expected type for timezero')
+            if self._timezero is not None:
+                return self._timezero
+            else:
+                return self.trigtime
 
     @property
     def timezero_utc(self):
@@ -477,25 +473,43 @@ class batPipe:
 
         return swift_met_to_utc(self.timezero, self.utcf)
 
-    def filter_time(self, t1t2):
+    def filter_time(self, t1t2=None, timezero=None):
         """Set the time interval used for light curve and spectral extraction.
 
+        Both arguments are stored as instance state and every cached
+        property is invalidated. Passing ``None`` for ``t1t2`` reverts to
+        the full observation span; passing ``None`` for ``timezero`` makes
+        :attr:`timezero` fall back to :attr:`trigtime`.
+
         Args:
-            t1t2: Two-element list ``[t1, t2]`` giving the start and stop time
-                in seconds relative to ``timezero``, or ``None`` to reset to
-                the full observation span.
+            t1t2: Two-element list ``[t1, t2]`` giving the start and stop
+                time in seconds relative to ``timezero``, or ``None`` to
+                reset to the full observation span.
+            timezero: Reference epoch as Swift MET seconds
+                (``float`` / ``int``) or as a UTC string (converted via
+                :func:`swift_utc_to_met` using :attr:`utcf`). ``None``
+                falls back to :attr:`trigtime`.
 
         Raises:
-            ValueError: If ``t1t2`` is neither a list nor ``None``.
+            ValueError: If ``t1t2`` is not a list, tuple, or ``None``, or
+                if ``timezero`` is not a number, string, or ``None``.
         """
 
-        if isinstance(t1t2, (list, type(None))):
-            self._time_filter = t1t2
+        if not isinstance(t1t2, (list, tuple, type(None))):
+            raise ValueError('t1t2 is expected to be list, tuple or None')
 
-        else:
-            raise ValueError('t1t2 is extected to be list or None')
+        if not isinstance(timezero, (float, int, str, type(None))):
+            raise ValueError('timezero is expected to be float, int, str or None')
 
-    def filter_energy(self, e1e2):
+        if isinstance(timezero, str):
+            timezero = swift_utc_to_met(timezero, self.utcf)
+
+        self._time_filter = t1t2
+        self._timezero = timezero
+
+        clear_cached_property(self)
+
+    def filter_energy(self, e1e2=None):
         """Set the energy band used for light curve and spectral extraction.
 
         Args:
@@ -507,11 +521,12 @@ class batPipe:
             ValueError: If ``e1e2`` is neither a list nor ``None``.
         """
 
-        if isinstance(e1e2, (list, type(None))):
-            self._energy_filter = e1e2
+        if not isinstance(e1e2, (list, tuple, type(None))):
+            raise ValueError('e1e2 is expected to be list, tuple or None')
 
-        else:
-            raise ValueError('e1e2 is extected to be list or None')
+        self._energy_filter = e1e2
+
+        clear_cached_property(self)
 
     @property
     def time_filter(self):
@@ -620,7 +635,7 @@ class batPipe:
         if isinstance(new_lc_binsize, (int, float, type(None))):
             self._lc_binsize = new_lc_binsize
         else:
-            raise ValueError('lc_binsize is extected to be int, float or None')
+            raise ValueError('lc_binsize is expected to be int, float or None')
 
     @property
     def lc_tstart(self):
@@ -724,7 +739,7 @@ class batPipe:
         if isinstance(new_gs_p0, (float, int)):
             self._gs_p0 = new_gs_p0
         else:
-            raise ValueError('gs_p0 is extected to be float or int')
+            raise ValueError('gs_p0 is expected to be float or int')
 
     @property
     def gs_sigma(self):
@@ -745,7 +760,7 @@ class batPipe:
         if isinstance(new_gs_sigma, (int, float)):
             self._gs_sigma = new_gs_sigma
         else:
-            raise ValueError('gs_sigma is extected to be int or float')
+            raise ValueError('gs_sigma is expected to be int or float')
 
     @property
     def lc_gs(self):
@@ -813,7 +828,7 @@ class batPipe:
         if show:
             fig.show()
         fig.write_html(savepath + '/lc.html', include_plotlyjs='cdn')
-        fig.write_image(savepath + '/lc.pdf')
+        # fig.write_image(savepath + '/lc.pdf')
 
         fig = go.Figure()
         net = go.Scatter(
@@ -831,7 +846,7 @@ class batPipe:
         fig.update_layout(legend=dict(x=1, y=1, xanchor='right', yanchor='bottom'))
 
         fig.write_html(savepath + '/cum_lc.html', include_plotlyjs='cdn')
-        fig.write_image(savepath + '/cum_lc.pdf')
+        # fig.write_image(savepath + '/cum_lc.pdf')
 
     def calculate_txx(
         self,
@@ -972,7 +987,7 @@ class batPipe:
         if show:
             fig.show()
         fig.write_html(savepath + '/rebin_lc.html', include_plotlyjs='cdn')
-        fig.write_image(savepath + '/rebin_lc.pdf')
+        # fig.write_image(savepath + '/rebin_lc.pdf')
 
     @property
     def spec_slices(self):

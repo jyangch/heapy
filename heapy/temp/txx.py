@@ -340,7 +340,11 @@ class pgTxx(pgSignal):
                 'csf2': self.csf2,
             }
 
-        msg = [f'{"id#":<5}{"Txx":<10}{"Txx-":<8}{"Txx+":<8}{"Txx1":<8}{"Txx2":<8}'] + [
+        XX = int(self.xx * 100)
+
+        msg = [
+            f'{"id#":<5}{f"T{XX}":<10}{f"T{XX}-":<8}{f"T{XX}+":<8}{f"T{XX}1":<8}{f"T{XX}2":<8}'
+        ] + [
             f'{i + 1:<5d}{t:<10.3f}{t_err[0]:<8.3f}{t_err[1]:<8.3f}{t1:<8.3f}{t2:<8.3f}'
             for i, (t, t_err, t1, t2) in enumerate(
                 zip(
@@ -694,7 +698,11 @@ class ppTxx(ppSignal):
             'csf2': self.csf2,
         }
 
-        msg = [f'{"id#":<5}{"Txx":<10}{"Txx-":<8}{"Txx+":<8}{"Txx1":<8}{"Txx2":<8}'] + [
+        XX = int(self.xx * 100)
+
+        msg = [
+            f'{"id#":<5}{f"T{XX}":<10}{f"T{XX}-":<8}{f"T{XX}+":<8}{f"T{XX}1":<8}{f"T{XX}2":<8}'
+        ] + [
             f'{i + 1:<5d}{t:<10.3f}{t_err[0]:<8.3f}{t_err[1]:<8.3f}{t1:<8.3f}{t2:<8.3f}'
             for i, (t, t_err, t1, t2) in enumerate(
                 zip(
@@ -1049,7 +1057,11 @@ class ggTxx(ggSignal):
             'csf2': self.csf2,
         }
 
-        msg = [f'{"id#":<5}{"Txx":<10}{"Txx-":<8}{"Txx+":<8}{"Txx1":<8}{"Txx2":<8}'] + [
+        XX = int(self.xx * 100)
+
+        msg = [
+            f'{"id#":<5}{f"T{XX}":<10}{f"T{XX}-":<8}{f"T{XX}+":<8}{f"T{XX}1":<8}{f"T{XX}2":<8}'
+        ] + [
             f'{i + 1:<5d}{t:<10.3f}{t_err[0]:<8.3f}{t_err[1]:<8.3f}{t1:<8.3f}{t2:<8.3f}'
             for i, (t, t_err, t1, t2) in enumerate(
                 zip(

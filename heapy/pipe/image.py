@@ -30,7 +30,7 @@ from ..temp.txx import ppTxx
 from ..util.data import rebin, union
 from ..util.file import copy_file
 from ..util.time import ep_met_to_utc, ep_utc_to_met, swift_met_to_utc, swift_utc_to_met
-from ..util.tools import json_dump
+from ..util.tools import cached_property, clear_cached_property, json_dump
 from .filter import Filter
 
 docs_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + '/docs'
@@ -232,7 +232,7 @@ class Image:
         hdu = fits.open(self.file)
         self._event = table.Table.read(hdu['EVENTS'])
         self._gti = table.Table.read(hdu['GTI'])
-        self._timezero = hdu['EVENTS'].header['TSTART']
+        self._mintime = hdu['EVENTS'].header['TSTART']
         self._filter = Filter(self._event)
         hdu.close()
 
@@ -279,15 +279,29 @@ class Image:
         return np.array(union(np.vstack((tstart, tstop)).T))
 
     @property
+    def mintime(self):
+        """Return the minimum time (TSTART from the EVENTS header) in seconds."""
+
+        return self._mintime
+
+    @property
     def timezero(self):
-        """Return the reference time (TSTART from the EVENTS header)."""
+        """Return the reference time in MET seconds.
 
-        return self._timezero
+        Falls back to :attr:`mintime` (TSTART from the EVENTS header) when
+        no explicit value has been set through :meth:`filter_time` or when
+        it was reset to ``None``.
+        """
 
-    @timezero.setter
-    def timezero(self, new_timezero):
-
-        self._timezero = new_timezero
+        try:
+            _ = self._timezero
+        except AttributeError:
+            return self.mintime
+        else:
+            if self._timezero is not None:
+                return self._timezero
+            else:
+                return self.mintime
 
     @property
     def timezero_utc(self):
@@ -307,21 +321,35 @@ class Image:
 
         return None
 
-    def slice_time(self, t1t2):
+    def slice_time(self, t1t2, timezero):
         """Trim all event tables in-place to a relative time window.
 
         Permanently discards events outside ``[t1, t2]`` from the full,
-        source, and background event tables and resets all active filters.
+        source, and background event tables, rebuilds each underlying
+        :class:`Filter` view from the trimmed tables, resets all active
+        filters, and clears every cached property.
 
         Args:
             t1t2: Two-element sequence ``[t1, t2]`` in seconds relative to
                 ``timezero``.
+            timezero: Reference epoch in MET seconds used to convert
+                ``t1t2`` into absolute event times.
+
+        Raises:
+            ValueError: If ``t1t2`` is neither a list nor a tuple, or if
+                ``timezero`` is neither a ``float`` nor an ``int``.
         """
+
+        if not isinstance(t1t2, (list, tuple)):
+            raise ValueError('t1t2 is expected to be list or tuple')
+
+        if not isinstance(timezero, (float, int)):
+            raise ValueError('timezero is expected to be float or int')
 
         t1, t2 = t1t2
 
-        met_t1 = self.timezero + t1
-        met_t2 = self.timezero + t2
+        met_t1 = timezero + t1
+        met_t2 = timezero + t2
 
         met_ts = self._event['TIME']
         flt = (met_ts >= met_t1) & (met_ts <= met_t2)
@@ -335,42 +363,82 @@ class Image:
         flt = (bkg_met_ts >= met_t1) & (bkg_met_ts <= met_t2)
         self._bkg_event = self._bkg_event[flt]
 
+        self._filter = Filter(self._event)
+        self._src_filter = Filter(self._src_event)
+        self._bkg_filter = Filter(self._bkg_event)
+
         self._clear_filter()
 
-    def filter_time(self, t1t2):
-        """Apply a reversible time filter to all event tables.
+        clear_cached_property(self)
 
-        Passing ``None`` removes the current time filter.
+    def _utc_to_met(self, utc):
+        """Convert a UTC string to mission elapsed time (MET) seconds.
+
+        Subclasses override this hook to support ``timezero='YYYY-MM-...'``
+        in :meth:`filter_time`. The base ``Image`` class has no associated
+        mission, so it raises ``NotImplementedError``.
 
         Args:
-            t1t2: Two-element list ``[t1, t2]`` in seconds relative to
-                ``timezero``, or ``None`` to clear the filter.
+            utc: UTC timestamp string in ISO-like format.
 
         Raises:
-            ValueError: If ``t1t2`` is neither a list nor ``None``.
+            NotImplementedError: Always, on the base class; subclasses
+                must override this hook.
         """
+
+        raise NotImplementedError(
+            'UTC string timezero is not supported by the base Image class; '
+            'use a mission-specific subclass.'
+        )
+
+    def filter_time(self, t1t2=None, timezero=None):
+        """Apply a reversible time filter to all event tables.
+
+        Passing ``None`` for ``t1t2`` removes the current time filter.
+        ``timezero`` is stored and reused by every relative-time accessor;
+        passing ``None`` resets it so :attr:`timezero` falls back to
+        :attr:`mintime`.
+
+        Args:
+            t1t2: Two-element ``[t1, t2]`` in seconds relative to
+                ``timezero``, or ``None`` to clear the filter.
+            timezero: Reference epoch as MET seconds (``float`` / ``int``)
+                or as a UTC string (converted via :meth:`_utc_to_met`).
+                ``None`` falls back to :attr:`mintime`.
+
+        Raises:
+            ValueError: If ``t1t2`` is not a list, tuple, or ``None``, or
+                if ``timezero`` is not a number, string, or ``None``.
+            NotImplementedError: If ``timezero`` is a string and the
+                concrete subclass does not implement :meth:`_utc_to_met`.
+        """
+
+        if not isinstance(t1t2, (list, tuple, type(None))):
+            raise ValueError('t1t2 is expected to be list, tuple, or None')
+
+        if not isinstance(timezero, (float, int, str, type(None))):
+            raise ValueError('timezero is expected to be float, int, str, or None')
+
+        if isinstance(timezero, str):
+            timezero = self._utc_to_met(timezero)
+
+        self._time_filter = t1t2
+        self._timezero = timezero
 
         if t1t2 is None:
             expr = None
 
-        elif isinstance(t1t2, list):
+        else:
             t1, t2 = t1t2
-
             met_t1 = self.timezero + t1
             met_t2 = self.timezero + t2
-
             expr = f'(TIME >= {met_t1}) * (TIME <= {met_t2})'
-
-        else:
-            raise ValueError('t1t2 is extected to be list or None')
-
-        self._time_filter = t1t2
 
         self._filter_info['time'] = expr
 
         self._filter_update()
 
-    def filter_pi(self, p1p2):
+    def filter_pi(self, p1p2=None):
         """Apply a reversible PI channel range filter to all event tables.
 
         Args:
@@ -381,17 +449,17 @@ class Image:
             ValueError: If ``p1p2`` is neither a list nor ``None``.
         """
 
+        if not isinstance(p1p2, (list, tuple, type(None))):
+            raise ValueError('p1p2 is expected to be list, tuple, or None')
+
+        self._pi_filter = p1p2
+
         if p1p2 is None:
             expr = None
 
-        elif isinstance(p1p2, list):
+        else:
             p1, p2 = p1p2
             expr = f'(PI >= {p1}) * (PI <= {p2})'
-
-        else:
-            raise ValueError('p1p2 is extected to be list or None')
-
-        self._pi_filter = p1p2
 
         self._filter_info['pi'] = expr
 
@@ -410,6 +478,8 @@ class Image:
         self._filter_update()
 
     def _filter_update(self):
+
+        clear_cached_property(self)
 
         self._clear_filter()
 
@@ -437,7 +507,7 @@ class Image:
 
         return self._filter_info
 
-    @property
+    @cached_property()
     def time_filter(self):
         """Return the active time-filter window ``[t1, t2]`` in seconds.
 
@@ -453,7 +523,7 @@ class Image:
         else:
             return self._time_filter
 
-    @property
+    @cached_property()
     def pi_filter(self):
         """Return the active PI filter window ``[p1, p2]``.
 
@@ -526,15 +596,15 @@ class Image:
         if show:
             fig.show()
         fig.write_html(savepath + '/image.html', include_plotlyjs='cdn')
-        fig.write_image(savepath + '/image.pdf')
+        # fig.write_image(savepath + '/image.pdf')
 
-    @property
+    @cached_property()
     def src_ts(self):
         """Return filtered source-region event times in seconds relative to ``timezero``."""
 
         return np.array(self.src_event['TIME']) - self.timezero
 
-    @property
+    @cached_property()
     def bkg_ts(self):
         """Return filtered background-region event times in seconds relative to ``timezero``."""
 
@@ -598,6 +668,12 @@ class Image:
             raise ValueError('lc_binsize is extected to be int, float or None')
 
     @property
+    def lc_params(self):
+        """Return the light-curve cache key as ``(lc_t1t2, lc_binsize)``."""
+
+        return (self.lc_t1t2, self.lc_binsize)
+
+    @cached_property(lambda self: self.lc_params)
     def lc_src_ts(self):
         """Return source-region event times within the light curve window in seconds."""
 
@@ -605,7 +681,7 @@ class Image:
 
         return self.src_ts[idx]
 
-    @property
+    @cached_property(lambda self: self.lc_params)
     def lc_bkg_ts(self):
         """Return background-region event times within the light curve window in seconds."""
 
@@ -613,13 +689,13 @@ class Image:
 
         return self.bkg_ts[idx]
 
-    @property
+    @cached_property(lambda self: self.lc_params)
     def lc_bins(self):
         """Return the light curve bin edges array in seconds."""
 
         return np.arange(self.lc_t1t2[0], self.lc_t1t2[1] + 1e-5, self.lc_binsize)
 
-    @property
+    @cached_property(lambda self: self.lc_params)
     def lc_bin_list(self):
         """Return light curve bin boundaries as an (N, 2) array in seconds."""
 
@@ -627,7 +703,7 @@ class Image:
 
         return np.vstack((lbins, rbins)).T
 
-    @property
+    @cached_property(lambda self: self.lc_params)
     def lc_mask(self):
         """Return a boolean mask selecting bins that fall entirely within a GTI."""
 
@@ -637,13 +713,13 @@ class Image:
             axis=1,
         )
 
-    @property
+    @cached_property(lambda self: self.lc_params)
     def lc_mask_bin_list(self):
         """Return light curve bins restricted to GTI-covered intervals."""
 
         return self.lc_bin_list[self.lc_mask]
 
-    @property
+    @cached_property(lambda self: self.lc_params)
     def lc_exps(self):
         """Return the exposure per light curve bin in seconds.
 
@@ -654,25 +730,25 @@ class Image:
 
         return self.lc_binsize
 
-    @property
+    @cached_property(lambda self: self.lc_params)
     def lc_mask_exps(self):
         """Return GTI-masked light curve exposures in seconds."""
 
         return self.lc_exps[self.lc_mask]
 
-    @property
+    @cached_property(lambda self: self.lc_params)
     def lc_time(self):
         """Return light curve bin center times in seconds."""
 
         return np.mean(self.lc_bin_list, axis=1)
 
-    @property
+    @cached_property(lambda self: self.lc_params)
     def lc_mask_time(self):
         """Return GTI-masked light curve bin center times in seconds."""
 
         return self.lc_time[self.lc_mask]
 
-    @property
+    @cached_property(lambda self: self.lc_params)
     def lc_time_err(self):
         """Return half-widths of light curve bins in seconds."""
 
@@ -680,157 +756,157 @@ class Image:
 
         return (rbins - lbins) / 2
 
-    @property
+    @cached_property(lambda self: self.lc_params)
     def lc_mask_time_err(self):
         """Return GTI-masked light curve bin half-widths in seconds."""
 
         return self.lc_time_err[self.lc_mask]
 
-    @property
+    @cached_property(lambda self: self.lc_params)
     def lc_src_cts(self):
         """Return source counts per light curve bin."""
 
         return np.histogram(self.lc_src_ts, bins=self.lc_bins)[0]
 
-    @property
+    @cached_property(lambda self: self.lc_params)
     def lc_mask_src_cts(self):
         """Return GTI-masked source counts per light curve bin."""
 
         return self.lc_src_cts[self.lc_mask]
 
-    @property
+    @cached_property(lambda self: self.lc_params)
     def lc_src_cts_err(self):
         """Return Poisson 1-sigma uncertainties on source counts per bin."""
 
         return np.sqrt(self.lc_src_cts)
 
-    @property
+    @cached_property(lambda self: self.lc_params)
     def lc_mask_src_cts_err(self):
         """Return GTI-masked Poisson 1-sigma uncertainties on source counts."""
 
         return self.lc_src_cts_err[self.lc_mask]
 
-    @property
+    @cached_property(lambda self: self.lc_params)
     def lc_src_rate(self):
         """Return source count rate per bin in counts per second."""
 
         return self.lc_src_cts / self.lc_exps
 
-    @property
+    @cached_property(lambda self: self.lc_params)
     def lc_mask_src_rate(self):
         """Return GTI-masked source count rate in counts per second."""
 
         return self.lc_src_rate[self.lc_mask]
 
-    @property
+    @cached_property(lambda self: self.lc_params)
     def lc_src_rate_err(self):
         """Return 1-sigma uncertainty on source count rate in counts per second."""
 
         return self.lc_src_cts_err / self.lc_exps
 
-    @property
+    @cached_property(lambda self: self.lc_params)
     def lc_mask_src_rate_err(self):
         """Return GTI-masked 1-sigma uncertainty on source count rate."""
 
         return self.lc_src_rate_err[self.lc_mask]
 
-    @property
+    @cached_property(lambda self: self.lc_params)
     def lc_bkg_cts(self):
         """Return background counts per light curve bin."""
 
         return np.histogram(self.lc_bkg_ts, bins=self.lc_bins)[0]
 
-    @property
+    @cached_property(lambda self: self.lc_params)
     def lc_mask_bkg_cts(self):
         """Return GTI-masked background counts per light curve bin."""
 
         return self.lc_bkg_cts[self.lc_mask]
 
-    @property
+    @cached_property(lambda self: self.lc_params)
     def lc_bkg_cts_err(self):
         """Return Poisson 1-sigma uncertainties on background counts per bin."""
 
         return np.sqrt(self.lc_bkg_cts)
 
-    @property
+    @cached_property(lambda self: self.lc_params)
     def lc_mask_bkg_cts_err(self):
         """Return GTI-masked Poisson 1-sigma uncertainties on background counts."""
 
         return self.lc_bkg_cts_err[self.lc_mask]
 
-    @property
+    @cached_property(lambda self: self.lc_params)
     def lc_bkg_rate(self):
         """Return background count rate scaled to the source region in counts per second."""
 
         return self.lc_bkg_cts / self.lc_exps * self.backscale
 
-    @property
+    @cached_property(lambda self: self.lc_params)
     def lc_mask_bkg_rate(self):
         """Return GTI-masked scaled background rate in counts per second."""
 
         return self.lc_bkg_rate[self.lc_mask]
 
-    @property
+    @cached_property(lambda self: self.lc_params)
     def lc_bkg_rate_err(self):
         """Return 1-sigma uncertainty on the scaled background rate in counts per second."""
 
         return self.lc_bkg_cts_err / self.lc_exps * self.backscale
 
-    @property
+    @cached_property(lambda self: self.lc_params)
     def lc_mask_bkg_rate_err(self):
         """Return GTI-masked 1-sigma uncertainty on scaled background rate."""
 
         return self.lc_bkg_rate_err[self.lc_mask]
 
-    @property
+    @cached_property(lambda self: self.lc_params)
     def lc_net_rate(self):
         """Return background-subtracted net count rate in counts per second."""
 
         return self.lc_src_rate - self.lc_bkg_rate
 
-    @property
+    @cached_property(lambda self: self.lc_params)
     def lc_mask_net_rate(self):
         """Return GTI-masked net count rate in counts per second."""
 
         return self.lc_net_rate[self.lc_mask]
 
-    @property
+    @cached_property(lambda self: self.lc_params)
     def lc_net_rate_err(self):
         """Return 1-sigma uncertainty on net count rate in counts per second."""
 
         return np.sqrt(self.lc_src_rate_err**2 + self.lc_bkg_rate_err**2)
 
-    @property
+    @cached_property(lambda self: self.lc_params)
     def lc_mask_net_rate_err(self):
         """Return GTI-masked 1-sigma uncertainty on net count rate."""
 
         return self.lc_net_rate_err[self.lc_mask]
 
-    @property
+    @cached_property(lambda self: self.lc_params)
     def lc_net_cts(self):
         """Return net (background-subtracted) counts per light curve bin."""
 
         return self.lc_net_rate * self.lc_exps
 
-    @property
+    @cached_property(lambda self: self.lc_params)
     def lc_mask_net_cts(self):
         """Return GTI-masked net counts per light curve bin."""
 
         return self.lc_net_cts[self.lc_mask]
 
-    @property
+    @cached_property(lambda self: self.lc_params)
     def lc_net_cts_err(self):
         """Return 1-sigma uncertainty on net counts per light curve bin."""
 
         return self.lc_net_rate_err * self.lc_exps
 
-    @property
+    @cached_property(lambda self: self.lc_params)
     def lc_mask_net_cts_err(self):
         """Return GTI-masked 1-sigma uncertainty on net counts per bin."""
 
         return self.lc_net_cts_err[self.lc_mask]
 
-    @property
+    @cached_property(lambda self: self.lc_params)
     def lc_net_ccts(self):
         """Return cumulative net counts over all light curve bins."""
 
@@ -875,6 +951,12 @@ class Image:
             raise ValueError('ps_sigma is extected to be int or float')
 
     @property
+    def lc_ps_params(self):
+        """Return the ``ppSignal`` cache key as a tuple of all ps inputs."""
+
+        return (self.lc_t1t2, self.lc_binsize, self.ps_p0, self.ps_sigma)
+
+    @cached_property(lambda self: self.lc_ps_params)
     def lc_ps(self):
         """Compute and return a ``ppSignal`` object for the light curve.
 
@@ -954,7 +1036,7 @@ class Image:
         if show:
             fig.show()
         fig.write_html(savepath + '/lc.html', include_plotlyjs='cdn')
-        fig.write_image(savepath + '/lc.pdf')
+        # fig.write_image(savepath + '/lc.pdf')
 
         fig = go.Figure()
         net = go.Scatter(
@@ -973,7 +1055,7 @@ class Image:
         fig.update_layout(legend=dict(x=1, y=1, xanchor='right', yanchor='bottom'))
 
         fig.write_html(savepath + '/cum_lc.html', include_plotlyjs='cdn')
-        fig.write_image(savepath + '/cum_lc.pdf')
+        # fig.write_image(savepath + '/cum_lc.pdf')
 
     def calculate_txx(
         self,
@@ -1145,7 +1227,7 @@ class Image:
         if show:
             fig.show()
         fig.write_html(savepath + '/rebin_lc.html', include_plotlyjs='cdn')
-        fig.write_image(savepath + '/rebin_lc.pdf')
+        # fig.write_image(savepath + '/rebin_lc.pdf')
 
     def check_pileup(self, std=False, show=False):
         """Diagnose pile-up by fitting a PSF model to the radial profile.
@@ -1303,7 +1385,7 @@ class Image:
         if show:
             fig.show()
         fig.write_html(psf_savepath + '/psf.html', include_plotlyjs='cdn')
-        fig.write_image(psf_savepath + '/psf.pdf')
+        # fig.write_image(psf_savepath + '/psf.pdf')
 
     @property
     def spec_slices(self):
@@ -1552,28 +1634,15 @@ class epImage(Image):
         self._arffile = new_arffile
 
     @property
-    def timezero(self):
-        """Return the reference time in EP MET seconds."""
-
-        return self._timezero
-
-    @timezero.setter
-    def timezero(self, new_timezero):
-
-        if isinstance(new_timezero, float):
-            self._timezero = new_timezero
-
-        elif isinstance(new_timezero, str):
-            self._timezero = ep_utc_to_met(new_timezero)
-
-        else:
-            raise ValueError('not expected type for timezero')
-
-    @property
     def timezero_utc(self):
         """Return the reference time as an EP UTC string."""
 
         return ep_met_to_utc(self.timezero)
+
+    def _utc_to_met(self, utc):
+        """Convert a UTC string to EP MET seconds."""
+
+        return ep_utc_to_met(utc)
 
     @staticmethod
     def _psf_model(r, p):
@@ -1734,31 +1803,21 @@ class swiftImage(Image):
         """Return the UTCFINIT correction factor from the event file header."""
 
         hdu = fits.open(self._file)
-        return hdu['EVENTS'].header['UTCFINIT']
+        val = hdu['EVENTS'].header['UTCFINIT']
+        hdu.close()
 
-    @property
-    def timezero(self):
-        """Return the reference time in Swift MET seconds."""
-
-        return self._timezero
-
-    @timezero.setter
-    def timezero(self, new_timezero):
-
-        if isinstance(new_timezero, float):
-            self._timezero = new_timezero
-
-        elif isinstance(new_timezero, str):
-            self._timezero = swift_utc_to_met(new_timezero, self.utcf)
-
-        else:
-            raise ValueError('not expected type for timezero')
+        return val
 
     @property
     def timezero_utc(self):
         """Return the reference time as a Swift UTC string."""
 
         return swift_met_to_utc(self.timezero, self.utcf)
+
+    def _utc_to_met(self, utc):
+        """Convert a UTC string to Swift MET seconds using the file's UTCFINIT."""
+
+        return swift_utc_to_met(utc, self.utcf)
 
     @staticmethod
     def _psf_model(r, p):
@@ -1802,7 +1861,7 @@ class swiftImage(Image):
         else:
             raise ValueError('psf_fitradius is extected to be int or None')
 
-    @property
+    @cached_property(lambda self: self.lc_params)
     def lc_exps(self):
         """Return vignetting-corrected exposure per light curve bin in seconds.
 
