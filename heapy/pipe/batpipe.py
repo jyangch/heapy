@@ -704,9 +704,9 @@ class batPipe:
         self._batbinevt_curve(std=std)
 
         lc_hdu = fits.open(self.lcfile)
-        self.lc_time = np.array(lc_hdu['RATE'].data['TIME']) - self.timezero
-        self.lc_net_rate = np.array(lc_hdu['RATE'].data['RATE'])
-        self.lc_net_rate_err = np.array(lc_hdu['RATE'].data['ERROR'])
+        self.lc_time = np.array(lc_hdu['RATE'].data['TIME'], dtype=float) - self.timezero
+        self.lc_net_rate = np.array(lc_hdu['RATE'].data['RATE'], dtype=float)
+        self.lc_net_rate_err = np.array(lc_hdu['RATE'].data['ERROR'], dtype=float)
         self.ngoodpix = lc_hdu['RATE'].header['NGOODPIX']
         lc_hdu.close()
 

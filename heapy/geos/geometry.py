@@ -107,7 +107,7 @@ class gbmGeometry:
         self._poshist = table.unique(self._poshist, keys=['SCLK_UTC'])
         self._poshist.sort('SCLK_UTC')
 
-        self._met = np.array(self._poshist['SCLK_UTC'])
+        self._met = np.array(self._poshist['SCLK_UTC'], dtype=float)
         self._utc = fermi_met_to_utc(self._met)
 
         self._quaternion = np.column_stack(

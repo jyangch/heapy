@@ -394,7 +394,7 @@ class Event:
     @cached_property()
     def _ts(self):
 
-        return np.array(self._event['TIME']) - self.timezero
+        return np.array(self._event['TIME'], dtype=float) - self.timezero
 
     @cached_property()
     def _pha(self):
@@ -407,13 +407,13 @@ class Event:
     @cached_property()
     def _dtime(self):
 
-        return np.array(self._event['DEAD_TIME'])
+        return np.array(self._event['DEAD_TIME'], dtype=float)
 
     @cached_property()
     def ts(self):
         """Return filtered event times in seconds relative to ``timezero``."""
 
-        return np.array(self.event['TIME']) - self.timezero
+        return np.array(self.event['TIME'], dtype=float) - self.timezero
 
     @cached_property()
     def pha(self):
@@ -434,7 +434,7 @@ class Event:
     def channel_emin(self):
         """Return lower energy boundary of each channel in keV."""
 
-        return np.array(self.ebound['E_MIN'])
+        return np.array(self.ebound['E_MIN'], dtype=float)
 
     @cached_property()
     def channel_emax(self):
@@ -445,7 +445,7 @@ class Event:
         ``channel_emin``, and ``channel_emax`` (both in keV).
         """
 
-        return np.array(self.ebound['E_MAX'])
+        return np.array(self.ebound['E_MAX'], dtype=float)
 
     @property
     def lc_t1t2(self):
@@ -1629,8 +1629,8 @@ class gbmTTE(Event):
 
             pha = np.array(event['PHA']).astype(int)
             ch = np.array(ebound['CHANNEL']).astype(int)
-            emin = np.array(ebound['E_MIN'])
-            emax = np.array(ebound['E_MAX'])
+            emin = np.array(ebound['E_MIN'], dtype=float)
+            emax = np.array(ebound['E_MAX'], dtype=float)
             energy = Event._ch_to_energy(pha, ch, emin, emax)
             event['ENERGY'] = energy * units.keV
             event['DEAD_TIME'] = (pha == 127) * 10.0 + (pha < 127) * 2.6
@@ -1899,8 +1899,8 @@ class gecamEVT(Event):
 
             pi = np.array(event['PI']).astype(int)
             ch = np.array(ebound['CHANNEL']).astype(int)
-            emin = np.array(ebound['E_MIN'])
-            emax = np.array(ebound['E_MAX'])
+            emin = np.array(ebound['E_MIN'], dtype=float)
+            emax = np.array(ebound['E_MAX'], dtype=float)
             energy = Event._ch_to_energy(pi, ch, emin, emax)
             event['ENERGY'] = energy * units.keV
 
@@ -2096,9 +2096,9 @@ class gridTTE(Event):
             event.remove_columns([f'adcv{self.det}', f'adcv_c{self.det}'])
 
             ch = np.array(ebound['CHANNEL']).astype(int)
-            emin = np.array(ebound['E_MIN'])
+            emin = np.array(ebound['E_MIN'], dtype=float)
 
-            energy = np.array(event['ENERGY'])
+            energy = np.array(event['ENERGY'], dtype=float)
             pi = ch[np.searchsorted(emin, energy, side='right') - 1]
             event['PI'] = pi
 
@@ -2251,8 +2251,8 @@ class gridgroundTTE(Event):
 
             pi = np.array(event['PI']).astype(int)
             ch = np.array(ebound['CHANNEL']).astype(int)
-            emin = np.array(ebound['E_MIN'])
-            emax = np.array(ebound['E_MAX'])
+            emin = np.array(ebound['E_MIN'], dtype=float)
+            emax = np.array(ebound['E_MAX'], dtype=float)
             energy = Event._ch_to_energy(pi, ch, emin, emax)
             event['ENERGY'] = energy * units.keV
 

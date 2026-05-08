@@ -602,13 +602,13 @@ class Image:
     def src_ts(self):
         """Return filtered source-region event times in seconds relative to ``timezero``."""
 
-        return np.array(self.src_event['TIME']) - self.timezero
+        return np.array(self.src_event['TIME'], dtype=float) - self.timezero
 
     @cached_property()
     def bkg_ts(self):
         """Return filtered background-region event times in seconds relative to ``timezero``."""
 
-        return np.array(self.bkg_event['TIME']) - self.timezero
+        return np.array(self.bkg_event['TIME'], dtype=float) - self.timezero
 
     @property
     def lc_t1t2(self):
@@ -1898,8 +1898,8 @@ class swiftImage(Image):
                 print(stderr)
 
         hdu = fits.open(src_corrfile)
-        time_10s = np.array(hdu['LCCORRFACT'].data['TIME'])
-        factor_10s = np.array(hdu['LCCORRFACT'].data['CORRFACT'])
+        time_10s = np.array(hdu['LCCORRFACT'].data['TIME'], dtype=float)
+        factor_10s = np.array(hdu['LCCORRFACT'].data['CORRFACT'], dtype=float)
 
         diff = np.abs(self.lc_time[:, None] - time_10s[None, :])
         self.lc_factor = factor_10s[np.argmin(diff, axis=1)]
