@@ -1,17 +1,26 @@
 """Shared helpers and plotter for the ``signal`` module's pipeline classes.
 
-Bundles three groups of utilities consumed by :mod:`heapy.auto.signal`:
+Bundles four groups of utilities consumed by :mod:`heapy.auto.signal`:
 
 - Bin / interval helpers (:func:`indices_in_intervals`,
-  :func:`filter_block_edges`, :func:`classify_bins`).
+  :func:`filter_block_edges`, :func:`classify_bins`,
+  :func:`intervals_equal`).
+- Bayesian-blocks driver :func:`time_rescaling_bblock` that wraps
+  ``astropy.stats.bayesian_blocks`` with optional non-stationary
+  background correction (Scargle 2013, Appendix B).
 - One-bin SNR estimators (:func:`pg_snr`, :func:`pp_snr`,
   :func:`gauss_snr`) wrapping :mod:`heapy.util.significance`.
 - :class:`SignalPlotter`, the composable two-panel diagnostic figure
-  used by every ``save()`` method in :mod:`heapy.auto.signal`.
+  used by every ``save()`` method in :mod:`heapy.auto.signal`, plus
+  :func:`plot_tau_diagnostic`, an opt-in tau-space verification PDF.
 """
 
+import os
+
+from astropy.stats import bayesian_blocks
 import matplotlib.pyplot as plt
 import numpy as np
+from scipy.interpolate import interp1d
 
 from ..util.significance import pgsig, ppsig
 
@@ -40,6 +49,85 @@ def indices_in_intervals(lbins, rbins, intervals):
                 break
 
     return np.unique(idx).astype(int) if idx else np.array([], dtype=int)
+
+
+def time_rescaling_bblock(t, cts=None, bkg_integral=None, p0=0.05):
+    """Run Bayesian blocks with optional non-stationary background correction.
+
+    When ``bkg_integral`` is supplied, transforms the time axis via
+    ``tau(t) = integral_0^t B(s) ds`` so the inhomogeneous Poisson
+    process becomes homogeneous (Scargle 2013, Appendix B), runs
+    ``events`` mode Bayesian blocks in ``tau``-space, then maps the
+    resulting edges back to the original time axis through cubic
+    interpolation on the ``(tau, t)`` pairs. Without ``bkg_integral``,
+    delegates to ``astropy.stats.bayesian_blocks`` unchanged.
+
+    Args:
+        t: Photon arrival times (``cts=None``, unbinned branch) or
+            sorted bin centers (``cts`` supplied, binned branch).
+        cts: Per-bin counts; ``None`` selects the unbinned branch where
+            each ``t`` entry counts as one event.
+        bkg_integral: Callable ``t -> tau`` returning the cumulative
+            background integral; must be strictly increasing on the
+            input grid. ``None`` skips the time-rescaling transformation.
+        p0: False-alarm probability passed to ``bayesian_blocks``.
+
+    Returns:
+        Block edges in the original time axis (sorted, length >= 2).
+
+    Raises:
+        ValueError: If ``bkg_integral`` is not strictly increasing on
+            the input grid.
+    """
+
+    t = np.asarray(t, dtype=float)
+
+    if cts is None:
+        # Match astropy events-mode internals: dedupe and sort photon times
+        t = np.sort(np.unique(t))
+    else:
+        cts = np.asarray(cts)
+
+    if bkg_integral is None:
+        if cts is None:
+            return bayesian_blocks(t, fitness='events', p0=p0)
+        return bayesian_blocks(t, cts, fitness='events', p0=p0)
+
+    tau = np.asarray(bkg_integral(t), dtype=float)
+    if len(tau) > 1 and not np.all(np.diff(tau) > 0):
+        raise ValueError('bkg_integral must be strictly increasing on the input grid')
+
+    if cts is None:
+        edges_tau = bayesian_blocks(tau, fitness='events', p0=p0)
+    else:
+        edges_tau = bayesian_blocks(tau, cts, fitness='events', p0=p0)
+
+    inv = interp1d(tau, t, kind='cubic', fill_value='extrapolate')
+    return np.asarray(inv(edges_tau), dtype=float)
+
+
+def intervals_equal(a, b):
+    """Test whether two interval lists describe the same set.
+
+    Compares ``[low, high]`` pairs as sorted floats; differences in
+    ordering between the two inputs are tolerated.
+
+    Args:
+        a: First list of ``[low, high]`` pairs, or ``None``.
+        b: Second list of ``[low, high]`` pairs, or ``None``.
+
+    Returns:
+        ``True`` when both inputs are ``None`` or when the two lists
+        contain the same intervals up to ordering.
+    """
+
+    if a is None or b is None:
+        return a is None and b is None
+    if len(a) != len(b):
+        return False
+    a_sorted = sorted((float(p[0]), float(p[1])) for p in a)
+    b_sorted = sorted((float(p[0]), float(p[1])) for p in b)
+    return a_sorted == b_sorted
 
 
 def filter_block_edges(edges_raw, min_binsize, margin=1.8):
@@ -415,3 +503,91 @@ class SignalPlotter:
 
         self.fig.savefig(filename, dpi=dpi, bbox_inches='tight', pad_inches=0.1)
         plt.close(self.fig)
+
+
+def plot_tau_diagnostic(poly, ts, bins, edges, time, rate, savepath):
+    """Save a 2-panel time-rescaling diagnostic PDF for debugging.
+
+    Top panel: time-axis raw rate ``rate(t)``, polynomial background
+    overlay (with a 1-sigma band), and Bayesian-block edges drawn as
+    vertical dashed lines. Bottom panel: tau-axis photon density
+    ``dN/dtau`` from a uniform-tau histogram of ``ts``, with the BB
+    edges mapped through ``poly.integral`` and a horizontal line at
+    ``dN/dtau = 1`` marking the level a correctly-modelled background
+    would sit at after time rescaling. Signal segments rise above the
+    unity line.
+
+    Useful for verifying that the polynomial background is adequate --
+    when ``dN/dtau`` deviates strongly from 1 over intervals known to
+    be background-only, the polynomial is biased and the BB edges may
+    be unreliable.
+
+    The integral on the (small) ``bins`` grid is interpolated to photon
+    times so the call stays cheap regardless of how many photons live
+    in ``ts``.
+
+    Args:
+        poly: Background model exposing ``val(x) -> (mo, err)`` and
+            ``integral(x) -> (mo, err)``; typically a fitted
+            :class:`~.polynomial.Polynomial` or
+            :class:`~.polynomial.CompositePolynomial`.
+        ts: Source photon arrival times.
+        bins: Histogram bin edges (length ``N + 1``).
+        edges: Bayesian-block edges (length ``n + 1``).
+        time: Per-bin centers used for the time-axis curve.
+        rate: Per-bin source rate used for the time-axis curve.
+        savepath: Destination directory; created if absent. The PDF is
+            written to ``savepath/signal_tau.pdf``.
+    """
+
+    if not os.path.exists(savepath):
+        os.makedirs(savepath)
+
+    ts_sorted = np.sort(ts)
+    # Evaluate the integral on the (small) bins grid, then interpolate to
+    # photon times. Calling poly.integral directly on ts hits the
+    # err-computation path; the err itself is unused for the diagnostic
+    # and the interp residual is far below Poisson noise.
+    tau_grid_t = poly.integral(bins)[0]
+    tau_at_ts = np.interp(ts_sorted, bins, tau_grid_t)
+    tau_edges = np.interp(edges, bins, tau_grid_t)
+
+    n_tau_bins = len(bins) - 1
+    tau_lo = float(np.min(tau_at_ts))
+    tau_hi = float(np.max(tau_at_ts))
+    tau_grid = np.linspace(tau_lo, tau_hi, n_tau_bins + 1)
+    cts_tau, _ = np.histogram(tau_at_ts, bins=tau_grid)
+    rate_tau = cts_tau / np.diff(tau_grid)
+    tau_center = 0.5 * (tau_grid[:-1] + tau_grid[1:])
+
+    bak, bak_err = poly.val(time)
+
+    with plt_rc_context():
+        fig, (ax_t, ax_tau) = plt.subplots(2, 1, figsize=(8, 8))
+        plt.subplots_adjust(hspace=0.25)
+
+        ax_t.plot(time, rate, lw=1.0, c='b', label='Light curve')
+        ax_t.plot(time, bak, lw=1.0, c='r', label='Background')
+        ax_t.fill_between(time, bak - bak_err, bak + bak_err, color='r', alpha=0.3)
+        for e in edges[1:-1]:
+            ax_t.axvline(e, ls='--', c='k', lw=0.6, alpha=0.6)
+        ax_t.set_xlim([bins[0], bins[-1]])
+        ax_t.set_xlabel('Time')
+        ax_t.set_ylabel('Rate (cts/s)')
+        ax_t.set_title('time axis')
+        ax_t.legend(frameon=False)
+        ax_t.minorticks_on()
+
+        ax_tau.plot(tau_center, rate_tau, lw=1.0, c='b', label='dN / dtau')
+        ax_tau.axhline(1.0, ls='--', c='r', lw=1.0, label='Expected bkg = 1')
+        for e in tau_edges[1:-1]:
+            ax_tau.axvline(e, ls='--', c='k', lw=0.6, alpha=0.6)
+        ax_tau.set_xlim([tau_lo, tau_hi])
+        ax_tau.set_xlabel('tau (cumulative background counts)')
+        ax_tau.set_ylabel('dN / dtau')
+        ax_tau.set_title('tau axis (time-rescaled)')
+        ax_tau.legend(frameon=False)
+        ax_tau.minorticks_on()
+
+        fig.savefig(savepath + '/signal_tau.pdf', dpi=300, bbox_inches='tight', pad_inches=0.1)
+        plt.close(fig)

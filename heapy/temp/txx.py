@@ -81,7 +81,6 @@ class pgTxx(pgSignal):
 
         if self.poly_res is None:
             self.loop(p0=p0, sigma=sigma, deg=deg)
-            self.loop(p0=p0, sigma=sigma, deg=deg)
 
         self.ncts = self.cts - self.bcts
         self.net = self.rate - self.bak

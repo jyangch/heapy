@@ -818,12 +818,12 @@ class Event:
         """Run automatic polynomial background estimation for the light curve.
 
         Fits a polynomial background to the light curve using ``pgSignal``,
-        running two sigma-clipping iterations.  The result is stored in
+        whose ``loop()`` internally runs the drpls-seeded then
+        polynomial-seeded two-pass sequence. The result is stored in
         ``_lc_bs`` and retrieved via the ``lc_bs`` property.
         """
 
         self._lc_bs = pgSignal(self.lc_ts, self.lc_bins, self.lc_exps, self.bs_ignore)
-        self._lc_bs.loop(p0=self.bs_p0, sigma=self.bs_sigma, deg=self.bs_deg)
         self._lc_bs.loop(p0=self.bs_p0, sigma=self.bs_sigma, deg=self.bs_deg)
 
     @cached_property(lambda self: self.lc_bs_params)
@@ -1257,9 +1257,8 @@ class Event:
 
         bs = pgSignal(self.spec_ts, bins, ignore=self.bs_ignore)
         bs.loop(p0=self.bs_p0, sigma=self.bs_sigma, deg=self.bs_deg)
-        bs.loop(p0=self.bs_p0, sigma=self.bs_sigma, deg=self.bs_deg)
 
-        ignore = bs.ignore
+        ignore = bs.ignore if bs.ignore is not None else bs.sort_res['ignore']
         brate, _ = bs.poly.val(interp_time)
 
         brate_sum = np.zeros_like(brate)

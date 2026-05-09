@@ -123,6 +123,58 @@ class Polynomial:
         mo, err = self.ls_polyval(x, coeff=self.ls_res['coeff'], covar=self.ls_res['covar'])
         return mo, err
 
+    def integral(self, x):
+        """Evaluate the antiderivative (with constant 0) and 1-sigma error at ``x``.
+
+        Returns the analytical antiderivative whose value at the origin
+        is zero, with errors propagated from the coefficient covariance
+        via the linear map ``c_int[k] = c[k] / (deg + 1 - k)``. Intended
+        as a ``bkg_integral`` callable for time-rescaling Bayesian blocks
+        where only differences ``F(t1) - F(t0)`` enter, so the choice
+        of integration constant is irrelevant.
+
+        Args:
+            x: Query abscissae.
+
+        Returns:
+            Tuple ``(mo, err)`` -- antiderivative values and 1-sigma errors.
+
+        Raises:
+            AssertionError: If called before :meth:`fit`.
+        """
+
+        x = np.array(x)
+
+        if min(x) < min(self.x):
+            msg = f'Extrapolation may be imprecise: {min(x):f} < {min(self.x):f}'
+            warnings.warn(msg, UserWarning, stacklevel=2)
+
+        if max(x) > max(self.x):
+            msg = f'Extrapolation may be imprecise: {max(x):f} > {max(self.x):f}'
+            warnings.warn(msg, UserWarning, stacklevel=2)
+
+        assert self.ls_res is not None, 'you should first perform fitting'
+
+        coeff = self.ls_res['coeff']
+        covar = self.ls_res['covar']
+
+        # Antiderivative in descending power order: degree (n+1), length (n+2),
+        # constant of integration set to 0. coeff is in descending order with
+        # coeff[k] at power (n-k); after integration that term becomes
+        # coeff[k] / (n-k+1) at power (n-k+1), which sits at index k of the
+        # length-(n+2) result. The trailing slot (constant) stays zero.
+        powers = np.arange(len(coeff), 0, -1).astype(float)
+        int_coeff = np.zeros(len(coeff) + 1)
+        int_coeff[:-1] = coeff / powers
+
+        int_covar = np.zeros((len(coeff) + 1, len(coeff) + 1))
+        if covar is not None:
+            scale = np.diag(1.0 / powers)
+            int_covar[:-1, :-1] = scale @ covar @ scale.T
+
+        mo, err = self.ls_polyval(x, coeff=int_coeff, covar=int_covar)
+        return mo, err
+
     def two_pass(self):
         """Run the GBM/GECAM-style two-pass polynomial fit with BIC selection.
 
@@ -235,10 +287,17 @@ class Polynomial:
             if covar.shape[0] != order:
                 raise TypeError('expected each dim of covar and coeff have same length')
 
-            # evaluate the model uncertainty at given x
-            # M (i.e. var) = X M_\beta (i.e. covar) X^T
-            var = lhs @ covar @ lhs.T
-            err = np.sqrt(np.clip(np.diag(var), 0.0, None))
+            # Evaluate per-point variance from coefficient covariance:
+            # var[i] = lhs[i] @ covar @ lhs[i].T (i.e. diag(X M_beta X^T)).
+            # Original form materialises the full N*N product, which OOMs
+            # on long x (e.g. one entry per photon, N ~ 1e5+). The einsum
+            # contracts directly to the diagonal -- mathematically identical,
+            # O(N * order^2) memory instead of O(N^2).
+            # Original (kept for reference):
+            #     var = lhs @ covar @ lhs.T
+            #     err = np.sqrt(np.clip(np.diag(var), 0.0, None))
+            diag_var = np.einsum('ij,jk,ik->i', lhs, covar, lhs)
+            err = np.sqrt(np.clip(diag_var, 0.0, None))
 
             return mo, err
 
@@ -429,6 +488,30 @@ class CompositePolynomial:
         ys, vars = [], []
         for p in self.polys:
             y, ye = p.val(x)
+            ys.append(y)
+            vars.append(np.asarray(ye) ** 2)
+
+        return np.sum(ys, axis=0), np.sqrt(np.sum(vars, axis=0))
+
+    def integral(self, x):
+        """Evaluate the summed antiderivative and propagated 1-sigma error at ``x``.
+
+        Component antiderivatives add linearly (each anchored at the
+        constant 0); per-point errors add in quadrature. Mirrors
+        :meth:`Polynomial.integral` for use as a ``bkg_integral``
+        callable in time-rescaling Bayesian blocks.
+
+        Args:
+            x: Query abscissae.
+
+        Returns:
+            Tuple ``(mo, err)`` -- sum of constituent antiderivative
+            values and quadrature sum of constituent 1-sigma errors.
+        """
+
+        ys, vars = [], []
+        for p in self.polys:
+            y, ye = p.integral(x)
             ys.append(y)
             vars.append(np.asarray(ye) ** 2)
 

@@ -139,6 +139,33 @@ class Baseline:
 
         return interp(x)
 
+    def integral(self, x):
+        """Evaluate the cumulative integral of the fitted baseline at ``x``.
+
+        Builds the cubic-spline antiderivative whose value at the
+        leftmost fitting abscissa ``self.x[0]`` is 0; integration is
+        analytical within the spline's piecewise representation. Useful
+        as a ``bkg_integral`` callable for time-rescaling Bayesian
+        blocks where only differences enter, so the choice of reference
+        point is irrelevant.
+
+        Args:
+            x: Query abscissae; values outside the fitting range are
+                extrapolated and trigger a ``UserWarning``.
+
+        Returns:
+            Antiderivative values at ``x``.
+        """
+
+        x = np.asarray(x)
+
+        if x.min() < self.x.min() or x.max() > self.x.max():
+            warnings.warn('Extrapolation may be imprecise', UserWarning, stacklevel=2)
+
+        antider = CubicSpline(self.x, self.mo, extrapolate=True).antiderivative()
+
+        return antider(x)
+
     @staticmethod
     def speyediff(N, d, format='csc'):
         """Build the sparse ``d``-th order finite-difference matrix of size ``N``.

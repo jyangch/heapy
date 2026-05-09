@@ -36,9 +36,12 @@ from .signal_utils import (
     filter_block_edges,
     gauss_snr,
     indices_in_intervals,
+    intervals_equal,
     pg_snr,
+    plot_tau_diagnostic,
     plt_rc_context,
     pp_snr,
+    time_rescaling_bblock,
 )
 
 
@@ -46,15 +49,17 @@ class pgSignal:
     """Polynomial-background signal pipeline for Poisson event lists.
 
     Two construction paths are supported. The default :meth:`__init__`
-    starts from raw event time-stamps and runs
-    :meth:`bblock` → :meth:`basefit` → :meth:`calsnr` →
-    :meth:`sorting` → :meth:`polyfit` (wrapped in :meth:`loop`); the
-    final :meth:`polyfit` replaces the baseline-derived background with
-    a BIC-selected polynomial fitted over non-signal bins.
+    starts from raw event time-stamps and runs two passes of
+    :meth:`bblock` → :meth:`calsnr` → :meth:`sorting` →
+    :meth:`polyfit` (wrapped in :meth:`loop`); pass 1 seeds the
+    background from a drpls :meth:`basefit` so the first :meth:`bblock`
+    already accounts for non-stationary background via time rescaling,
+    pass 2 then refines using the polynomial obtained from pass 1.
     :meth:`from_components` instead stacks pre-polyfit'd component
     instances that share the same binning, producing a composite-poly
-    pipeline that goes straight to :meth:`bblock` → :meth:`calsnr` →
-    :meth:`sorting` (no further polyfit).
+    pipeline that runs only the second pass --
+    :meth:`bblock` → :meth:`calsnr` → :meth:`sorting` -- since the
+    background is already fixed.
 
     Attributes:
         ts: Source event time-stamps (concatenated across components in
@@ -272,26 +277,38 @@ class pgSignal:
         return inst
 
     def bblock(self, p0=0.05):
-        """Run ``astropy.stats.bayesian_blocks`` and filter undersized gaps.
+        """Run time-rescaling Bayesian blocks under the current background estimate.
 
-        Before :meth:`polyfit` has run, the partition is driven by source
-        events alone; afterwards the net rate and its error are passed to
-        the ``measures`` fitness so the polynomial background seeds the
-        re-partitioning. Composite instances always take the ``measures``
-        branch since :attr:`poly_res` is populated at construction.
+        The background cumulative integral is taken from :attr:`poly`
+        when :meth:`polyfit` (or :meth:`from_components`) has run, and
+        from the drpls :attr:`bl` set by :meth:`basefit` otherwise.
+        With neither available the call degenerates to plain
+        ``events``-mode Bayesian blocks. Inputs at most ``1e4`` events
+        long use the unbinned branch; larger event lists fall back to
+        the binned branch over :attr:`bins` (positive bins only).
+        Composite instances always take the polynomial branch since
+        :attr:`poly` is populated at construction.
 
         Args:
             p0: False-alarm probability passed to ``bayesian_blocks``.
         """
 
-        if self.poly_res is None:
-            if len(self.ts) <= 1e4:
-                edges_ = bayesian_blocks(self.ts, fitness='events', p0=p0)
-            else:
-                pos = np.where(self.cts > 0)[0]
-                edges_ = bayesian_blocks(self.time[pos], self.cts[pos], fitness='events', p0=p0)
+        if self.poly_res is not None:
+
+            def bkg_integral(t):
+                return self.poly.integral(t)[0]
+        elif self.base_res is not None:
+            bkg_integral = self.bl.integral
         else:
-            edges_ = bayesian_blocks(self.time, self.net, self.net_err, fitness='measures', p0=p0)
+            bkg_integral = None
+
+        if len(self.ts) <= 1e4:
+            edges_ = time_rescaling_bblock(self.ts, p0=p0, bkg_integral=bkg_integral)
+        else:
+            pos = np.where(self.cts > 0)[0]
+            edges_ = time_rescaling_bblock(
+                self.time[pos], cts=self.cts[pos], p0=p0, bkg_integral=bkg_integral
+            )
 
         edges_[0] = max(edges_[0], self.time[0])
         edges_[-1] = min(edges_[-1], self.time[-1])
@@ -326,9 +343,6 @@ class pgSignal:
                 'basefit is not applicable on composite instances; '
                 'the background is already fixed by from_components()'
             )
-
-        if self.block_res is None:
-            self.bblock()
 
         weight = np.ones_like(self.time) if weight is None else np.array(weight, dtype=float)
 
@@ -465,12 +479,14 @@ class pgSignal:
                 'rebuild the source components instead'
             )
 
-        if self.ignore is None:
+        if self.ignore is not None:
+            ignore = self.ignore
+        else:
             if self.sort_res is None:
                 self.sorting()
-            self.ignore = self.sort_res['ignore']
+            ignore = self.sort_res['ignore']
 
-        ignore_idx = indices_in_intervals(self.lbins, self.rbins, self.ignore)
+        ignore_idx = indices_in_intervals(self.lbins, self.rbins, ignore)
 
         notice_time = np.delete(self.time, ignore_idx)
         notice_rate = np.delete(self.rate, ignore_idx)
@@ -498,26 +514,88 @@ class pgSignal:
             'bak_err': self.bak_err,
         }
 
-    def loop(self, p0=0.05, sigma=3, deg=None):
-        """Run the full pipeline.
+    def loop(self, p0=0.05, sigma=3, deg=None, iter=False):
+        """Run the full two-pass pipeline.
 
-        Raw-events instances run ``bblock → calsnr → sorting → polyfit``;
-        composite instances skip :meth:`polyfit` since the background is
-        already fixed at :meth:`from_components` time.
+        Raw-events instances run two passes of ``bblock → calsnr →
+        sorting → polyfit``: pass 1 seeds the background from a drpls
+        baseline (so the very first :meth:`bblock` already accounts for
+        non-stationary background via time rescaling); pass 2 refines
+        with the polynomial obtained in pass 1. With ``iter_polyfit``
+        enabled, pass 2's ``calsnr → sorting → polyfit`` triple is
+        repeated (without a fresh :meth:`bblock`) until the auto-derived
+        ignore intervals stabilize, capped at 10 iterations to bound
+        runtime against pathological oscillation. Composite instances
+        skip pass 1 entirely and never call :meth:`polyfit` since the
+        background is fixed at :meth:`from_components` time.
 
         Args:
             p0: False-alarm probability for Bayesian blocks.
             sigma: Detection threshold for bin classification.
             deg: Polynomial degree for the background refit (``None``
                 enables BIC selection); ignored on composite instances.
+            iter: When ``True``, repeat the full ``bblock →
+                calsnr → sorting → polyfit`` pass after pass 2 until
+                the ignore intervals stabilize. Each iteration re-runs
+                :meth:`bblock` with the latest polynomial so the edges
+                stay consistent with the background estimate. Ignored
+                on composite instances.
         """
 
+        is_composite = isinstance(getattr(self, 'poly', None), CompositePolynomial)
+
+        if not is_composite:
+            # Pass 1: drpls baseline as background seed.
+            self.basefit()
+            self.bblock(p0)
+            self.calsnr()
+            self.sorting(sigma)
+            self.polyfit(deg)
+
+        # Pass 2: polynomial as background. Composite instances enter here directly.
         self.bblock(p0)
         self.calsnr()
         self.sorting(sigma)
 
-        if not isinstance(getattr(self, 'poly', None), CompositePolynomial):
-            self.polyfit(deg)
+        if is_composite:
+            return
+
+        self.polyfit(deg)
+
+        if iter:
+            for _ in range(10):
+                prev_ignore = list(self.sort_res['ignore'])
+                self.bblock(p0)
+                self.calsnr()
+                self.sorting(sigma)
+                self.polyfit(deg)
+                if intervals_equal(prev_ignore, self.sort_res['ignore']):
+                    break
+
+    def save_tau_diagnostic(self, savepath):
+        """Save a 2-panel time-rescaling diagnostic PDF for debugging.
+
+        Thin wrapper that checks the precondition (polynomial background
+        must exist) and delegates rendering to
+        :func:`~.signal_utils.plot_tau_diagnostic`. See that function
+        for the panel layout and interpretation.
+
+        Args:
+            savepath: Destination directory; created if absent.
+
+        Raises:
+            RuntimeError: If :meth:`polyfit` (or :meth:`from_components`)
+                has not run, leaving :attr:`poly` undefined.
+        """
+
+        if self.poly_res is None:
+            raise RuntimeError(
+                'save_tau_diagnostic requires polyfit() (or from_components()) to have run'
+            )
+
+        plot_tau_diagnostic(
+            self.poly, self.ts, self.bins, self.edges, self.time, self.rate, savepath
+        )
 
     def save(self, savepath):
         """Dump stage result dicts as JSON and write a diagnostic PDF.
@@ -529,6 +607,9 @@ class pgSignal:
         rendered through :class:`~.signal_utils.SignalPlotter`: total
         rate + Bayesian blocks on top, net rate + class-colored block
         SNR on the bottom.
+
+        For tau-space verification of the time-rescaling step, call
+        :meth:`save_tau_diagnostic` separately.
 
         Args:
             savepath: Destination directory; created if absent.
