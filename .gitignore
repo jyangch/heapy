@@ -55,4 +55,4 @@ docs/
 CLAUDE.md
 
 # Ignore test files
-test/
+tests/
