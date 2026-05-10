@@ -175,6 +175,44 @@ class Polynomial:
         mo, err = self.ls_polyval(x, coeff=int_coeff, covar=int_covar)
         return mo, err
 
+    def block_integral(self, a, b):
+        """Evaluate the definite integral over ``[a, b]`` with full coefficient covariance.
+
+        Uses the analytical integrated Vandermonde basis
+        ``J_k = (b^{n-k+1} - a^{n-k+1}) / (n-k+1)`` so the variance is
+        ``J^T Cov(c) J``, accounting for correlations between different
+        ``x`` shared through the polynomial coefficients. This is the
+        statistically correct propagation for a definite integral; do
+        not approximate it by integrating the pointwise variance from
+        :meth:`val`.
+
+        Args:
+            a: Lower integration bound (scalar).
+            b: Upper integration bound (scalar).
+
+        Returns:
+            Tuple ``(F, err)`` -- definite integral value and 1-sigma
+            error.
+
+        Raises:
+            AssertionError: If called before :meth:`fit`.
+        """
+
+        assert self.ls_res is not None, 'you should first perform fitting'
+
+        coeff = self.ls_res['coeff']
+        covar = self.ls_res['covar']
+
+        n = len(coeff) - 1
+        powers = np.arange(n, -1, -1).astype(float)
+        J = (b ** (powers + 1) - a ** (powers + 1)) / (powers + 1)
+
+        F = float(coeff @ J)
+        var = float(J @ covar @ J) if covar is not None else 0.0
+        err = float(np.sqrt(max(var, 0.0)))
+
+        return F, err
+
     def two_pass(self):
         """Run the GBM/GECAM-style two-pass polynomial fit with BIC selection.
 
@@ -356,7 +394,7 @@ class Polynomial:
 
         if (y == 0).all():
             coeff = np.full(order, 0.0)
-            res = {'coeff': coeff}
+            res = {'coeff': coeff, 'aic': np.inf, 'bic': np.inf}
             if cov:
                 covar = np.full((order, order), 0.0)
                 res['covar'] = covar
@@ -516,3 +554,28 @@ class CompositePolynomial:
             vars.append(np.asarray(ye) ** 2)
 
         return np.sum(ys, axis=0), np.sqrt(np.sum(vars, axis=0))
+
+    def block_integral(self, a, b):
+        """Sum component definite integrals over ``[a, b]``; variances add in quadrature.
+
+        Components are independent (separate coefficient covariances),
+        so per-component variances sum directly. See
+        :meth:`Polynomial.block_integral` for the per-component
+        propagation.
+
+        Args:
+            a: Lower integration bound (scalar).
+            b: Upper integration bound (scalar).
+
+        Returns:
+            Tuple ``(F, err)`` -- summed definite integral and
+            quadrature-summed 1-sigma error.
+        """
+
+        Fs, vars_ = [], []
+        for p in self.polys:
+            F, err = p.block_integral(a, b)
+            Fs.append(F)
+            vars_.append(err ** 2)
+
+        return float(np.sum(Fs)), float(np.sqrt(np.sum(vars_)))

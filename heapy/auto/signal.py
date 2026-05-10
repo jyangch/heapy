@@ -386,10 +386,7 @@ class pgSignal:
             self.re_bcts = np.zeros(self.nblock, dtype=float)
             self.re_bcts_err = np.zeros(self.nblock, dtype=float)
             for i, (left, right) in enumerate(zip(self.edges[:-1], self.edges[1:], strict=False)):
-                x = np.linspace(left, right, 100)
-                y, y_err = self.poly.val(x)
-                self.re_bcts[i] = np.trapz(y, x)
-                self.re_bcts_err[i] = np.sqrt(np.trapz(y_err**2, x))
+                self.re_bcts[i], self.re_bcts_err[i] = self.poly.block_integral(left, right)
         else:
             self.re_bcts = np.zeros(self.nblock, dtype=float)
             for i, (left, right) in enumerate(zip(self.edges[:-1], self.edges[1:], strict=False)):

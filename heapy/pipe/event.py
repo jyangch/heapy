@@ -1317,11 +1317,7 @@ class Event:
             brate_sum = brate_sum + brate_i
 
             for j, (left, right) in enumerate(zip(lslices, rslices, strict=False)):
-                bins_j = np.linspace(left, right, 100)
-                brate_j, brate_err_j = bs_i.poly.val(bins_j)
-
-                phaii[j, i] = np.trapz(brate_j, bins_j)
-                phaii_err[j, i] = np.sqrt(np.trapz(brate_err_j**2, bins_j))
+                phaii[j, i], phaii_err[j, i] = bs_i.poly.block_integral(left, right)
 
         fig = go.Figure()
         src = go.Scatter(
