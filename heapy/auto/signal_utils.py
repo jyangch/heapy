@@ -20,7 +20,6 @@ import os
 from astropy.stats import bayesian_blocks
 import matplotlib.pyplot as plt
 import numpy as np
-from scipy.interpolate import interp1d
 
 from ..util.significance import pgsig, ppsig
 
@@ -102,8 +101,14 @@ def time_rescaling_bblock(t, cts=None, bkg_integral=None, p0=0.05):
     else:
         edges_tau = bayesian_blocks(tau, cts, fitness='events', p0=p0)
 
-    inv = interp1d(tau, t, kind='cubic', fill_value='extrapolate')
-    return np.asarray(inv(edges_tau), dtype=float)
+    # Map tau-space block edges back to t-space via direct Voronoi-midpoint
+    # lookup (matching threeML/bbbd). Avoids the float roundoff that
+    # np.interp accumulates when tau cancels near the bkg_integral's
+    # zero anchor (subnormal-scale noise at edges adjacent to that point).
+    tau_v = np.concatenate([tau[:1], 0.5 * (tau[1:] + tau[:-1]), tau[-1:]])
+    t_v = np.concatenate([t[:1], 0.5 * (t[1:] + t[:-1]), t[-1:]])
+    idx = np.clip(np.searchsorted(tau_v, edges_tau), 0, len(t_v) - 1)
+    return np.asarray(t_v[idx], dtype=float)
 
 
 def intervals_equal(a, b):

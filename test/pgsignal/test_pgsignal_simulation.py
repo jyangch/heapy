@@ -149,11 +149,11 @@ def main():
     dump_plots(s_default, 'D_default')
 
     s_iter = pgSignal(ts_a, bins)
-    s_iter.loop(p0=0.05, sigma=3, iter_polyfit=True)
+    s_iter.loop(p0=0.05, sigma=3, iter=True)
     dump_plots(s_iter, 'D_iter')
 
     print(f'  default 2-pass : ignore = {s_default.sort_res["ignore"]}')
-    print(f'  iter_polyfit   : ignore = {s_iter.sort_res["ignore"]}')
+    print(f'  iter=True      : ignore = {s_iter.sort_res["ignore"]}')
     print(f'  identical?     : {s_default.sort_res["ignore"] == s_iter.sort_res["ignore"]}')
     print(f'  poly deg same? : default={s_default.poly.best_deg}, iter={s_iter.poly.best_deg}')
 
@@ -217,12 +217,12 @@ def main():
     print('TEST G: extreme cubic bkg -- can iter_polyfit / manual ignore recover?')
     print('=' * 70)
 
-    # G.1 iter_polyfit on the same data as TEST F
+    # G.1 iter on the same data as TEST F
     s_g_iter = pgSignal(ts_f, bins)
-    s_g_iter.loop(p0=0.05, sigma=3, iter_polyfit=True)
+    s_g_iter.loop(p0=0.05, sigma=3, iter=True)
     dump_plots(s_g_iter, 'G1_iter')
     cl, ch = signal_window(s_g_iter.sort_res['re_sig'][0])
-    print(f'  G.1 iter_polyfit=True:')
+    print(f'  G.1 iter=True:')
     print(f'    T_start={cl:.3f}, T_end={ch:.3f} (truth: [10, 25])')
     print(f'    poly deg picked: {s_g_iter.poly.best_deg}')
     print(f'    signal blocks  : {len(s_g_iter.sort_res["re_sig"][0])}')

@@ -297,8 +297,10 @@ class pgSignal:
 
             def bkg_integral(t):
                 return self.poly.integral(t)[0]
+
         elif self.base_res is not None:
             bkg_integral = self.bl.integral
+
         else:
             bkg_integral = None
 
