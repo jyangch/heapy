@@ -479,6 +479,7 @@ class SignalPlotter:
             drawstyle='steps-post',
             label='Bayesian block SNR',
         )
+        ax.axhline(0.0, lw=1.0, c='red', ls='--')
         ax.axhline(sigma, lw=1.0, c='grey', ls='--', label=f'{sigma:.1f}$\\sigma$')
         ax.set_ylabel('Significance (sigma)')
 

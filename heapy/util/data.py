@@ -647,7 +647,7 @@ def get_items_by_idx(data, indices):
         raise IndexError([data[i] for i in indices]) from exc
 
 
-def generate_asymmetric_gaussian(mean, std_left, std_right, size):
+def generate_asymmetric_gaussian(mean, std_left, std_right, size, random_seed=450001, rng=None):
     """Generate samples from an asymmetric Gaussian distribution.
 
     Draws standard normal samples and rescales negative deviations by
@@ -659,13 +659,22 @@ def generate_asymmetric_gaussian(mean, std_left, std_right, size):
         std_left: Standard deviation applied to samples below the mean.
         std_right: Standard deviation applied to samples above the mean.
         size: Number of samples to generate.
+        random_seed: Seed for a freshly-built local RNG when ``rng`` is
+            ``None``. Default ensures reproducibility across runs; pass
+            ``None`` for OS entropy.
+        rng: Optional pre-built ``np.random.Generator`` to draw from. When
+            supplied this is used directly and ``random_seed`` is ignored.
+            Pass a shared ``rng`` across multiple calls to keep successive
+            samples statistically independent while remaining reproducible.
 
     Returns:
         A ``np.ndarray`` of length ``size`` drawn from the asymmetric
         Gaussian distribution.
     """
 
-    samples = np.random.randn(size)
+    if rng is None:
+        rng = np.random.default_rng(random_seed)
+    samples = rng.standard_normal(size)
 
     mask_left = samples <= 0
     mask_right = samples > 0

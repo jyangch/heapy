@@ -135,7 +135,7 @@ class pgTxx(pgSignal):
 
         self.pulse_res = {'pstart': self.pstart, 'pstop': self.pstop}
 
-    def mc_simulation(self, nmc):
+    def mc_simulation(self, nmc, random_seed=450001):
         """Generate Monte Carlo realisations of the net count light curve.
 
         Draws Poisson samples for the source counts and Gaussian samples for
@@ -144,13 +144,17 @@ class pgTxx(pgSignal):
 
         Args:
             nmc: Number of Monte Carlo realisations to generate.
+            random_seed: Seed for the local RNG used to draw the
+                Poisson/Gaussian samples. Default ensures reproducibility
+                across runs; pass ``None`` for OS entropy.
         """
 
         self.nmc = int(nmc)
         self.nsample = len(self.time)
 
-        src_sample = np.random.poisson(lam=self.cts, size=(self.nmc, self.nsample))
-        bkg_sample = np.random.normal(
+        rng = np.random.default_rng(random_seed)
+        src_sample = rng.poisson(lam=self.cts, size=(self.nmc, self.nsample))
+        bkg_sample = rng.normal(
             loc=np.real(self.bcts), scale=np.real(self.bcts_err), size=(self.nmc, self.nsample)
         )
 
@@ -539,7 +543,7 @@ class ppTxx(ppSignal):
 
         self.pulse_res = {'pstart': self.pstart, 'pstop': self.pstop}
 
-    def mc_simulation(self, nmc):
+    def mc_simulation(self, nmc, random_seed=450001):
         """Generate Monte Carlo realisations of the net count light curve.
 
         Draws independent Poisson samples for both source and background
@@ -548,13 +552,17 @@ class ppTxx(ppSignal):
 
         Args:
             nmc: Number of Monte Carlo realisations to generate.
+            random_seed: Seed for the local RNG used to draw the
+                Poisson samples. Default ensures reproducibility across
+                runs; pass ``None`` for OS entropy.
         """
 
         self.nmc = int(nmc)
         self.nsample = len(self.time)
 
-        src_sample = np.random.poisson(lam=self.cts, size=(self.nmc, self.nsample))
-        bkg_sample = np.random.poisson(lam=self.bcts, size=(self.nmc, self.nsample))
+        rng = np.random.default_rng(random_seed)
+        src_sample = rng.poisson(lam=self.cts, size=(self.nmc, self.nsample))
+        bkg_sample = rng.poisson(lam=self.bcts, size=(self.nmc, self.nsample))
 
         self.mc_ncts = np.vstack([self.ncts, src_sample - bkg_sample * self.backscale])
 
@@ -899,7 +907,7 @@ class ggTxx(ggSignal):
 
         self.pulse_res = {'pstart': self.pstart, 'pstop': self.pstop}
 
-    def mc_simulation(self, nmc):
+    def mc_simulation(self, nmc, random_seed=450001):
         """Generate Monte Carlo realisations of the net count light curve.
 
         Draws Gaussian samples using ``self.ncts`` and ``self.ncts_err`` and
@@ -908,12 +916,16 @@ class ggTxx(ggSignal):
 
         Args:
             nmc: Number of Monte Carlo realisations to generate.
+            random_seed: Seed for the local RNG used to draw the
+                Gaussian samples. Default ensures reproducibility across
+                runs; pass ``None`` for OS entropy.
         """
 
         self.nmc = int(nmc)
         self.nsample = len(self.time)
 
-        sample = np.random.normal(loc=self.ncts, scale=self.ncts_err, size=(self.nmc, self.nsample))
+        rng = np.random.default_rng(random_seed)
+        sample = rng.normal(loc=self.ncts, scale=self.ncts_err, size=(self.nmc, self.nsample))
 
         self.mc_ncts = np.vstack([self.ncts, sample])
 
@@ -1142,7 +1154,7 @@ class ggTxx(ggSignal):
         plt.close(fig)
 
 
-def accumcts(time, ccts, pstart, pstop, xx, simple_err=False):
+def accumcts(time, ccts, pstart, pstop, xx, simple_err=False, random_seed=450001):
     """Compute cumulative-count-fraction levels and Txx start/stop times.
 
     Interpolates the cumulative count curve to 1000-point resolution when
@@ -1159,6 +1171,9 @@ def accumcts(time, ccts, pstart, pstop, xx, simple_err=False):
         xx: Cumulative count fraction, e.g. ``0.9`` for T90.
         simple_err: When ``True``, also compute and return analytic
             uncertainty estimates on all CSF and Txx values.
+        random_seed: Seed for the local RNG used by the asymmetric
+            Gaussian sampler in the ``simple_err`` branch. Default
+            ensures reproducibility; ignored when ``simple_err=False``.
 
     Returns:
         When ``simple_err`` is ``False``: a tuple
@@ -1169,6 +1184,8 @@ def accumcts(time, ccts, pstart, pstop, xx, simple_err=False):
         ``(txx, txx1, txx2, txx_err, txx1_err, txx2_err,
         csf, csf1, csf2, csf_err, csf1_err, csf2_err)``.
     """
+
+    rng = np.random.default_rng(random_seed)
 
     idx = np.argsort(pstop - pstart)[0]
     if len(np.where((time >= pstart[idx]) & (time <= pstop[idx]))[0]) < 1000:
@@ -1235,8 +1252,8 @@ def accumcts(time, ccts, pstart, pstop, xx, simple_err=False):
             txx1_le_i, txx1_he_i = txx1_i - txx1_lo_i, txx1_hi_i - txx1_i
             txx2_le_i, txx2_he_i = txx2_i - txx2_lo_i, txx2_hi_i - txx2_i
 
-            txx1_i_sam = generate_asymmetric_gaussian(txx1_i, txx1_le_i, txx1_he_i, 1000)
-            txx2_i_sam = generate_asymmetric_gaussian(txx2_i, txx2_le_i, txx2_he_i, 1000)
+            txx1_i_sam = generate_asymmetric_gaussian(txx1_i, txx1_le_i, txx1_he_i, 1000, rng=rng)
+            txx2_i_sam = generate_asymmetric_gaussian(txx2_i, txx2_le_i, txx2_he_i, 1000, rng=rng)
             txx_lo_i, txx_hi_i = np.percentile(txx2_i_sam - txx1_i_sam, [16, 84])
             txx_le_i, txx_he_i = txx_i - txx_lo_i, txx_hi_i - txx_i
 

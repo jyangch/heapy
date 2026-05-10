@@ -70,14 +70,22 @@ class Event:
         + px.colors.qualitative.Alphabet
     )
 
-    def __init__(self, file):
+    def __init__(self, file, random_seed=450001):
         """Initialize Event and read the FITS file.
 
         Args:
             file: Path to the event FITS file.
+            random_seed: Seed for the per-instance ``np.random.Generator``
+                used by :meth:`_energy_of_ch` to assign continuous photon
+                energies within their PI channels. The same seed makes
+                two instances of the same input deterministically produce
+                the same energy assignment regardless of intervening
+                calls to the global ``np.random`` state. Pass ``None``
+                to seed from OS entropy (non-reproducible).
         """
 
         self._file = file
+        self._rng = np.random.default_rng(random_seed)
 
         self._read()
 
@@ -94,8 +102,7 @@ class Event:
             self._filter = Filter(self._event)
             self._filter_info = {'time': None, 'energy': None, 'tag': None}
 
-    @staticmethod
-    def _ch_to_energy(pi, ch, e1, e2):
+    def _ch_to_energy(self, pi, ch, e1, e2):
 
         pi = np.asarray(pi)
         ch = np.asarray(ch)
@@ -110,14 +117,13 @@ class Event:
         e1_selected = e1[indices]
         e2_selected = e2[indices]
 
-        energy = Event._energy_of_ch(len(pi), e1_selected, e2_selected)
+        energy = self._energy_of_ch(len(pi), e1_selected, e2_selected)
 
         return energy
 
-    @staticmethod
-    def _energy_of_ch(n, e1, e2):
+    def _energy_of_ch(self, n, e1, e2):
 
-        return e1 + (e2 - e1) * np.random.random_sample(n)
+        return e1 + (e2 - e1) * self._rng.random(n)
 
     @property
     def file(self):
@@ -1554,7 +1560,7 @@ class gbmTTE(Event):
         }
     )
 
-    def __init__(self, file, posfile=None):
+    def __init__(self, file, posfile=None, random_seed=450001):
         """Initialize gbmTTE and read the TTE FITS file(s).
 
         Args:
@@ -1562,10 +1568,13 @@ class gbmTTE(Event):
             posfile: Path (or list of paths) to GBM position history
                 (poshist) FITS file(s), or ``None`` if response generation
                 is not needed.
+            random_seed: Seed for the per-instance RNG used by
+                :meth:`Event._energy_of_ch`. See :class:`Event` for details.
         """
 
         self._file = file
         self._posfile = posfile
+        self._rng = np.random.default_rng(random_seed)
 
         self._read()
 
@@ -1630,7 +1639,7 @@ class gbmTTE(Event):
             ch = np.array(ebound['CHANNEL']).astype(int)
             emin = np.array(ebound['E_MIN'], dtype=float)
             emax = np.array(ebound['E_MAX'], dtype=float)
-            energy = Event._ch_to_energy(pha, ch, emin, emax)
+            energy = self._ch_to_energy(pha, ch, emin, emax)
             event['ENERGY'] = energy * units.keV
             event['DEAD_TIME'] = (pha == 127) * 10.0 + (pha < 127) * 2.6
 
@@ -1832,7 +1841,7 @@ class gecamEVT(Event):
     PHA values.
     """
 
-    def __init__(self, file, det, gain_type):
+    def __init__(self, file, det, gain_type, random_seed=450001):
         """Initialize gecamEVT and read the event FITS file(s).
 
         Args:
@@ -1841,11 +1850,14 @@ class gecamEVT(Event):
                 (e.g. ``'01'`` through ``'25'``).
             gain_type: Gain-type selector; either ``'HG'`` (high-gain) or
                 ``'LG'`` (low-gain).
+            random_seed: Seed for the per-instance RNG used by
+                :meth:`Event._energy_of_ch`. See :class:`Event` for details.
         """
 
         self._file = file
         self._det = det
         self._gain_type = gain_type
+        self._rng = np.random.default_rng(random_seed)
 
         self._read()
 
@@ -1900,7 +1912,7 @@ class gecamEVT(Event):
             ch = np.array(ebound['CHANNEL']).astype(int)
             emin = np.array(ebound['E_MIN'], dtype=float)
             emax = np.array(ebound['E_MAX'], dtype=float)
-            energy = Event._ch_to_energy(pi, ch, emin, emax)
+            energy = self._ch_to_energy(pi, ch, emin, emax)
             event['ENERGY'] = energy * units.keV
 
             event_list.append(event)
@@ -2024,7 +2036,7 @@ class gridTTE(Event):
     the RSP EBOUNDS.
     """
 
-    def __init__(self, file, rspfile, det):
+    def __init__(self, file, rspfile, det, random_seed=450001):
         """Initialize gridTTE and read the TTE and RSP FITS file(s).
 
         Args:
@@ -2032,11 +2044,14 @@ class gridTTE(Event):
             rspfile: Path (or list of paths) to GRID RSP FITS file(s)
                 providing the EBOUNDS extension.
             det: Detector index string (``'0'`` through ``'3'``).
+            random_seed: Seed for the per-instance RNG used by
+                :meth:`Event._energy_of_ch`. See :class:`Event` for details.
         """
 
         self._file = file
         self._rspfile = rspfile
         self._det = det
+        self._rng = np.random.default_rng(random_seed)
 
         self._read()
 
@@ -2217,17 +2232,20 @@ class gridgroundTTE(Event):
     energies using the same channel-to-energy mapping as ``gridTTE``.
     """
 
-    def __init__(self, file, det):
+    def __init__(self, file, det, random_seed=450001):
         """Initialize gridgroundTTE and read the ground-calibration FITS file(s).
 
         Args:
             file: Path (or list of paths) to GRID ground-calibration TTE
                 FITS file(s).
             det: Detector index string (``'0'`` through ``'3'``).
+            random_seed: Seed for the per-instance RNG used by
+                :meth:`Event._energy_of_ch`. See :class:`Event` for details.
         """
 
         self._file = file
         self._det = det
+        self._rng = np.random.default_rng(random_seed)
 
         self._read()
 
@@ -2252,7 +2270,7 @@ class gridgroundTTE(Event):
             ch = np.array(ebound['CHANNEL']).astype(int)
             emin = np.array(ebound['E_MIN'], dtype=float)
             emax = np.array(ebound['E_MAX'], dtype=float)
-            energy = Event._ch_to_energy(pi, ch, emin, emax)
+            energy = self._ch_to_energy(pi, ch, emin, emax)
             event['ENERGY'] = energy * units.keV
 
             event_list.append(event)

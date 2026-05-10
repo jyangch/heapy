@@ -153,7 +153,7 @@ class pgSignal:
         self.obj_list = None
 
     @classmethod
-    def frombin(cls, cts, bins, exp=None, ignore=None):
+    def frombin(cls, cts, bins, exp=None, ignore=None, random_seed=450001):
         """Build a :class:`pgSignal` from a pre-binned counts histogram.
 
         Synthesizes uniformly-distributed event time-stamps within each
@@ -167,6 +167,10 @@ class pgSignal:
             exp: Per-bin exposure times; defaults to bin widths.
             ignore: Optional ``[[low, high], ...]`` intervals excluded
                 from :meth:`polyfit` weighting.
+            random_seed: Seed for the local RNG that draws synthetic
+                photon times within each bin. Default ensures
+                reproducibility across runs; pass ``None`` for OS
+                entropy (non-reproducible).
 
         Returns:
             A fully initialised :class:`pgSignal`.
@@ -184,9 +188,10 @@ class pgSignal:
         msg = 'rebuilt the time list, but may not accurate'
         warnings.warn(msg, UserWarning, stacklevel=2)
 
+        rng = np.random.default_rng(random_seed)
         chunks = []
         for t1, t2, n in zip(bins[:-1], bins[1:], cts, strict=False):
-            chunks.append(np.random.random(size=int(n)) * (t2 - t1) + t1)
+            chunks.append(rng.random(size=int(n)) * (t2 - t1) + t1)
         ts = np.concatenate(chunks) if chunks else np.array([])
 
         sbs_ = cls(ts, bins, exp, ignore)
@@ -737,7 +742,7 @@ class ppSignal:
         self.sort_res = None
 
     @classmethod
-    def frombin(cls, cts, bcts, bins, backscale=1, exp=None):
+    def frombin(cls, cts, bcts, bins, backscale=1, exp=None, random_seed=450001):
         """Build a :class:`ppSignal` from pre-binned histograms.
 
         Synthesizes fake time-stamps uniformly within each bin to satisfy
@@ -751,6 +756,10 @@ class ppSignal:
             backscale: Ratio scaling background counts into the source
                 region.
             exp: Per-bin exposure times; defaults to bin widths.
+            random_seed: Seed for the local RNG that draws synthetic
+                photon times within each bin. Default ensures
+                reproducibility across runs; pass ``None`` for OS
+                entropy (non-reproducible).
 
         Returns:
             A fully initialised :class:`ppSignal`.
@@ -769,14 +778,15 @@ class ppSignal:
         msg = 'rebuilt the time list, but may not accurate'
         warnings.warn(msg, UserWarning, stacklevel=2)
 
+        rng = np.random.default_rng(random_seed)
         ts_chunks = []
         for t1, t2, n in zip(bins[:-1], bins[1:], cts, strict=False):
-            ts_chunks.append(np.random.random(size=int(n)) * (t2 - t1) + t1)
+            ts_chunks.append(rng.random(size=int(n)) * (t2 - t1) + t1)
         ts = np.concatenate(ts_chunks) if ts_chunks else np.array([])
 
         bts_chunks = []
         for t1, t2, n in zip(bins[:-1], bins[1:], bcts, strict=False):
-            bts_chunks.append(np.random.random(size=int(n)) * (t2 - t1) + t1)
+            bts_chunks.append(rng.random(size=int(n)) * (t2 - t1) + t1)
         bts = np.concatenate(bts_chunks) if bts_chunks else np.array([])
 
         cls_ = cls(ts, bts, bins, backscale=backscale, exp=exp)

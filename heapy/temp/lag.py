@@ -60,6 +60,7 @@ class Lag:
         ytype='pg',
         nmc=1000,
         M=1,
+        random_seed=450001,
     ):
         """Initialize the Lag estimator with two light curves.
 
@@ -93,6 +94,9 @@ class Lag:
             M: Box-smoothing factor; the effective analysis bin width is
                 :math:`M \\times dt`.  ``M = 1`` gives the classic CCF;
                 ``M > 1`` enables MCCF.
+            random_seed: Seed for the per-instance RNG used by
+                :meth:`_mc_sample`. Default ensures reproducibility
+                across runs; pass ``None`` for OS entropy.
 
         Raises:
             ValueError: If ``xcts`` or ``ycts`` is not one-dimensional,
@@ -123,6 +127,8 @@ class Lag:
         self.nmc = int(nmc)
         if self.nmc < 1:
             raise ValueError('nmc must be at least 1')
+
+        self._rng = np.random.default_rng(random_seed)
 
         self.xtype = xtype
         self.ytype = ytype
@@ -314,16 +320,16 @@ class Lag:
         size = (self.nmc, self.nsample)
 
         if dtype == 'pg':
-            src = np.random.poisson(lam=cts, size=size)
-            bkg = np.random.normal(loc=bcts, scale=bcts_err, size=size)
+            src = self._rng.poisson(lam=cts, size=size)
+            bkg = self._rng.normal(loc=bcts, scale=bcts_err, size=size)
 
         elif dtype == 'pp':
-            src = np.random.poisson(lam=cts, size=size)
-            bkg = np.random.poisson(lam=bcts, size=size)
+            src = self._rng.poisson(lam=cts, size=size)
+            bkg = self._rng.poisson(lam=bcts, size=size)
 
         elif dtype == 'gg':
-            src = np.random.normal(loc=cts, scale=cts_err, size=size)
-            bkg = np.random.normal(loc=bcts, scale=bcts_err, size=size)
+            src = self._rng.normal(loc=cts, scale=cts_err, size=size)
+            bkg = self._rng.normal(loc=bcts, scale=bcts_err, size=size)
 
         else:
             raise TypeError(f'invalid dtype: {dtype}')
