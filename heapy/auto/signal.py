@@ -76,8 +76,9 @@ class pgSignal:
             :class:`~.polynomial.CompositePolynomial` after
             :meth:`from_components`.
         bak, bak_err, bcts, bcts_err: Background rate and counts with errors.
-        net, net_err, ncts, ncts_err: Net rate and counts with errors
-            (``net_err``/``ncts_err`` only set after :meth:`polyfit`).
+        net, net_err, ncts, ncts_err: Net rate and counts with errors.
+            Populated by :meth:`polyfit` on the raw-events path and by
+            :meth:`from_components` on the composite path.
         obj_list: Source components when constructed via
             :meth:`from_components`; ``None`` otherwise.
         ini_res, base_res, block_res, snr_res, sort_res, poly_res: Stage
@@ -204,11 +205,12 @@ class pgSignal:
 
         Each component must share the same :attr:`bins` and must have
         already completed :meth:`polyfit` (i.e. expose ``bcts``,
-        ``bcts_err``, ``bak``, ``bak_err``, ``net``, ``net_err``). The
-        returned instance carries summed per-bin arrays, a
-        :class:`~.polynomial.CompositePolynomial` background model, and
-        is ready for :meth:`bblock` → :meth:`calsnr` → :meth:`sorting`
-        -- :meth:`polyfit`/:meth:`basefit` are not applicable.
+        ``bcts_err``, ``bak``, ``bak_err``, ``net``, ``net_err``,
+        ``ncts``, ``ncts_err``). The returned instance carries summed
+        per-bin arrays, a :class:`~.polynomial.CompositePolynomial`
+        background model, and is ready for :meth:`bblock` →
+        :meth:`calsnr` → :meth:`sorting` -- :meth:`polyfit` /
+        :meth:`basefit` are not applicable.
 
         Args:
             obj_list: Non-empty list of polyfit'd :class:`pgSignal`
@@ -226,7 +228,7 @@ class pgSignal:
             ValueError: If bin edges differ across entries.
         """
 
-        required = ('bcts', 'bcts_err', 'bak', 'bak_err', 'net', 'net_err')
+        required = ('bcts', 'bcts_err', 'bak', 'bak_err', 'net', 'net_err', 'ncts', 'ncts_err')
         for obj in obj_list:
             if not isinstance(obj, pgSignal):
                 raise TypeError('expected obj_list contains pgSignal objects')
@@ -263,6 +265,9 @@ class pgSignal:
 
         inst.net = np.sum([obj.net for obj in obj_list], axis=0)
         inst.net_err = np.sqrt(np.sum([obj.net_err**2 for obj in obj_list], axis=0))
+
+        inst.ncts = np.sum([obj.ncts for obj in obj_list], axis=0)
+        inst.ncts_err = np.sqrt(np.sum([obj.ncts_err**2 for obj in obj_list], axis=0))
 
         inst.ignore = None
 

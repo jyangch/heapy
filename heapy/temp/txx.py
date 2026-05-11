@@ -90,7 +90,7 @@ class pgTxx(pgSignal):
                 warning if more than one interval is found.
         """
 
-        if self.poly_res is None:
+        if self.sort_res is None:
             self.loop(p0=p0, sigma=sigma, deg=deg)
 
         self.pstart, self.pstop = detect_pulses_by_snr(self.re_snr, self.edges, sigma, mp=mp)
