@@ -419,6 +419,33 @@ class SignalPlotter:
         self._style_axis(self.ax_top)
         self._style_axis(self.ax_bot)
 
+        self._gaps = None
+        self._bin_lbins = None
+        self._bin_rbins = None
+
+    def set_gaps(self, gaps, bins):
+        """Register missing-data intervals to mask in subsequent plot_* calls.
+
+        Bins / blocks that overlap any of ``gaps`` are replaced with
+        ``NaN`` in the plot arrays so the missing region renders as a
+        break rather than a spurious zero-rate excursion. Only affects
+        rendering; the caller's input arrays are not mutated and the
+        JSON dumps in :class:`~heapy.auto.signal.pgSignal.save` still
+        carry the raw values.
+
+        Args:
+            gaps: List of ``[low, high]`` intervals; empty / falsy
+                disables masking.
+            bins: Per-bin edges (length ``N + 1``) used by
+                :meth:`plot_curve` to derive bin lefts / rights for the
+                overlap test. :meth:`plot_block` and :meth:`plot_snr`
+                use their own ``edges`` argument and do not consult this.
+        """
+
+        self._gaps = gaps
+        self._bin_lbins = bins[:-1]
+        self._bin_rbins = bins[1:]
+
     @staticmethod
     def _style_axis(ax):
 
@@ -476,6 +503,13 @@ class SignalPlotter:
             bak_err: Optional 1-sigma uncertainty on ``bak``.
         """
 
+        rate = np.asarray(rate, dtype=float).copy()
+        net = np.asarray(net, dtype=float).copy()
+        if self._gaps:
+            idx = indices_in_intervals(self._bin_lbins, self._bin_rbins, self._gaps)
+            rate[idx] = np.nan
+            net[idx] = np.nan
+
         self.ax_top.plot(time, rate, lw=1.0, c='b', label='Light curve')
         if bak is not None:
             self.ax_top.plot(time, bak, lw=1.0, c='r', label='Background')
@@ -507,6 +541,13 @@ class SignalPlotter:
             re_rate: Total block rate per block (top panel).
             re_net: Net block rate per block (bottom panel).
         """
+
+        re_rate = np.asarray(re_rate, dtype=float).copy()
+        re_net = np.asarray(re_net, dtype=float).copy()
+        if self._gaps:
+            idx = indices_in_intervals(edges[:-1], edges[1:], self._gaps)
+            re_rate[idx] = np.nan
+            re_net[idx] = np.nan
 
         self.ax_top.plot(
             edges,
@@ -546,6 +587,11 @@ class SignalPlotter:
             re_snr: Per-block SNR (length ``N``).
             sigma: Detection threshold drawn as a dashed horizontal line.
         """
+
+        re_snr = np.asarray(re_snr, dtype=float).copy()
+        if self._gaps:
+            idx = indices_in_intervals(edges[:-1], edges[1:], self._gaps)
+            re_snr[idx] = np.nan
 
         if self.ax_bot_block_line is not None:
             self.ax_bot_block_line.remove()

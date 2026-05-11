@@ -22,7 +22,6 @@ Example:
 """
 
 import os
-import warnings
 
 from astropy.stats import bayesian_blocks
 import numpy as np
@@ -153,7 +152,7 @@ class pgSignal:
         self.poly_res = None
 
         self.obj_list = None
-        self._gap_int = None  # NaN-derived missing-data intervals; only set via frombin
+        self._gap_int = None
 
     @classmethod
     def frombin(cls, cts, bins, exp=None, ignore=None, random_seed=450001):
@@ -206,9 +205,6 @@ class pgSignal:
             gap_int = union(raw_nan)
             ignore = gap_int if ignore is None else union(list(ignore) + gap_int)
             cts = np.where(nan_mask, 0, cts)
-
-        msg = 'rebuilt the time list, but may not accurate'
-        warnings.warn(msg, UserWarning, stacklevel=2)
 
         rng = np.random.default_rng(random_seed)
         chunks = []
@@ -495,11 +491,20 @@ class pgSignal:
     def polyfit(self, deg=None):
         """Refit the background as a polynomial over non-signal bins.
 
-        Drops bins inside :attr:`ignore` (derived from :meth:`sorting` if
-        not set at construction) and fits the remaining rates with
-        :class:`~.polynomial.Polynomial`. Updates :attr:`bak`, :attr:`bcts`,
-        their errors, the net arrays, and :attr:`poly_res`. Not applicable
-        on composite instances.
+        Excludes the union of :attr:`ignore` (user-supplied and/or
+        NaN-gap intervals from :meth:`frombin`) and the auto-derived
+        signal/bad intervals from :meth:`sorting` (``sort_res['ignore']``),
+        then fits the remaining rates with
+        :class:`~.polynomial.Polynomial`. When :attr:`sort_res` is
+        already populated (typical inside :meth:`loop`) it is reused
+        without rerunning :meth:`sorting`; if both :attr:`sort_res` and
+        :attr:`ignore` are unset, :meth:`sorting` is triggered first.
+        When :attr:`ignore` is supplied but :attr:`sort_res` is unset
+        (e.g. per-channel refits that reuse a master's ignore list)
+        :meth:`sorting` is **not** triggered, so the supplied intervals
+        are used as-is. Updates :attr:`bak`, :attr:`bcts`, their
+        errors, the net arrays, and :attr:`poly_res`. Not applicable on
+        composite instances.
 
         Args:
             deg: Polynomial degree; ``None`` lets the two-pass fit pick
@@ -515,12 +520,15 @@ class pgSignal:
                 'rebuild the source components instead'
             )
 
+        if self.sort_res is None and self.ignore is None:
+            self.sorting()
+
+        ignore_parts = []
+        if self.sort_res is not None:
+            ignore_parts.extend(self.sort_res['ignore'])
         if self.ignore is not None:
-            ignore = self.ignore
-        else:
-            if self.sort_res is None:
-                self.sorting()
-            ignore = self.sort_res['ignore']
+            ignore_parts.extend(self.ignore)
+        ignore = union(ignore_parts)
 
         ignore_idx = indices_in_intervals(self.lbins, self.rbins, ignore)
 
@@ -665,8 +673,11 @@ class pgSignal:
 
         re_rate = self.re_cts / self.re_binsize
         re_net = (self.re_cts - self.re_bcts) / self.re_binsize
+
         with plt_rc_context():
             fig = SignalPlotter()
+            if self._gap_int:
+                fig.set_gaps(self._gap_int, self.bins)
             fig.plot_curve(self.time, self.rate, self.net, bak=self.bak, bak_err=self.bak_err)
             fig.plot_block(self.edges, re_rate, re_net)
             fig.plot_snr(self.edges, self.re_snr, self.sigma)
@@ -803,9 +814,6 @@ class ppSignal:
 
         if bins.size != (cts.size + 1):
             raise TypeError('expected size(bins) = size(cts)+1')
-
-        msg = 'rebuilt the time list, but may not accurate'
-        warnings.warn(msg, UserWarning, stacklevel=2)
 
         rng = np.random.default_rng(random_seed)
         ts_chunks = []
