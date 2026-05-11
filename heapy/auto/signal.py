@@ -153,6 +153,7 @@ class pgSignal:
         self.poly_res = None
 
         self.obj_list = None
+        self._gap_int = None  # NaN-derived missing-data intervals; only set via frombin
 
     @classmethod
     def frombin(cls, cts, bins, exp=None, ignore=None, random_seed=450001):
@@ -161,14 +162,25 @@ class pgSignal:
         Synthesizes uniformly-distributed event time-stamps within each
         bin to populate the histogram-based ``__init__`` path. The
         resulting timing is approximate; a ``UserWarning`` is always
-        emitted.
+        emitted. ``NaN`` entries in ``cts`` mark missing-data bins:
+        they are replaced with zero counts and their time intervals
+        are unioned into ``ignore`` so :meth:`basefit` and
+        :meth:`polyfit` skip them; the bins themselves are still
+        scored by :meth:`sorting` and typically land in
+        ``re_bad_int`` due to their large negative SNR. Gap boundaries
+        are also recorded on the instance so :meth:`bblock` pins
+        block edges at them, preventing a single block from
+        straddling a missing-data region.
 
         Args:
-            cts: Source counts per bin.
+            cts: Source counts per bin. ``NaN`` entries mark bins with
+                no valid observation and are auto-excluded via
+                ``ignore``.
             bins: Bin edges (length ``N + 1``).
             exp: Per-bin exposure times; defaults to bin widths.
             ignore: Optional ``[[low, high], ...]`` intervals excluded
-                from :meth:`polyfit` weighting.
+                from :meth:`polyfit` weighting. Intervals derived from
+                ``NaN`` bins are appended automatically.
             random_seed: Seed for the local RNG that draws synthetic
                 photon times within each bin. Default ensures
                 reproducibility across runs; pass ``None`` for OS
@@ -181,11 +193,19 @@ class pgSignal:
             TypeError: If ``bins`` is not one element longer than ``cts``.
         """
 
-        cts = np.array(cts)
+        cts = np.asarray(cts, dtype=float)
         bins = np.array(bins)
 
         if bins.size != (cts.size + 1):
             raise TypeError('expected size(bins) = size(cts)+1')
+
+        nan_mask = np.isnan(cts)
+        gap_int = None
+        if nan_mask.any():
+            raw_nan = [[float(bins[i]), float(bins[i + 1])] for i in np.where(nan_mask)[0]]
+            gap_int = union(raw_nan)
+            ignore = gap_int if ignore is None else union(list(ignore) + gap_int)
+            cts = np.where(nan_mask, 0, cts)
 
         msg = 'rebuilt the time list, but may not accurate'
         warnings.warn(msg, UserWarning, stacklevel=2)
@@ -197,6 +217,7 @@ class pgSignal:
         ts = np.concatenate(chunks) if chunks else np.array([])
 
         sbs_ = cls(ts, bins, exp, ignore)
+        sbs_._gap_int = gap_int
         return sbs_
 
     @classmethod
@@ -285,6 +306,9 @@ class pgSignal:
             'bak_err': inst.bak_err,
         }
 
+        gap_pool = [pair for obj in obj_list if obj._gap_int for pair in obj._gap_int]
+        inst._gap_int = union(gap_pool) if gap_pool else None
+
         return inst
 
     def bblock(self, p0=0.05):
@@ -326,7 +350,9 @@ class pgSignal:
         edges_[0] = max(edges_[0], self.time[0])
         edges_[-1] = min(edges_[-1], self.time[-1])
 
-        self.edges = filter_block_edges(edges_, np.min(self.binsize))
+        gap_eps = np.unique([e for pair in self._gap_int for e in pair]) if self._gap_int else None
+        self.edges = filter_block_edges(edges_, np.min(self.binsize), protected=gap_eps)
+
         self.nblock = len(self.edges) - 1
         self.re_binsize = self.edges[1:] - self.edges[:-1]
 

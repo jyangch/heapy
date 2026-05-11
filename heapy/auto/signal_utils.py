@@ -136,28 +136,46 @@ def intervals_equal(a, b):
     return a_sorted == b_sorted
 
 
-def filter_block_edges(edges_raw, min_binsize, margin=1.8):
+def filter_block_edges(edges_raw, min_binsize, margin=1.8, protected=None):
     """Drop interior Bayesian-block edges that produce undersized blocks.
 
     An interior edge is kept only when both neighboring gaps exceed
     ``min_binsize / margin``. The two endpoint edges are always preserved.
     ``edges_raw`` must already be clamped to the data range by the caller.
+    When ``protected`` is supplied, those edges are force-injected into
+    the output and any auto-derived edge within ``min_binsize / margin``
+    of a protected point is discarded in favor of the protected one.
 
     Args:
         edges_raw: Candidate block edges (1D, sorted, endpoints clamped).
         min_binsize: Minimum physical bin size from the raw histogram.
         margin: Safety factor relaxing ``min_binsize``; larger keeps more edges.
+        protected: Optional 1D array-like of edges that must appear in
+            the output. Points outside ``(edges_raw[0], edges_raw[-1])``
+            are silently ignored.
 
     Returns:
         Sorted unique edges with undersized neighbors removed.
     """
 
+    threshold = min_binsize / margin
+
+    if protected is None or len(protected) == 0:
+        protected = np.empty(0, dtype=float)
+    else:
+        protected = np.asarray(protected, dtype=float)
+        protected = protected[(protected > edges_raw[0]) & (protected < edges_raw[-1])]
+
     edges = [edges_raw[0], edges_raw[-1]]
+    edges.extend(protected.tolist())
     for i in range(1, len(edges_raw) - 1):
-        flag1 = (edges_raw[i] - edges_raw[i - 1]) > min_binsize / margin
-        flag2 = (edges_raw[i + 1] - edges_raw[i]) > min_binsize / margin
-        if flag1 and flag2:
-            edges.append(edges_raw[i])
+        flag1 = (edges_raw[i] - edges_raw[i - 1]) > threshold
+        flag2 = (edges_raw[i + 1] - edges_raw[i]) > threshold
+        if not (flag1 and flag2):
+            continue
+        if protected.size > 0 and np.any(np.abs(edges_raw[i] - protected) <= threshold):
+            continue
+        edges.append(edges_raw[i])
 
     return np.unique(edges)
 
