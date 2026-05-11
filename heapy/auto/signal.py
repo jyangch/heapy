@@ -8,7 +8,8 @@ their statistical assumptions:
   background; supports a :meth:`pgSignal.from_components` factory that
   stacks multiple already-polyfit'd instances into a composite pipeline.
 - :class:`ppSignal` -- Poisson source with a Poisson background.
-- :class:`ggSignal` -- Gaussian-measured rates (no separate background).
+- :class:`ggSignal` -- Gaussian-measured net light curve (background
+  already subtracted upstream).
 
 All three reuse the helpers and the :class:`~.signal_utils.SignalPlotter`
 diagnostic figure from :mod:`heapy.auto.signal_utils`.
@@ -931,38 +932,41 @@ class ppSignal:
 
 
 class ggSignal:
-    """Detect and sort signal bins in Gaussian-measured light curves.
+    """Detect and sort signal bins in a Gaussian net light curve.
 
-    Designed for data whose per-bin uncertainties are already Gaussian; do
-    not use this class for Poisson counts (see :class:`ppSignal` or
-    :class:`pgSignal` instead).
+    Designed for data that has been background-subtracted upstream and
+    whose per-bin uncertainties are already Gaussian. The class never
+    performs background subtraction itself; the inputs are interpreted
+    as net counts and net errors throughout. For raw-counts pipelines
+    that handle background internally, see :class:`ppSignal` or
+    :class:`pgSignal`.
 
     Attributes:
-        cts: Per-bin counts (or signal).
-        cts_err: 1-sigma uncertainty on :attr:`cts`.
+        ncts: Per-bin net counts.
+        ncts_err: 1-sigma uncertainty on :attr:`ncts`.
         bins: Bin edges (length ``N + 1``).
         exp: Per-bin exposure times.
         time: Bin centers.
-        rate: :attr:`cts` / :attr:`exp`.
-        rate_err: :attr:`cts_err` / :attr:`exp`.
+        net: :attr:`ncts` / :attr:`exp` (net rate).
+        net_err: :attr:`ncts_err` / :attr:`exp`.
         ini_res, block_res, snr_res, sort_res: Stage result dicts populated
             by :meth:`bblock`, :meth:`calsnr`, and :meth:`sorting`.
 
     Example:
-        >>> sig = ggSignal(cts, cts_err, bins)
+        >>> sig = ggSignal(ncts, ncts_err, bins)
         >>> sig.loop(p0=0.05, sigma=3)
         >>> sig.save('./out')
 
     Warning:
-        Only apply to Gaussian-distributed data.
+        Only apply to Gaussian-distributed net data.
     """
 
-    def __init__(self, cts, cts_err, bins, exp=None):
-        """Store arrays and derive rates, rate errors, and bin geometry.
+    def __init__(self, ncts, ncts_err, bins, exp=None):
+        """Store arrays and derive net rates, errors, and bin geometry.
 
         Args:
-            cts: Per-bin counts (or signal) matching bin count ``N``.
-            cts_err: 1-sigma uncertainty on ``cts``; same length as ``cts``.
+            ncts: Per-bin net counts matching bin count ``N``.
+            ncts_err: 1-sigma uncertainty on ``ncts``; same length as ``ncts``.
             bins: Bin edges (length ``N + 1``).
             exp: Per-bin exposure times; defaults to bin widths when
                 ``None``.
@@ -972,8 +976,8 @@ class ggSignal:
                 exposure exceeds its bin width.
         """
 
-        self.cts = np.array(cts)
-        self.cts_err = np.array(cts_err)
+        self.ncts = np.array(ncts)
+        self.ncts_err = np.array(ncts_err)
         self.bins = np.array(bins).astype(float)
 
         self.lbins = self.bins[:-1]
@@ -990,14 +994,14 @@ class ggSignal:
             raise TypeError('expected exp <= binsize')
 
         self.time = (self.lbins + self.rbins) / 2
-        self.rate = self.cts / self.exp
-        self.rate_err = self.cts_err / self.exp
+        self.net = self.ncts / self.exp
+        self.net_err = self.ncts_err / self.exp
 
         self.ini_res = {
-            'cts': self.cts,
-            'cts_err': self.cts_err,
+            'ncts': self.ncts,
+            'ncts_err': self.ncts_err,
             'time': self.time,
-            'rate': self.rate,
+            'net': self.net,
             'exp': self.exp,
             'bins': self.bins,
         }
@@ -1016,7 +1020,7 @@ class ggSignal:
             p0: False-alarm probability passed to ``bayesian_blocks``.
         """
 
-        edges_ = bayesian_blocks(self.time, self.rate, self.rate_err, fitness='measures', p0=p0)
+        edges_ = bayesian_blocks(self.time, self.net, self.net_err, fitness='measures', p0=p0)
 
         edges_[0] = max(edges_[0], self.time[0])
         edges_[-1] = min(edges_[-1], self.time[-1])
@@ -1031,35 +1035,35 @@ class ggSignal:
         """Compute Gaussian SNR on both raw bins and Bayesian blocks.
 
         Runs :meth:`bblock` first when block results are missing.
-        Populates :attr:`re_cts`, :attr:`re_cts_err`, :attr:`snr`,
+        Populates :attr:`re_ncts`, :attr:`re_ncts_err`, :attr:`snr`,
         :attr:`re_snr`, and :attr:`snr_res`.
         """
 
         if self.block_res is None:
             self.bblock()
 
-        self.re_cts, self.re_cts_err = [], []
+        self.re_ncts, self.re_ncts_err = [], []
         for t1, t2 in zip(self.edges[:-1], self.edges[1:], strict=False):
-            self.re_cts.append(np.sum(self.cts[(self.time >= t1) & (self.time < t2)]))
-            self.re_cts_err.append(
-                np.sqrt(np.sum(self.cts_err[(self.time >= t1) & (self.time < t2)] ** 2))
+            self.re_ncts.append(np.sum(self.ncts[(self.time >= t1) & (self.time < t2)]))
+            self.re_ncts_err.append(
+                np.sqrt(np.sum(self.ncts_err[(self.time >= t1) & (self.time < t2)] ** 2))
             )
-        self.re_cts = np.array(self.re_cts)
-        self.re_cts_err = np.array(self.re_cts_err)
+        self.re_ncts = np.array(self.re_ncts)
+        self.re_ncts_err = np.array(self.re_ncts_err)
 
         self.snr = np.zeros_like(self.binsize)
         for i in range(len(self.binsize)):
-            self.snr[i] = gauss_snr(self.cts[i], self.cts_err[i])
+            self.snr[i] = gauss_snr(self.ncts[i], self.ncts_err[i])
 
         self.re_snr = np.zeros_like(self.re_binsize)
         for i in range(len(self.re_binsize)):
-            self.re_snr[i] = gauss_snr(self.re_cts[i], self.re_cts_err[i])
+            self.re_snr[i] = gauss_snr(self.re_ncts[i], self.re_ncts_err[i])
 
         self.snr_res = {
             'snr': self.snr,
             're_snr': self.re_snr,
-            're_cts': self.re_cts,
-            're_cts_err': self.re_cts_err,
+            're_ncts': self.re_ncts,
+            're_ncts_err': self.re_ncts_err,
         }
 
     def sorting(self, sigma=3):
@@ -1120,10 +1124,10 @@ class ggSignal:
         Creates ``savepath`` if missing. Writes ``ini_res``,
         ``block_res``, ``snr_res``, ``sort_res`` JSON files plus
         ``signal.pdf``, a two-panel figure rendered through
-        :class:`~.signal_utils.SignalPlotter` (rate + Bayesian blocks
-        on top, rate + class-colored block SNR on the bottom; ggSignal
-        passes ``rate`` for both top and bottom curves since no
-        background subtraction applies).
+        :class:`~.signal_utils.SignalPlotter` (net rate + Bayesian
+        blocks on top, net rate + class-colored block SNR on the
+        bottom; ggSignal passes ``net`` for both top and bottom curves
+        since the input is already background-subtracted).
 
         Args:
             savepath: Destination directory; created if absent.
@@ -1137,10 +1141,10 @@ class ggSignal:
         json_dump(self.snr_res, savepath + '/snr_res.json')
         json_dump(self.sort_res, savepath + '/sort_res.json')
 
-        re_rate = self.re_cts / self.re_binsize
+        re_net = self.re_ncts / self.re_binsize
         with plt_rc_context():
             fig = SignalPlotter()
-            fig.plot_curve(self.time, self.rate, self.rate)
-            fig.plot_block(self.edges, re_rate, re_rate)
+            fig.plot_curve(self.time, self.net, self.net)
+            fig.plot_block(self.edges, re_net, re_net)
             fig.plot_snr(self.edges, self.re_snr, self.sigma)
             fig.save(savepath + '/signal.pdf')

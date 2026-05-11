@@ -23,6 +23,7 @@ import numpy as np
 from scipy.interpolate import interp1d
 
 from ..auto.signal import ggSignal, pgSignal, ppSignal
+from ..auto.signal_utils import detect_pulses_by_snr
 from ..util.data import generate_asymmetric_gaussian
 from ..util.tools import format_message, json_dump
 
@@ -58,6 +59,16 @@ class pgTxx(pgSignal):
         self.pulse_res = None
         self.txx_res = None
 
+    @classmethod
+    def from_components(cls, obj_list):
+
+        inst = super().from_components(obj_list)
+
+        inst.pulse_res = None
+        inst.txx_res = None
+
+        return inst
+
     def find_pulse(self, p0=0.05, sigma=3, deg=None, mp=True):
         """Detect significant pulse intervals in the net light curve.
 
@@ -82,56 +93,7 @@ class pgTxx(pgSignal):
         if self.poly_res is None:
             self.loop(p0=p0, sigma=sigma, deg=deg)
 
-        self.ncts = self.cts - self.bcts
-        self.net = self.rate - self.bak
-
-        self.re_ncts = self.re_cts - self.re_bcts
-        self.re_net = self.re_ncts / self.re_binsize
-
-        start, stop = (0, 0)
-        flat, up, down = (1, 2, 3)
-        label = []
-        nblock = len(self.re_net)
-        for i, val in enumerate(self.re_net):
-            if i == 0:
-                label.append(start)
-            elif i == (nblock - 1):
-                label.append(stop)
-            else:
-                if val > self.re_net[i - 1]:
-                    label.append(up)
-                elif val < self.re_net[i - 1]:
-                    label.append(down)
-                else:
-                    label.append(flat)
-
-        flag = False
-        pstart, pstop = [], []
-        for i in range(nblock):
-            if (self.re_snr[i] > sigma) and (flag is False):
-                assert label[i] != down
-                pstart.append(self.edges[i])
-                flag = True
-            elif (self.re_snr[i] <= sigma) and (flag is True):
-                assert label[i] != up
-                pstop.append(self.edges[i])
-                flag = False
-
-        if flag and len(pstart) > 0:
-            pstart.pop()
-        if len(pstart) > 0 and pstart[0] == self.edges[0]:
-            pstart = pstart[1:]
-            pstop = pstop[1:]
-
-        if (not mp) and (len(pstart) > 0):
-            if len(pstart) > 1:
-                msg = 'multi-pulse will be combined into one'
-                warnings.warn(msg, UserWarning, stacklevel=2)
-            pstart = [pstart[0]]
-            pstop = [pstop[-1]]
-
-        self.pstart = np.array(pstart)
-        self.pstop = np.array(pstop)
+        self.pstart, self.pstop = detect_pulses_by_snr(self.re_snr, self.edges, sigma, mp=mp)
 
         self.pulse_res = {'pstart': self.pstart, 'pstop': self.pstop}
 
@@ -154,9 +116,7 @@ class pgTxx(pgSignal):
 
         rng = np.random.default_rng(random_seed)
         src_sample = rng.poisson(lam=self.cts, size=(self.nmc, self.nsample))
-        bkg_sample = rng.normal(
-            loc=np.real(self.bcts), scale=np.real(self.bcts_err), size=(self.nmc, self.nsample)
-        )
+        bkg_sample = rng.normal(loc=self.bcts, scale=self.bcts_err, size=(self.nmc, self.nsample))
 
         self.mc_ncts = np.vstack([self.ncts, src_sample - bkg_sample])
 
@@ -490,56 +450,7 @@ class ppTxx(ppSignal):
         if self.sort_res is None:
             self.loop(p0=p0, sigma=sigma)
 
-        self.ncts = self.cts - self.bcts * self.backscale
-        self.net = self.rate - self.bak
-
-        self.re_ncts = self.re_cts - self.re_bcts * self.backscale
-        self.re_net = self.re_ncts / self.re_binsize
-
-        start, stop = (0, 0)
-        flat, up, down = (1, 2, 3)
-        label = []
-        nblock = len(self.re_net)
-        for i, val in enumerate(self.re_net):
-            if i == 0:
-                label.append(start)
-            elif i == (nblock - 1):
-                label.append(stop)
-            else:
-                if val > self.re_net[i - 1]:
-                    label.append(up)
-                elif val < self.re_net[i - 1]:
-                    label.append(down)
-                else:
-                    label.append(flat)
-
-        flag = False
-        pstart, pstop = [], []
-        for i in range(nblock):
-            if (self.re_snr[i] > sigma) and (flag is False):
-                assert label[i] != down
-                pstart.append(self.edges[i])
-                flag = True
-            elif (self.re_snr[i] <= sigma) and (flag is True):
-                assert label[i] != up
-                pstop.append(self.edges[i])
-                flag = False
-
-        if flag and len(pstart) > 0:
-            pstart.pop()
-        if len(pstart) > 0 and pstart[0] == self.edges[0]:
-            pstart = pstart[1:]
-            pstop = pstop[1:]
-
-        if (not mp) and (len(pstart) > 0):
-            if len(pstart) > 1:
-                msg = 'multi-pulse will be combined into one'
-                warnings.warn(msg, UserWarning, stacklevel=2)
-            pstart = [pstart[0]]
-            pstop = [pstop[-1]]
-
-        self.pstart = np.array(pstart)
-        self.pstop = np.array(pstop)
+        self.pstart, self.pstop = detect_pulses_by_snr(self.re_snr, self.edges, sigma, mp=mp)
 
         self.pulse_res = {'pstart': self.pstart, 'pstop': self.pstop}
 
@@ -850,60 +761,7 @@ class ggTxx(ggSignal):
         if self.sort_res is None:
             self.loop(p0=p0, sigma=sigma)
 
-        self.ncts = self.cts
-        self.ncts_err = self.cts_err
-        self.net = self.cts / self.exp
-        self.net_err = self.cts_err / self.exp
-
-        self.re_ncts = self.re_cts
-        self.re_ncts_err = self.re_cts_err
-        self.re_net = self.re_ncts / self.re_binsize
-        self.re_net_err = self.re_ncts_err / self.re_binsize
-
-        start, stop = (0, 0)
-        flat, up, down = (1, 2, 3)
-        label = []
-        nblock = len(self.re_net)
-        for i, val in enumerate(self.re_net):
-            if i == 0:
-                label.append(start)
-            elif i == (nblock - 1):
-                label.append(stop)
-            else:
-                if val > self.re_net[i - 1]:
-                    label.append(up)
-                elif val < self.re_net[i - 1]:
-                    label.append(down)
-                else:
-                    label.append(flat)
-
-        flag = False
-        pstart, pstop = [], []
-        for i in range(nblock):
-            if (self.re_snr[i] > sigma) and (flag is False):
-                assert label[i] != down
-                pstart.append(self.edges[i])
-                flag = True
-            elif (self.re_snr[i] <= sigma) and (flag is True):
-                assert label[i] != up
-                pstop.append(self.edges[i])
-                flag = False
-
-        if flag and len(pstart) > 0:
-            pstart.pop()
-        if len(pstart) > 0 and pstart[0] == self.edges[0]:
-            pstart = pstart[1:]
-            pstop = pstop[1:]
-
-        if (not mp) and (len(pstart) > 0):
-            if len(pstart) > 1:
-                msg = 'multi-pulse will be combined into one'
-                warnings.warn(msg, UserWarning, stacklevel=2)
-            pstart = [pstart[0]]
-            pstop = [pstop[-1]]
-
-        self.pstart = np.array(pstart)
-        self.pstop = np.array(pstop)
+        self.pstart, self.pstop = detect_pulses_by_snr(self.re_snr, self.edges, sigma, mp=mp)
 
         self.pulse_res = {'pstart': self.pstart, 'pstop': self.pstop}
 
@@ -1089,18 +947,28 @@ class ggTxx(ggSignal):
     def save(self, savepath):
         """Save Txx results and diagnostic plots to disk.
 
-        Serialises ``txx_res`` as a JSON file and writes a two-panel PDF
-        showing the net rate light curve with Txx boundaries (upper panel)
-        and the cumulative count curve with CSF levels (lower panel).
+        Serialises ``pulse_res`` and ``txx_res`` as JSON files and writes a
+        two-panel PDF showing the net rate light curve with Txx boundaries
+        (upper panel) and the cumulative count curve with CSF levels (lower
+        panel).
 
         Args:
             savepath: Directory path where output files are written; created
                 if it does not exist.
+
+        Returns:
+            ``False`` if no pulse has been detected; ``None`` on success.
         """
+
+        if len(self.pstart) == 0:
+            msg = 'there is no pulse'
+            warnings.warn(msg, UserWarning, stacklevel=2)
+            return False
 
         if not os.path.exists(savepath):
             os.makedirs(savepath)
 
+        json_dump(self.pulse_res, savepath + '/pulse_res.json')
         json_dump(self.txx_res, savepath + '/txx_res.json')
 
         rcParams['font.family'] = 'serif'

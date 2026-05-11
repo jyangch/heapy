@@ -16,6 +16,7 @@ Bundles four groups of utilities consumed by :mod:`heapy.auto.signal`:
 """
 
 import os
+import warnings
 
 from astropy.stats import bayesian_blocks
 import matplotlib.pyplot as plt
@@ -205,6 +206,71 @@ def classify_bins(snr, left, right, sigma, bad_sentinel=-5):
         'bkg_int': bkg_int,
         'bad_int': bad_int,
     }
+
+
+def detect_pulses_by_snr(re_snr, edges, sigma, mp=True):
+    """Identify pulse intervals from per-block SNR by left-to-right scan.
+
+    Walks the Bayesian blocks once: opens an interval at the first
+    block whose SNR exceeds ``sigma`` and closes it at the next block
+    whose SNR falls back to or below ``sigma``. The threshold is
+    asymmetric -- ``snr == sigma`` closes an open interval but does
+    not open a new one.
+
+    The signed-SNR convention of :func:`pg_snr` / :func:`pp_snr` /
+    :func:`gauss_snr` makes the ``> sigma`` test self-sufficient: a
+    statistically significant downward fluctuation has negative SNR and
+    cannot open a pulse, so no separate ``re_net > 0`` check is needed.
+
+    Edge handling:
+
+    - A leading pulse that opens at ``edges[0]`` is dropped, since its
+      true onset lies before the observation window.
+    - A trailing pulse that never closes (``re_snr`` stays above
+      ``sigma`` through the final block) is dropped.
+    - A trailing pulse that does close inside the last block is kept.
+
+    Args:
+        re_snr: Per-block signal-to-noise values.
+        edges: Block edges (length ``len(re_snr) + 1``).
+        sigma: SNR threshold above which a block is considered part of
+            a pulse.
+        mp: When ``True``, keep every detected sub-pulse. When ``False``,
+            collapse them into a single span from the first ``pstart``
+            to the last ``pstop``; any quiescent gap between sub-pulses
+            is absorbed into that span (which inflates the resulting
+            duration). A warning is emitted when more than one sub-pulse
+            was detected.
+
+    Returns:
+        ``(pstart, pstop)`` -- two ``np.ndarray`` of equal length giving
+        the start and stop times of each detected pulse.
+    """
+
+    pstart, pstop = [], []
+    flag = False
+    for i in range(len(re_snr)):
+        if re_snr[i] > sigma and not flag:
+            pstart.append(edges[i])
+            flag = True
+        elif re_snr[i] <= sigma and flag:
+            pstop.append(edges[i])
+            flag = False
+
+    if flag and len(pstart) > 0:
+        pstart.pop()
+    if len(pstart) > 0 and pstart[0] == edges[0]:
+        pstart = pstart[1:]
+        pstop = pstop[1:]
+
+    if not mp and len(pstart) > 0:
+        if len(pstart) > 1:
+            msg = 'multi-pulse will be combined into one'
+            warnings.warn(msg, UserWarning, stacklevel=2)
+        pstart = [pstart[0]]
+        pstop = [pstop[-1]]
+
+    return np.array(pstart), np.array(pstop)
 
 
 def pg_snr(cts_i, bcts_i, bcts_err_i=None):
