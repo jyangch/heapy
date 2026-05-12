@@ -165,23 +165,27 @@ class pgSignal:
         """Build a :class:`pgSignal` from a pre-binned counts histogram.
 
         Synthesizes uniformly-distributed event time-stamps within each
-        bin to populate the histogram-based ``__init__`` path. The
-        resulting timing is approximate. ``NaN`` entries in ``cts`` mark
-        missing-data bins: they are replaced with zero counts and their
-        time intervals are recorded on the instance as
-        :attr:`_gap_int`, which :meth:`_effective_ignore` always folds
-        into the exclusion set used by :meth:`basefit` and
-        :meth:`polyfit` (independent of user-supplied :attr:`ignore`).
-        Gap-bin counts are still scored by :meth:`sorting` and typically
-        land in ``re_bad_int`` due to their large negative SNR. Gap
-        boundaries are also fed to :meth:`bblock` so block edges pin
-        there, preventing a single block from straddling a missing-data
+        bin to feed :meth:`bblock`'s unbinned branch; the resulting
+        timing is approximate. ``NaN`` entries in ``cts`` mark
+        missing-data bins -- they are preserved verbatim on
+        :attr:`cts` (so :attr:`rate`, :attr:`net`, and :attr:`ncts`
+        carry ``NaN`` at those positions and propagate naturally
+        through subtraction, multiplication, and plotting), no events
+        are synthesized for them, and the merged gap intervals are
+        recorded on :attr:`_gap_int`. :meth:`_effective_ignore` always
+        folds the gap intervals into the exclusion set used by
+        :meth:`basefit` and :meth:`polyfit` independently of
+        user-supplied :attr:`ignore`. Gap-bin SNR comes out as ``NaN``
+        and is classified as bad by :meth:`sorting`; gap boundaries
+        are also fed to :meth:`bblock` so block edges pin there,
+        preventing a single block from straddling a missing-data
         region.
 
         Args:
             cts: Source counts per bin. ``NaN`` entries mark bins with
-                no valid observation and are auto-excluded via
-                :attr:`_gap_int`.
+                no valid observation; they are kept as ``NaN`` so
+                downstream arithmetic propagates the missing-data
+                signal without an intermediate ``0`` placeholder.
             bins: Bin edges (length ``N + 1``).
             exp: Per-bin exposure times; defaults to bin widths.
             ignore: Intervals excluded from :meth:`polyfit` weighting.
@@ -198,11 +202,13 @@ class pgSignal:
             A fully initialised :class:`pgSignal`.
 
         Raises:
-            TypeError: If ``bins`` is not one element longer than ``cts``.
+            TypeError: If ``bins`` is not one element longer than ``cts``,
+                or if ``exp`` and ``bins`` have mismatched sizes, or any
+                exposure exceeds its bin width.
         """
 
         cts = np.asarray(cts, dtype=float)
-        bins = np.array(bins)
+        bins = np.asarray(bins, dtype=float)
 
         if bins.size != (cts.size + 1):
             raise TypeError('expected size(bins) = size(cts)+1')
@@ -212,17 +218,56 @@ class pgSignal:
         if nan_mask.any():
             raw_nan = [[float(bins[i]), float(bins[i + 1])] for i in np.where(nan_mask)[0]]
             gap_int = union(raw_nan)
-            cts = np.where(nan_mask, 0, cts)
 
         rng = np.random.default_rng(random_seed)
         chunks = []
-        for t1, t2, n in zip(bins[:-1], bins[1:], cts, strict=False):
+        # No synthetic events for NaN bins; for everything else fall back to int(n).
+        for t1, t2, n, is_gap in zip(bins[:-1], bins[1:], cts, nan_mask, strict=False):
+            if is_gap:
+                continue
             chunks.append(rng.random(size=int(n)) * (t2 - t1) + t1)
         ts = np.concatenate(chunks) if chunks else np.array([])
 
-        sbs_ = cls(ts, bins, exp, ignore)
-        sbs_._gap_int = gap_int
-        return sbs_
+        # Build the instance directly so the NaN placeholders survive; the raw
+        # __init__ path would re-derive cts from ts via np.histogram and lose
+        # them (histogram outputs int and zeros NaN-bins by construction).
+        inst = cls.__new__(cls)
+        inst.ts = ts.astype(float)
+        inst.bins = bins
+        inst.lbins = bins[:-1]
+        inst.rbins = bins[1:]
+        inst.binsize = inst.rbins - inst.lbins
+        inst.exp = np.array(exp).astype(float) if exp is not None else inst.binsize
+
+        if (inst.exp.size + 1) != inst.bins.size:
+            raise TypeError('expected size(exp) + 1 = size(bins)')
+        if not (inst.exp <= inst.binsize).all():
+            raise TypeError('expected exp <= binsize')
+
+        inst.cts = cts if nan_mask.any() else cts.astype(int)
+        inst.ignore = cls._normalize_ignore(ignore)
+        inst.time = (inst.lbins + inst.rbins) / 2
+        inst.rate = inst.cts / inst.exp  # NaN at gap bins propagates from here
+
+        inst.ini_res = {
+            'time': inst.time,
+            'cts': inst.cts,
+            'rate': inst.rate,
+            'exp': inst.exp,
+            'bins': inst.bins,
+            'ignore': inst.ignore,
+        }
+
+        inst.base_res = None
+        inst.block_res = None
+        inst.snr_res = None
+        inst.sort_res = None
+        inst.poly_res = None
+
+        inst.obj_list = None
+        inst._gap_int = gap_int
+
+        return inst
 
     @classmethod
     def from_components(cls, obj_list):

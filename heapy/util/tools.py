@@ -15,7 +15,34 @@ from itertools import islice
 import json
 from pathlib import Path
 
+import matplotlib.pyplot as plt
 import numpy as np
+
+
+def plt_rc_context():
+    """Return the project's standard PDF-friendly matplotlib rc context.
+
+    Bundles serif body text (STIX Two Text), STIX math, and TrueType
+    (type-42) embedding for the ``pdf`` and ``ps`` backends so saved
+    figures stay typographically consistent regardless of the global
+    rcParams at call time. Use in a ``with`` block around any figure
+    rendering that produces a saved artifact.
+
+    Returns:
+        A :class:`matplotlib.RcParams` context manager applying the
+        preset overrides.
+    """
+
+    plt_rc = {
+        'font.family': 'serif',
+        'font.serif': ['STIX Two Text'],
+        'mathtext.fontset': 'stix',
+        'font.size': 12,
+        'pdf.fonttype': 42,
+        'ps.fonttype': 42,
+    }
+
+    return plt.rc_context(plt_rc)
 
 
 def format_message(msg, min_width=30):

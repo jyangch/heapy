@@ -17,15 +17,12 @@ import os
 import warnings
 
 from astropy.stats import mad_std, sigma_clip
-from matplotlib import rcParams
-import matplotlib.pyplot as plt
 import numpy as np
-from scipy.interpolate import interp1d
 
 from ..auto.signal import ggSignal, pgSignal, ppSignal
-from ..auto.signal_utils import detect_pulses_by_snr
-from ..util.data import generate_asymmetric_gaussian
-from ..util.tools import format_message, json_dump
+from ..auto.signal_utils import detect_pulses_by_snr, indices_in_intervals
+from ..util.tools import format_message, json_dump, plt_rc_context
+from .temp_utils import TxxPlotter, accumcts
 
 
 class pgTxx(pgSignal):
@@ -58,6 +55,16 @@ class pgTxx(pgSignal):
 
         self.pulse_res = None
         self.txx_res = None
+
+    @classmethod
+    def frombin(cls, cts, bins, exp=None, ignore=None, random_seed=450001):
+
+        inst = super().frombin(cts, bins, exp=exp, ignore=ignore, random_seed=random_seed)
+
+        inst.pulse_res = None
+        inst.txx_res = None
+
+        return inst
 
     @classmethod
     def from_components(cls, obj_list):
@@ -115,10 +122,20 @@ class pgTxx(pgSignal):
         self.nsample = len(self.time)
 
         rng = np.random.default_rng(random_seed)
-        src_sample = rng.poisson(lam=self.cts, size=(self.nmc, self.nsample))
+        # NaN cts (gap bins) breaks ``rng.poisson``; substitute zero for the
+        # Poisson rate at those positions and re-flag the rows below.
+        src_lam = np.nan_to_num(self.cts, nan=0.0)
+        src_sample = rng.poisson(lam=src_lam, size=(self.nmc, self.nsample))
         bkg_sample = rng.normal(loc=self.bcts, scale=self.bcts_err, size=(self.nmc, self.nsample))
 
         self.mc_ncts = np.vstack([self.ncts, src_sample - bkg_sample])
+
+        # Mark gap bins as NaN across all MC rows so :meth:`calculate`'s
+        # ``np.nancumsum`` treats them as no-contribution rather than the
+        # spurious ``-bcts`` draw the Gaussian background sample would yield.
+        if self._gap_int:
+            gap_idx = indices_in_intervals(self.lbins, self.rbins, self._gap_int)
+            self.mc_ncts[:, gap_idx] = np.nan
 
     def calculate(self, xx=0.9, pstart=None, pstop=None, lbkg=None, rbkg=None, simple_err=False):
         """Compute Txx duration and its uncertainties for each detected pulse.
@@ -183,7 +200,9 @@ class pgTxx(pgSignal):
         tmax = min(tmax_, self.time[-1])
         self.tindex = np.where((self.time >= tmin) & (self.time <= tmax))[0]
 
-        self.ccts = np.cumsum(self.ncts)
+        # NaN-aware cumsum so gap bins (NaN in self.ncts) contribute zero
+        # without propagating NaN through the rest of the cumulative curve.
+        self.ccts = np.nancumsum(self.ncts)
 
         if simple_err:
             (
@@ -231,7 +250,7 @@ class pgTxx(pgSignal):
             mc_txx, mc_txx1, mc_txx2 = [], [], []
 
             for ncts in self.mc_ncts:
-                ccts = np.cumsum(ncts)
+                ccts = np.nancumsum(ncts)
 
                 txx, txx1, txx2, csf, csf1, csf2 = accumcts(
                     self.time[self.tindex],
@@ -324,9 +343,14 @@ class pgTxx(pgSignal):
     def save(self, savepath):
         """Save Txx results and diagnostic plots to disk.
 
-        Serialises ``pulse_res`` and ``txx_res`` as JSON files and writes a
-        two-panel PDF showing the light curve with Txx boundaries (upper
-        panel) and the cumulative count curve with CSF levels (lower panel).
+        Serialises ``pulse_res`` and ``txx_res`` as JSON files and
+        delegates the two-panel diagnostic figure to
+        :class:`~heapy.temp.temp_utils.TxxPlotter`. ``self.rate`` already
+        carries ``NaN`` at gap bins (preserved by :meth:`frombin`), so
+        only the cumulative curve needs an extra mask (registered via
+        :meth:`~heapy.temp.temp_utils.TxxPlotter.set_gaps`) because
+        :meth:`calculate` keeps ``ccts`` continuous through gaps via
+        ``np.nancumsum``.
 
         Args:
             savepath: Directory path where output files are written; created
@@ -347,56 +371,14 @@ class pgTxx(pgSignal):
         json_dump(self.pulse_res, savepath + '/pulse_res.json')
         json_dump(self.txx_res, savepath + '/txx_res.json')
 
-        rcParams['font.family'] = 'serif'
-        rcParams['font.serif'] = ['STIX Two Text']
-        rcParams['mathtext.fontset'] = 'stix'
-        rcParams['font.size'] = 12
-        rcParams['pdf.fonttype'] = 42
-        rcParams['ps.fonttype'] = 42
-
-        fig = plt.figure(figsize=(7, 6))
-        gs = fig.add_gridspec(2, 1, wspace=0, hspace=0)
-        ax1 = fig.add_subplot(gs[:1, 0])
-        ax2 = fig.add_subplot(gs[1:, 0], sharex=ax1)
-
-        ax1.plot(self.time, self.rate, color='k', lw=1.0, label='Light Curve')
-        ax1.plot(self.time, self.bak, color='r', lw=1.0, label='Background')
-        for i in range(len(self.txx1)):
-            ax1.axvline(self.txx1[i], color='g', lw=1.0, ls='--')
-            ax1.axvline(self.txx2[i], color='g', lw=1.0, ls='--')
-        ax1.set_ylabel('Rate')
-        ax1.set_xlim([self.time[0], self.time[-1]])
-        ax1.minorticks_on()
-        ax1.tick_params(axis='x', which='both', direction='in', labelcolor='k', colors='k')
-        ax1.tick_params(axis='y', which='both', direction='in', labelcolor='k', colors='k')
-        ax1.tick_params(which='major', width=1.0, length=5)
-        ax1.tick_params(which='minor', width=1.0, length=3)
-        ax1.xaxis.set_ticks_position('both')
-        ax1.yaxis.set_ticks_position('both')
-        plt.setp(ax1.get_xticklabels(), visible=False)
-        ax1.legend(frameon=False)
-
-        ax2.plot(self.time, self.ccts, color='gray', lw=1.0)
-        ax2.plot(self.time[self.tindex], self.ccts[self.tindex], color='k', lw=1.0)
-        for i in range(len(self.txx1)):
-            ax2.axvline(self.txx1[i], color='g', lw=1.0, ls='--')
-            ax2.axvline(self.txx2[i], color='g', lw=1.0, ls='--')
-        for csfi in self.csf:
-            ax2.axhline(csfi, color='orange', lw=1.0)
-        for i in range(len(self.csf1)):
-            ax2.axhline(self.csf1[i], color='orange', lw=1.0, ls='--')
-            ax2.axhline(self.csf2[i], color='orange', lw=1.0, ls='--')
-        ax2.set_xlabel('Time')
-        ax2.set_ylabel('Accumulated counts')
-        ax2.minorticks_on()
-        ax2.tick_params(axis='x', which='both', direction='in', labelcolor='k', colors='k')
-        ax2.tick_params(axis='y', which='both', direction='in', labelcolor='k', colors='k')
-        ax2.tick_params(which='major', width=1.0, length=5)
-        ax2.tick_params(which='minor', width=1.0, length=3)
-        ax2.xaxis.set_ticks_position('both')
-        ax2.yaxis.set_ticks_position('both')
-        fig.savefig(savepath + '/txx.pdf', bbox_inches='tight', pad_inches=0.1, dpi=300)
-        plt.close(fig)
+        with plt_rc_context():
+            fig = TxxPlotter()
+            if self._gap_int:
+                fig.set_gaps(self._gap_int, self.lbins, self.rbins)
+            fig.plot_curve(self.time, self.rate, bak=self.bak)
+            fig.plot_ccts(self.time, self.ccts, self.tindex)
+            fig.plot_txx(self.txx1, self.txx2, self.csf, self.csf1, self.csf2)
+            fig.save(savepath + '/txx.pdf')
 
 
 class ppTxx(ppSignal):
@@ -637,9 +619,9 @@ class ppTxx(ppSignal):
     def save(self, savepath):
         """Save Txx results and diagnostic plots to disk.
 
-        Serialises ``pulse_res`` and ``txx_res`` as JSON files and writes a
-        two-panel PDF showing the light curve with Txx boundaries (upper
-        panel) and the cumulative count curve with CSF levels (lower panel).
+        Serialises ``pulse_res`` and ``txx_res`` as JSON files and
+        delegates the two-panel diagnostic figure to
+        :class:`~heapy.temp.temp_utils.TxxPlotter`.
 
         Args:
             savepath: Directory path where output files are written; created
@@ -660,56 +642,12 @@ class ppTxx(ppSignal):
         json_dump(self.pulse_res, savepath + '/pulse_res.json')
         json_dump(self.txx_res, savepath + '/txx_res.json')
 
-        rcParams['font.family'] = 'serif'
-        rcParams['font.serif'] = ['STIX Two Text']
-        rcParams['mathtext.fontset'] = 'stix'
-        rcParams['font.size'] = 12
-        rcParams['pdf.fonttype'] = 42
-        rcParams['ps.fonttype'] = 42
-
-        fig = plt.figure(figsize=(7, 6))
-        gs = fig.add_gridspec(2, 1, wspace=0, hspace=0)
-        ax1 = fig.add_subplot(gs[:1, 0])
-        ax2 = fig.add_subplot(gs[1:, 0], sharex=ax1)
-
-        ax1.plot(self.time, self.rate, color='k', lw=1.0, label='Light Curve')
-        ax1.plot(self.time, self.bak, color='r', lw=1.0, label='Background')
-        for i in range(len(self.txx1)):
-            ax1.axvline(self.txx1[i], color='g', lw=1.0, ls='--')
-            ax1.axvline(self.txx2[i], color='g', lw=1.0, ls='--')
-        ax1.set_ylabel('Rate')
-        ax1.set_xlim([self.time[0], self.time[-1]])
-        ax1.minorticks_on()
-        ax1.tick_params(axis='x', which='both', direction='in', labelcolor='k', colors='k')
-        ax1.tick_params(axis='y', which='both', direction='in', labelcolor='k', colors='k')
-        ax1.tick_params(which='major', width=1.0, length=5)
-        ax1.tick_params(which='minor', width=1.0, length=3)
-        ax1.xaxis.set_ticks_position('both')
-        ax1.yaxis.set_ticks_position('both')
-        plt.setp(ax1.get_xticklabels(), visible=False)
-        ax1.legend(frameon=False)
-
-        ax2.plot(self.time, self.ccts, color='gray', lw=1.0)
-        ax2.plot(self.time[self.tindex], self.ccts[self.tindex], color='k', lw=1.0)
-        for i in range(len(self.txx1)):
-            ax2.axvline(self.txx1[i], color='g', lw=1.0, ls='--')
-            ax2.axvline(self.txx2[i], color='g', lw=1.0, ls='--')
-        for csfi in self.csf:
-            ax2.axhline(csfi, color='orange', lw=1.0)
-        for i in range(len(self.csf1)):
-            ax2.axhline(self.csf1[i], color='orange', lw=1.0, ls='--')
-            ax2.axhline(self.csf2[i], color='orange', lw=1.0, ls='--')
-        ax2.set_xlabel('Time')
-        ax2.set_ylabel('Accumulated counts')
-        ax2.minorticks_on()
-        ax2.tick_params(axis='x', which='both', direction='in', labelcolor='k', colors='k')
-        ax2.tick_params(axis='y', which='both', direction='in', labelcolor='k', colors='k')
-        ax2.tick_params(which='major', width=1.0, length=5)
-        ax2.tick_params(which='minor', width=1.0, length=3)
-        ax2.xaxis.set_ticks_position('both')
-        ax2.yaxis.set_ticks_position('both')
-        fig.savefig(savepath + '/txx.pdf', bbox_inches='tight', pad_inches=0.1, dpi=300)
-        plt.close(fig)
+        with plt_rc_context():
+            fig = TxxPlotter()
+            fig.plot_curve(self.time, self.rate, bak=self.bak)
+            fig.plot_ccts(self.time, self.ccts, self.tindex)
+            fig.plot_txx(self.txx1, self.txx2, self.csf, self.csf1, self.csf2)
+            fig.save(savepath + '/txx.pdf')
 
 
 class ggTxx(ggSignal):
@@ -947,10 +885,11 @@ class ggTxx(ggSignal):
     def save(self, savepath):
         """Save Txx results and diagnostic plots to disk.
 
-        Serialises ``pulse_res`` and ``txx_res`` as JSON files and writes a
-        two-panel PDF showing the net rate light curve with Txx boundaries
-        (upper panel) and the cumulative count curve with CSF levels (lower
-        panel).
+        Serialises ``pulse_res`` and ``txx_res`` as JSON files and
+        delegates the two-panel diagnostic figure to
+        :class:`~heapy.temp.temp_utils.TxxPlotter`. ggTxx passes
+        ``self.net`` as the primary curve (input is already
+        background-subtracted) and omits the background overlay.
 
         Args:
             savepath: Directory path where output files are written; created
@@ -971,221 +910,9 @@ class ggTxx(ggSignal):
         json_dump(self.pulse_res, savepath + '/pulse_res.json')
         json_dump(self.txx_res, savepath + '/txx_res.json')
 
-        rcParams['font.family'] = 'serif'
-        rcParams['font.serif'] = ['STIX Two Text']
-        rcParams['mathtext.fontset'] = 'stix'
-        rcParams['font.size'] = 12
-        rcParams['pdf.fonttype'] = 42
-        rcParams['ps.fonttype'] = 42
-
-        fig = plt.figure(figsize=(7, 6))
-        gs = fig.add_gridspec(2, 1, wspace=0, hspace=0)
-        ax1 = fig.add_subplot(gs[:1, 0])
-        ax2 = fig.add_subplot(gs[1:, 0], sharex=ax1)
-
-        ax1.plot(self.time, self.net, color='k', lw=1.0, label='Light Curve')
-        for i in range(len(self.txx1)):
-            ax1.axvline(self.txx1[i], color='g', lw=1.0, ls='--')
-            ax1.axvline(self.txx2[i], color='g', lw=1.0, ls='--')
-        ax1.set_ylabel('Rate')
-        ax1.set_xlim([self.time[0], self.time[-1]])
-        ax1.minorticks_on()
-        ax1.tick_params(axis='x', which='both', direction='in', labelcolor='k', colors='k')
-        ax1.tick_params(axis='y', which='both', direction='in', labelcolor='k', colors='k')
-        ax1.tick_params(which='major', width=1.0, length=5)
-        ax1.tick_params(which='minor', width=1.0, length=3)
-        ax1.xaxis.set_ticks_position('both')
-        ax1.yaxis.set_ticks_position('both')
-        plt.setp(ax1.get_xticklabels(), visible=False)
-        ax1.legend(frameon=False)
-
-        ax2.plot(self.time, self.ccts, color='gray', lw=1.0)
-        ax2.plot(self.time[self.tindex], self.ccts[self.tindex], color='k', lw=1.0)
-        for i in range(len(self.txx1)):
-            ax2.axvline(self.txx1[i], color='g', lw=1.0, ls='--')
-            ax2.axvline(self.txx2[i], color='g', lw=1.0, ls='--')
-        for csfi in self.csf:
-            ax2.axhline(csfi, color='orange', lw=1.0)
-        for i in range(len(self.csf1)):
-            ax2.axhline(self.csf1[i], color='orange', lw=1.0, ls='--')
-            ax2.axhline(self.csf2[i], color='orange', lw=1.0, ls='--')
-        ax2.set_xlabel('Time')
-        ax2.set_ylabel('Accumulated counts')
-        ax2.minorticks_on()
-        ax2.tick_params(axis='x', which='both', direction='in', labelcolor='k', colors='k')
-        ax2.tick_params(axis='y', which='both', direction='in', labelcolor='k', colors='k')
-        ax2.tick_params(which='major', width=1.0, length=5)
-        ax2.tick_params(which='minor', width=1.0, length=3)
-        ax2.xaxis.set_ticks_position('both')
-        ax2.yaxis.set_ticks_position('both')
-        fig.savefig(savepath + '/txx.pdf', bbox_inches='tight', pad_inches=0.1, dpi=300)
-        plt.close(fig)
-
-
-def accumcts(time, ccts, pstart, pstop, xx, simple_err=False, random_seed=450001):
-    """Compute cumulative-count-fraction levels and Txx start/stop times.
-
-    Interpolates the cumulative count curve to 1000-point resolution when
-    the native sampling is too coarse, calculates the background CSF levels
-    between pulses, derives the :math:`(1-xx)/2` and :math:`1-(1-xx)/2`
-    fraction levels (``csf1``, ``csf2``) for each pulse interval, and
-    locates the corresponding times via ``find_txx``.
-
-    Args:
-        time: 1-D time array covering the analysis window.
-        ccts: Cumulative net count array aligned with ``time``.
-        pstart: Array of pulse start times; one entry per pulse.
-        pstop: Array of pulse stop times; one entry per pulse.
-        xx: Cumulative count fraction, e.g. ``0.9`` for T90.
-        simple_err: When ``True``, also compute and return analytic
-            uncertainty estimates on all CSF and Txx values.
-        random_seed: Seed for the local RNG used by the asymmetric
-            Gaussian sampler in the ``simple_err`` branch. Default
-            ensures reproducibility; ignored when ``simple_err=False``.
-
-    Returns:
-        When ``simple_err`` is ``False``: a tuple
-        ``(txx, txx1, txx2, csf, csf1, csf2)`` where each element is a list
-        with one entry per pulse.
-
-        When ``simple_err`` is ``True``: a tuple
-        ``(txx, txx1, txx2, txx_err, txx1_err, txx2_err,
-        csf, csf1, csf2, csf_err, csf1_err, csf2_err)``.
-    """
-
-    rng = np.random.default_rng(random_seed)
-
-    idx = np.argsort(pstop - pstart)[0]
-    if len(np.where((time >= pstart[idx]) & (time <= pstop[idx]))[0]) < 1000:
-        interp_dt = (pstop[idx] - pstart[idx]) / 1000
-        interp_time = np.arange(time[0], time[-1] - 1e-5, interp_dt)
-        interp = interp1d(time, ccts, kind='quadratic')
-        interp_ccts = interp(interp_time)
-    else:
-        interp_time = time
-        interp_ccts = ccts
-
-    csf, csf1, csf2 = [], [], []
-    txx, txx1, txx2 = [], [], []
-
-    if simple_err:
-        csf_err, csf1_err, csf2_err = [], [], []
-        txx_err, txx1_err, txx2_err = [], [], []
-
-    for left, right in zip(np.append(time[0], pstop), np.append(pstart, time[-1]), strict=False):
-        idx = np.where((interp_time >= left) & (interp_time <= right))[0]
-        if len(idx) >= 1:
-            csf_i = np.mean(interp_ccts[idx])
-        else:
-            csf_i = interp_ccts[np.argmin(np.abs(interp_time - left))]
-        csf.append(csf_i)
-
-        if simple_err:
-            csf_err_i = np.std(interp_ccts[idx]) if len(idx) >= 1 else 0.0
-            csf_err.append(csf_err_i)
-
-    dcsf = np.array(csf[1:]) - np.array(csf[:-1])
-
-    for pi, (left, right) in enumerate(
-        zip(np.append(time[0], pstop[:-1]), np.append(pstart[1:], time[-1]), strict=False)
-    ):
-        nn = (1 - xx) / 2
-        dd = dcsf[pi] * nn
-
-        csf1_i = csf[pi] + dd
-        csf2_i = csf[pi + 1] - dd
-
-        csf1.append(csf1_i)
-        csf2.append(csf2_i)
-
-        if simple_err:
-            csf1_err_i = np.sqrt((1 - nn) ** 2 * csf_err[pi] ** 2 + nn**2 * csf_err[pi + 1] ** 2)
-            csf2_err_i = np.sqrt(nn**2 * csf_err[pi] ** 2 + (1 - nn) ** 2 * csf_err[pi + 1] ** 2)
-
-            csf1_err.append(csf1_err_i)
-            csf2_err.append(csf2_err_i)
-
-        pt = interp_time[np.where((interp_time >= left) & (interp_time <= right))]
-        pcts = interp_ccts[np.where((interp_time >= left) & (interp_time <= right))]
-
-        txx_i, txx1_i, txx2_i = find_txx(pt, pcts, csf1_i, csf2_i)
-
-        txx.append(txx_i)
-        txx1.append(txx1_i)
-        txx2.append(txx2_i)
-
-        if simple_err:
-            _, txx1_lo_i, txx2_lo_i = find_txx(pt, pcts, csf1_i - csf1_err_i, csf2_i - csf2_err_i)
-            _, txx1_hi_i, txx2_hi_i = find_txx(pt, pcts, csf1_i + csf1_err_i, csf2_i + csf2_err_i)
-            txx1_le_i, txx1_he_i = txx1_i - txx1_lo_i, txx1_hi_i - txx1_i
-            txx2_le_i, txx2_he_i = txx2_i - txx2_lo_i, txx2_hi_i - txx2_i
-
-            txx1_i_sam = generate_asymmetric_gaussian(txx1_i, txx1_le_i, txx1_he_i, 1000, rng=rng)
-            txx2_i_sam = generate_asymmetric_gaussian(txx2_i, txx2_le_i, txx2_he_i, 1000, rng=rng)
-            txx_lo_i, txx_hi_i = np.percentile(txx2_i_sam - txx1_i_sam, [16, 84])
-            txx_le_i, txx_he_i = txx_i - txx_lo_i, txx_hi_i - txx_i
-
-            txx_err.append([txx_le_i, txx_he_i])
-            txx1_err.append([txx1_le_i, txx1_he_i])
-            txx2_err.append([txx2_le_i, txx2_he_i])
-
-    if simple_err:
-        return (
-            txx,
-            txx1,
-            txx2,
-            txx_err,
-            txx1_err,
-            txx2_err,
-            csf,
-            csf1,
-            csf2,
-            csf_err,
-            csf1_err,
-            csf2_err,
-        )
-    else:
-        return txx, txx1, txx2, csf, csf1, csf2
-
-
-def find_txx(time, ccts, csf1, csf2):
-    """Locate the start and stop times corresponding to CSF thresholds.
-
-    Linearly interpolates the cumulative count curve onto a 1000-point grid,
-    then scans forward to find the time ``txx1`` at which the curve crosses
-    ``csf1`` from below, and ``txx2`` at which it crosses ``csf2`` from
-    below.  The duration ``txx = txx2 - txx1`` is also returned.
-
-    Args:
-        time: 1-D time array for the pulse interval.
-        ccts: Cumulative net count array aligned with ``time``.
-        csf1: Lower cumulative-count-fraction level (start threshold).
-        csf2: Upper cumulative-count-fraction level (stop threshold).
-
-    Returns:
-        A tuple ``(txx, txx1, txx2)`` where ``txx`` is the duration and
-        ``txx1``, ``txx2`` are the start and stop times, respectively.
-        All three values are ``0`` if no valid crossing is found.
-    """
-
-    interp_time = np.linspace(time[0], time[-1], 1000)
-    interp = interp1d(time, ccts, kind='linear')
-    interp_ccts = interp(interp_time)
-
-    txx1, txx2 = 0, 0
-    for i in range(1, len(interp_time)):
-        if interp_ccts[i] < csf1:
-            continue
-        elif (interp_ccts[i - 1] < csf1) and (interp_ccts[i] >= csf1):
-            txx1 = interp_time[i]
-            continue
-        elif (csf1 <= interp_ccts[i - 1] < csf2) and (csf1 < interp_ccts[i] <= csf2):
-            continue
-        elif (csf1 < interp_ccts[i - 1] <= csf2) and (interp_ccts[i] > csf2):
-            txx2 = interp_time[i - 1]
-            break
-        else:
-            continue
-
-    txx = txx2 - txx1
-    return txx, txx1, txx2
+        with plt_rc_context():
+            fig = TxxPlotter()
+            fig.plot_curve(self.time, self.net)
+            fig.plot_ccts(self.time, self.ccts, self.tindex)
+            fig.plot_txx(self.txx1, self.txx2, self.csf, self.csf1, self.csf2)
+            fig.save(savepath + '/txx.pdf')

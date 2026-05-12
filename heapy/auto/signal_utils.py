@@ -23,6 +23,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from ..util.significance import pgsig, ppsig
+from ..util.tools import plt_rc_context
 
 
 def indices_in_intervals(lbins, rbins, intervals):
@@ -296,7 +297,11 @@ def pg_snr(cts_i, bcts_i, bcts_err_i=None):
 
     Falls back to the pure-Poisson estimator :func:`ppsig` when no
     background uncertainty is supplied. Returns ``-5`` (a bad-bin
-    sentinel) for non-positive inputs or zero background error.
+    sentinel) for non-positive inputs or zero background error, and
+    ``NaN`` when ``cts_i`` itself is non-finite (signals a missing-data
+    bin so the caller and downstream :func:`classify_bins` can keep
+    treating it as bad without invoking the underlying SNR estimator,
+    which is not NaN-safe).
 
     Args:
         cts_i: Observed source counts in the bin.
@@ -305,8 +310,12 @@ def pg_snr(cts_i, bcts_i, bcts_err_i=None):
             Poisson-only branch.
 
     Returns:
-        SNR value, or ``-5`` when the bin is unusable.
+        SNR value, ``-5`` when the bin is unusable, or ``NaN`` when
+        ``cts_i`` is not finite.
     """
+
+    if not np.isfinite(cts_i):
+        return np.nan
 
     if bcts_err_i is None:
         if bcts_i <= 0 or cts_i <= 0:
@@ -352,33 +361,6 @@ def gauss_snr(cts_i, cts_err_i):
         return -5
 
     return cts_i / cts_err_i
-
-
-def plt_rc_context():
-    """Return the rc-context preset wrapped around every ``SignalPlotter`` save.
-
-    Bundles the project's PDF-friendly overrides -- Inter sans-serif
-    body text, ``stixsans`` math, and TrueType (type-42) embedding for
-    the ``pdf`` and ``ps`` backends -- so saved figures stay
-    typographically consistent regardless of the global rcParams at
-    call time.
-
-    Returns:
-        A :class:`matplotlib.RcParams` context manager applying the
-        preset overrides; use in a ``with`` block around figure
-        rendering.
-    """
-
-    plt_rc = {
-        'font.family': 'serif',
-        'font.serif': ['STIX Two Text'],
-        'mathtext.fontset': 'stix',
-        'font.size': 12,
-        'pdf.fonttype': 42,
-        'ps.fonttype': 42,
-    }
-
-    return plt.rc_context(plt_rc)
 
 
 class SignalPlotter:
