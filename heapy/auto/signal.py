@@ -37,6 +37,7 @@ from .signal_utils import (
     gauss_snr,
     indices_in_intervals,
     intervals_equal,
+    normalize_ignore,
     pg_snr,
     plot_tau_diagnostic,
     plt_rc_context,
@@ -104,8 +105,10 @@ class pgSignal:
             ts: Source event time-stamps.
             bins: Bin edges (length ``N + 1``).
             exp: Per-bin exposure times; defaults to bin widths.
-            ignore: Optional ``[[low, high], ...]`` intervals excluded
-                from :meth:`polyfit` weighting.
+            ignore: Intervals excluded from :meth:`polyfit` weighting.
+                Accepts either a single pair ``[low, high]`` or a list
+                of pairs ``[[low, high], ...]``; the bare pair form is
+                normalized to a single-element list.
 
         Raises:
             TypeError: If ``exp`` and ``bins`` have mismatched sizes or any
@@ -131,7 +134,7 @@ class pgSignal:
         if not (self.exp <= self.binsize).all():
             raise TypeError('expected exp <= binsize')
 
-        self.ignore = ignore
+        self.ignore = normalize_ignore(ignore)
 
         self.time = (self.lbins + self.rbins) / 2
         self.rate = self.cts / self.exp
@@ -177,9 +180,10 @@ class pgSignal:
                 ``ignore``.
             bins: Bin edges (length ``N + 1``).
             exp: Per-bin exposure times; defaults to bin widths.
-            ignore: Optional ``[[low, high], ...]`` intervals excluded
-                from :meth:`polyfit` weighting. Intervals derived from
-                ``NaN`` bins are appended automatically.
+            ignore: Intervals excluded from :meth:`polyfit` weighting.
+                Accepts either ``[low, high]`` or ``[[low, high], ...]``
+                (see :meth:`__init__`). Intervals derived from ``NaN``
+                bins are appended automatically.
             random_seed: Seed for the local RNG that draws synthetic
                 photon times within each bin. Default ensures
                 reproducibility across runs; pass ``None`` for OS
@@ -198,12 +202,14 @@ class pgSignal:
         if bins.size != (cts.size + 1):
             raise TypeError('expected size(bins) = size(cts)+1')
 
+        ignore = normalize_ignore(ignore)
+
         nan_mask = np.isnan(cts)
         gap_int = None
         if nan_mask.any():
             raw_nan = [[float(bins[i]), float(bins[i + 1])] for i in np.where(nan_mask)[0]]
             gap_int = union(raw_nan)
-            ignore = gap_int if ignore is None else union(list(ignore) + gap_int)
+            ignore = gap_int if ignore is None else union(ignore + gap_int)
             cts = np.where(nan_mask, 0, cts)
 
         rng = np.random.default_rng(random_seed)
