@@ -25,29 +25,6 @@ import numpy as np
 from ..util.significance import pgsig, ppsig
 
 
-def normalize_ignore(ignore):
-    """Coerce a user-supplied ``ignore`` argument into the nested form.
-
-    Accepts either a bare numeric pair ``[low, high]`` (wrapped to
-    ``[[low, high]]``) or an iterable of such pairs. Each pair is
-    cast to a list of Python floats so downstream code can iterate
-    uniformly. ``None`` passes through.
-
-    Args:
-        ignore: ``None``, ``[low, high]``, or ``[[low, high], ...]``.
-
-    Returns:
-        ``None`` or a list ``[[low, high], ...]``.
-    """
-
-    if ignore is None:
-        return None
-    seq = list(ignore)
-    if len(seq) == 2 and np.isscalar(seq[0]) and np.isscalar(seq[1]):
-        return [[float(seq[0]), float(seq[1])]]
-    return [[float(low), float(upp)] for low, upp in seq]
-
-
 def indices_in_intervals(lbins, rbins, intervals):
     """Return sorted unique bin indices that overlap any given interval.
 

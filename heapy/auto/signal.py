@@ -37,7 +37,6 @@ from .signal_utils import (
     gauss_snr,
     indices_in_intervals,
     intervals_equal,
-    normalize_ignore,
     pg_snr,
     plot_tau_diagnostic,
     plt_rc_context,
@@ -68,8 +67,12 @@ class pgSignal:
         bins: Bin edges (length ``N + 1``).
         cts, exp, time, rate: Histogram, exposure, bin centers, and rate.
             ``exp`` is only set on the raw-events construction path.
-        ignore: Optional list of ``[low, high]`` intervals to exclude from
-            the polynomial fit.
+        ignore: User-supplied list of ``[low, high]`` intervals (or
+            ``None``). When set, it serves as an escape hatch that
+            bypasses the auto-detected ``sort_res['ignore']`` in
+            :meth:`_effective_ignore`. NaN-gap intervals from
+            :meth:`frombin` live on :attr:`_gap_int` and are always
+            folded in regardless of this attribute.
         bl: :class:`~.baseline.Baseline` instance from :meth:`basefit`
             (raw-events path only).
         poly: :class:`~.polynomial.Polynomial` after :meth:`polyfit`, or
@@ -134,7 +137,7 @@ class pgSignal:
         if not (self.exp <= self.binsize).all():
             raise TypeError('expected exp <= binsize')
 
-        self.ignore = normalize_ignore(ignore)
+        self.ignore = self._normalize_ignore(ignore)
 
         self.time = (self.lbins + self.rbins) / 2
         self.rate = self.cts / self.exp
@@ -163,27 +166,29 @@ class pgSignal:
 
         Synthesizes uniformly-distributed event time-stamps within each
         bin to populate the histogram-based ``__init__`` path. The
-        resulting timing is approximate; a ``UserWarning`` is always
-        emitted. ``NaN`` entries in ``cts`` mark missing-data bins:
-        they are replaced with zero counts and their time intervals
-        are unioned into ``ignore`` so :meth:`basefit` and
-        :meth:`polyfit` skip them; the bins themselves are still
-        scored by :meth:`sorting` and typically land in
-        ``re_bad_int`` due to their large negative SNR. Gap boundaries
-        are also recorded on the instance so :meth:`bblock` pins
-        block edges at them, preventing a single block from
-        straddling a missing-data region.
+        resulting timing is approximate. ``NaN`` entries in ``cts`` mark
+        missing-data bins: they are replaced with zero counts and their
+        time intervals are recorded on the instance as
+        :attr:`_gap_int`, which :meth:`_effective_ignore` always folds
+        into the exclusion set used by :meth:`basefit` and
+        :meth:`polyfit` (independent of user-supplied :attr:`ignore`).
+        Gap-bin counts are still scored by :meth:`sorting` and typically
+        land in ``re_bad_int`` due to their large negative SNR. Gap
+        boundaries are also fed to :meth:`bblock` so block edges pin
+        there, preventing a single block from straddling a missing-data
+        region.
 
         Args:
             cts: Source counts per bin. ``NaN`` entries mark bins with
                 no valid observation and are auto-excluded via
-                ``ignore``.
+                :attr:`_gap_int`.
             bins: Bin edges (length ``N + 1``).
             exp: Per-bin exposure times; defaults to bin widths.
             ignore: Intervals excluded from :meth:`polyfit` weighting.
                 Accepts either ``[low, high]`` or ``[[low, high], ...]``
-                (see :meth:`__init__`). Intervals derived from ``NaN``
-                bins are appended automatically.
+                (see :meth:`__init__`). Stored verbatim on
+                :attr:`ignore`; NaN-derived gap intervals live on
+                :attr:`_gap_int` instead and never enter :attr:`ignore`.
             random_seed: Seed for the local RNG that draws synthetic
                 photon times within each bin. Default ensures
                 reproducibility across runs; pass ``None`` for OS
@@ -202,14 +207,11 @@ class pgSignal:
         if bins.size != (cts.size + 1):
             raise TypeError('expected size(bins) = size(cts)+1')
 
-        ignore = normalize_ignore(ignore)
-
         nan_mask = np.isnan(cts)
         gap_int = None
         if nan_mask.any():
             raw_nan = [[float(bins[i]), float(bins[i + 1])] for i in np.where(nan_mask)[0]]
             gap_int = union(raw_nan)
-            ignore = gap_int if ignore is None else union(ignore + gap_int)
             cts = np.where(nan_mask, 0, cts)
 
         rng = np.random.default_rng(random_seed)
@@ -362,15 +364,69 @@ class pgSignal:
 
         self.block_res = {'edges': self.edges, 'nblock': self.nblock, 're_binsize': self.re_binsize}
 
+    @staticmethod
+    def _normalize_ignore(ignore):
+        """Coerce a user-supplied ``ignore`` argument into the nested form.
+
+        Accepts either a bare numeric pair ``[low, high]`` (wrapped to
+        ``[[low, high]]``) or an iterable of such pairs. Each pair is
+        cast to a list of Python floats so downstream code can iterate
+        uniformly. ``None`` passes through.
+
+        Args:
+            ignore: ``None``, ``[low, high]``, or ``[[low, high], ...]``.
+
+        Returns:
+            ``None`` or a list ``[[low, high], ...]``.
+        """
+
+        if ignore is None:
+            return None
+        seq = list(ignore)
+        if len(seq) == 2 and np.isscalar(seq[0]) and np.isscalar(seq[1]):
+            return [[float(seq[0]), float(seq[1])]]
+        return [[float(low), float(upp)] for low, upp in seq]
+
+    def _effective_ignore(self):
+        """Resolve which intervals to drop from background fits at the current state.
+
+        Resolution policy:
+
+        - User-supplied :attr:`ignore` is an escape hatch: when set,
+          returns ``union(self.ignore + _gap_int)``. The auto-detected
+          ``sort_res['ignore']`` is bypassed so the user retains full
+          control over which regions feed the background model.
+        - Otherwise, when :attr:`sort_res` is populated, returns
+          ``union(sort_res['ignore'] + _gap_int)`` -- auto-detected
+          signal/bad blocks unioned with NaN gap intervals.
+        - When neither :attr:`ignore` nor :attr:`sort_res` is set yet
+          (e.g. inside :meth:`basefit` during pass 1), returns only the
+          gap intervals (or ``[]`` if none).
+
+        Returns:
+            A list of ``[low, high]`` intervals; ``[]`` when nothing is
+            excluded.
+        """
+
+        gap = list(self._gap_int) if self._gap_int else []
+        if self.ignore is not None:
+            return union(list(self.ignore) + gap)
+        if self.sort_res is None:
+            return gap
+        return union(list(self.sort_res['ignore']) + gap)
+
     def basefit(self, weight=None):
         """Fit a smooth baseline via ``drpls`` to seed the first background.
 
         Runs :meth:`bblock` first when block results are missing. Zero
-        weight is applied to bins inside :attr:`ignore`, and bins with
-        zero counts are excluded before calling
-        :meth:`~.baseline.Baseline.fit`. Populates :attr:`bl`, :attr:`bak`,
-        :attr:`bcts`, and :attr:`base_res`. Not applicable on composite
-        instances built via :meth:`from_components`.
+        weight is applied to bins inside :meth:`_effective_ignore`
+        (i.e. user-supplied :attr:`ignore` unioned with
+        :attr:`_gap_int`; :attr:`sort_res` is ``None`` at this stage so
+        it does not contribute), and bins with zero counts are excluded
+        before calling :meth:`~.baseline.Baseline.fit`. Populates
+        :attr:`bl`, :attr:`bak`, :attr:`bcts`, and :attr:`base_res`. Not
+        applicable on composite instances built via
+        :meth:`from_components`.
 
         Args:
             weight: Optional per-bin weights; defaults to ones.
@@ -387,8 +443,9 @@ class pgSignal:
 
         weight = np.ones_like(self.time) if weight is None else np.array(weight, dtype=float)
 
-        if self.ignore is not None:
-            ignore_idx = indices_in_intervals(self.lbins, self.rbins, self.ignore)
+        exclude = self._effective_ignore()
+        if exclude:
+            ignore_idx = indices_in_intervals(self.lbins, self.rbins, exclude)
             weight[ignore_idx] = 0
 
         pos = np.where(self.cts > 0)[0]
@@ -497,20 +554,21 @@ class pgSignal:
     def polyfit(self, deg=None):
         """Refit the background as a polynomial over non-signal bins.
 
-        Excludes the union of :attr:`ignore` (user-supplied and/or
-        NaN-gap intervals from :meth:`frombin`) and the auto-derived
-        signal/bad intervals from :meth:`sorting` (``sort_res['ignore']``),
-        then fits the remaining rates with
-        :class:`~.polynomial.Polynomial`. When :attr:`sort_res` is
-        already populated (typical inside :meth:`loop`) it is reused
-        without rerunning :meth:`sorting`; if both :attr:`sort_res` and
-        :attr:`ignore` are unset, :meth:`sorting` is triggered first.
-        When :attr:`ignore` is supplied but :attr:`sort_res` is unset
-        (e.g. per-channel refits that reuse a master's ignore list)
-        :meth:`sorting` is **not** triggered, so the supplied intervals
-        are used as-is. Updates :attr:`bak`, :attr:`bcts`, their
-        errors, the net arrays, and :attr:`poly_res`. Not applicable on
-        composite instances.
+        Drops bins inside :meth:`_effective_ignore` and fits the
+        remaining rates with :class:`~.polynomial.Polynomial`. The
+        resolution policy (see :meth:`_effective_ignore`) is:
+        user-supplied :attr:`ignore` is honoured as an escape hatch and
+        bypasses the auto-derived ``sort_res['ignore']``; otherwise the
+        auto-derived intervals are used. NaN-gap intervals
+        (:attr:`_gap_int`) are always unioned in either branch since
+        they mark "no observation", not "no signal". When neither
+        :attr:`sort_res` nor :attr:`ignore` is set, :meth:`sorting` is
+        triggered first to populate the auto branch; when only
+        :attr:`ignore` is set (e.g. per-channel refits reusing a
+        master's ignore), :meth:`sorting` is **not** triggered so the
+        supplied intervals are used as-is. Updates :attr:`bak`,
+        :attr:`bcts`, their errors, the net arrays, and
+        :attr:`poly_res`. Not applicable on composite instances.
 
         Args:
             deg: Polynomial degree; ``None`` lets the two-pass fit pick
@@ -529,13 +587,7 @@ class pgSignal:
         if self.sort_res is None and self.ignore is None:
             self.sorting()
 
-        ignore_parts = []
-        if self.sort_res is not None:
-            ignore_parts.extend(self.sort_res['ignore'])
-        if self.ignore is not None:
-            ignore_parts.extend(self.ignore)
-        ignore = union(ignore_parts)
-
+        ignore = self._effective_ignore()
         ignore_idx = indices_in_intervals(self.lbins, self.rbins, ignore)
 
         notice_time = np.delete(self.time, ignore_idx)
