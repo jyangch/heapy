@@ -391,9 +391,14 @@ class pgSignal:
         if len(self.ts) <= 1e4:
             edges_ = time_rescaling_bblock(self.ts, p0=p0, bkg_integral=bkg_integral)
         else:
+            # frombin keeps cts as float when NaN gap bins are present so the
+            # missing-data semantic stays distinguishable from a measured zero.
+            # astropy.bayesian_blocks(fitness='events') rejects non-integer
+            # input; ``pos`` already filters NaN via ``> 0`` so the surviving
+            # counts are integer-valued and safe to cast for this call.
             pos = np.where(self.cts > 0)[0]
             edges_ = time_rescaling_bblock(
-                self.time[pos], cts=self.cts[pos], p0=p0, bkg_integral=bkg_integral
+                self.time[pos], cts=self.cts[pos].astype(int), p0=p0, bkg_integral=bkg_integral
             )
 
         edges_[0] = max(edges_[0], self.time[0])
