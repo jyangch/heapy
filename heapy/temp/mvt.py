@@ -398,10 +398,154 @@ def _run_cwt(ncts, ncts_err, bins, *, bkg_rate, noise_model,
                       is_upper_limit=False, diag=diag)
 
 
+def _rebin_to_snr(net, err, lbins, rbins, target_snr=5.0):
+    """Greedy adjacent-bin grouping until every group has SNR >= ``target_snr``.
+
+    Returns ``(rate, drate, out_lb, out_rb)``.  ``rate`` is in cts/sec.
+    """
+    net = np.asarray(net, float)
+    err = np.asarray(err, float)
+    lb = np.asarray(lbins, float)
+    rb = np.asarray(rbins, float)
+    n = net.shape[0]
+    rate, drate, out_lb, out_rb = [], [], [], []
+    i = 0
+    while i < n:
+        c = net[i]
+        v = err[i] ** 2
+        l = lb[i]
+        r = rb[i]
+        j = i + 1
+        while True:
+            if v > 0 and c > 0 and (c / np.sqrt(v)) >= target_snr:
+                break
+            if j >= n:
+                break
+            c += net[j]
+            v += err[j] ** 2
+            r = rb[j]
+            j += 1
+        exposure = r - l
+        if exposure > 0:
+            rate.append(c / exposure)
+            drate.append(np.sqrt(v) / exposure)
+            out_lb.append(l)
+            out_rb.append(r)
+        i = j
+    return (np.array(rate), np.array(drate),
+            np.array(out_lb), np.array(out_rb))
+
+
+def _haar_structure_function(rate, drate, lbins, rbins,
+                              n_scales=40, scale_min=None, scale_max=None):
+    """Non-decimated Haar SF on log-rate (Golkhou 2014 eq 6-8).
+
+    Returns ``(delta_t, sigma2, sigma2_noise, sigma2_err)`` or ``None`` if the
+    light curve has too few positive-rate bins for analysis.
+    """
+    valid = (rate > 0) & (drate > 0)
+    if valid.sum() < 16:
+        return None
+    rate = rate[valid]
+    drate = drate[valid]
+    lb = lbins[valid]
+    rb = rbins[valid]
+    t_centre = 0.5 * (lb + rb)
+    x = np.log(rate)
+    dx = drate / rate
+    cx = np.concatenate([[0.0], np.cumsum(x)])
+    vx = np.concatenate([[0.0], np.cumsum(dx ** 2)])
+    ct = np.concatenate([[0.0], np.cumsum(t_centre)])
+    n = x.shape[0]
+    if scale_min is None:
+        scale_min = 1
+    if scale_max is None:
+        scale_max = max(2, n // 4)
+    scales = np.unique(np.round(np.geomspace(scale_min, scale_max, n_scales)).astype(int))
+    scales = scales[(scales > 0) & (2 * scales < n)]
+    delta_t = np.empty(scales.size)
+    sigma2 = np.empty(scales.size)
+    sigma2_noise = np.empty(scales.size)
+    sigma2_err = np.empty(scales.size)
+    for k, s in enumerate(scales):
+        ii = np.arange(0, n - 2 * s + 1)
+        w = (cx[ii + 2 * s] - 2 * cx[ii + s] + cx[ii]) / s
+        dw0 = np.sqrt(vx[ii + 2 * s] - vx[ii]) / s
+        dt_k = (ct[ii + 2 * s] - ct[ii]) / (2 * s)
+        nh = ii.size
+        delta_t[k] = float(np.median(dt_k))
+        sigma2[k] = float(np.mean(w ** 2) - np.mean(dw0 ** 2))
+        sigma2_noise[k] = float(np.mean(dw0 ** 2))
+        sigma2_err[k] = float(np.sqrt(2.0 / nh) * np.mean(dw0 ** 2))
+    return delta_t, sigma2, sigma2_noise, sigma2_err
+
+
 def _run_haar(ncts, ncts_err, bins, *, target_snr=5.0,
               n_scales=40, dchi2_threshold=4.0):
-    """Golkhou 2014 Haar structure-function MVT.  Filled in by Task 5."""
-    raise NotImplementedError("Task 5 fills this in")
+    """Golkhou & Butler 2014 Haar structure-function MVT."""
+    ncts = np.asarray(ncts, dtype=float)
+    ncts_err = np.asarray(ncts_err, dtype=float)
+    bins = np.asarray(bins, dtype=float)
+    lbins = bins[:-1]
+    rbins = bins[1:]
+    dt = float(bins[1] - bins[0])
+
+    rate, drate, lb, rb = _rebin_to_snr(ncts, ncts_err, lbins, rbins,
+                                         target_snr=target_snr)
+    if rate.size < 16:
+        return _MVTResult(method="haar", mvt=dt,
+                          mvt_err_lo=0.0, mvt_err_hi=0.0,
+                          is_upper_limit=True,
+                          diag={"reason": "too-few-rebinned-bins"})
+    sf = _haar_structure_function(rate, drate, lb, rb, n_scales=n_scales)
+    if sf is None:
+        return _MVTResult(method="haar", mvt=dt,
+                          mvt_err_lo=0.0, mvt_err_hi=0.0,
+                          is_upper_limit=True,
+                          diag={"reason": "log-rate-undefined-on-too-many-bins"})
+    delta_t, sigma2, sigma2_noise, sigma2_err = sf
+    pos = (sigma2 > 0) & (sigma2 > 3 * sigma2_err)
+    if pos.sum() < 4:
+        return _MVTResult(method="haar", mvt=float(delta_t[0]),
+                          mvt_err_lo=0.0, mvt_err_hi=0.0,
+                          is_upper_limit=True,
+                          diag={"reason": "no-significant-scaleogram-points",
+                                "delta_t": delta_t.tolist(),
+                                "sigma2": sigma2.tolist(),
+                                "sigma2_err": sigma2_err.tolist()})
+    sig = np.sqrt(np.maximum(sigma2, 0.0))
+    sig_err = 0.5 * sigma2_err / np.maximum(sig, 1e-30)
+    pos_idx = np.where(pos)[0]
+    fit_idx = pos_idx[:max(3, pos_idx.size // 3)]
+    slope, *_ = np.linalg.lstsq(delta_t[fit_idx].reshape(-1, 1),
+                                sig[fit_idx], rcond=None)
+    slope = float(slope[0])
+    model = slope * delta_t
+    dchi2 = np.cumsum(((sig - model) / np.maximum(sig_err, 1e-30)) ** 2)
+    base = dchi2[fit_idx[-1]]
+    excess = dchi2 - base
+    cross = np.where(excess[fit_idx[-1] + 1:] >= dchi2_threshold)[0]
+    if cross.size == 0:
+        return _MVTResult(method="haar", mvt=float(delta_t[-1]),
+                          mvt_err_lo=0.0, mvt_err_hi=0.0,
+                          is_upper_limit=True,
+                          diag={"reason": "no-departure-from-smooth-model",
+                                "delta_t": delta_t.tolist(),
+                                "sigma2": sigma2.tolist(),
+                                "model": model.tolist()})
+    cross_idx = int(fit_idx[-1] + 1 + cross[0])
+    mvt_val = float(delta_t[cross_idx])
+    err_lo = float(delta_t[cross_idx] - delta_t[max(cross_idx - 1, 0)])
+    err_hi = float(delta_t[min(cross_idx + 1, delta_t.size - 1)] - delta_t[cross_idx])
+    return _MVTResult(method="haar", mvt=mvt_val,
+                      mvt_err_lo=err_lo, mvt_err_hi=err_hi,
+                      is_upper_limit=False,
+                      diag={"delta_t": delta_t.tolist(),
+                            "sigma2": sigma2.tolist(),
+                            "sigma2_noise": sigma2_noise.tolist(),
+                            "sigma2_err": sigma2_err.tolist(),
+                            "smooth_slope": slope,
+                            "fit_idx": fit_idx.tolist()})
 
 
 def _run_mepsa(ncts, ncts_err, bins, *, bkg_rate=None,

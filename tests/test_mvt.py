@@ -30,14 +30,6 @@ def test_ppMVT_constructs_from_two_event_lists(fred_events):
     assert mvt.ncts is not None  # ppSignal computes ncts in __init__
 
 
-@pytest.mark.parametrize("method", ["haar"])
-def test_ggMVT_dispatch_raises_until_impls_added(fred_gg, method):
-    net, err, bins, bkg_rate, _ = fred_gg
-    mvt = ggMVT(net, err, bins)
-    with pytest.raises(NotImplementedError):
-        mvt.calculate(method=method)
-
-
 def test_calculate_rejects_unknown_method(fred_gg):
     net, err, bins, bkg_rate, _ = fred_gg
     mvt = ggMVT(net, err, bins)
@@ -106,3 +98,19 @@ def test_ppMVT_cwt_uses_poisson_mc(fred_events):
     mvt.calculate(method="cwt", n_sim=200)
     assert mvt.mvt_res.is_upper_limit is False
     # Confirms _run_cwt accepted noise_model='poisson' path without crashing.
+
+
+def test_ggMVT_haar_recovers_fred_rise_time(fred_gg):
+    net, err, bins, bkg_rate, _ = fred_gg
+    mvt = ggMVT(net, err, bins)
+    mvt.calculate(method="haar")
+    res = mvt.mvt_res
+    assert res.is_upper_limit is False
+    assert 0.05 < res.mvt < 1.5
+
+
+def test_ggMVT_haar_upper_limit_on_noise(noise_gg):
+    net, err, bins, bkg_rate = noise_gg
+    mvt = ggMVT(net, err, bins)
+    mvt.calculate(method="haar")
+    assert mvt.mvt_res.is_upper_limit is True
