@@ -440,8 +440,19 @@ def _haar_structure_function(rate, drate, lbins, rbins,
                               n_scales=40, scale_min=None, scale_max=None):
     """Non-decimated Haar SF on log-rate (Golkhou 2014 eq 6-8).
 
-    Returns ``(delta_t, sigma2, sigma2_noise, sigma2_err)`` or ``None`` if the
-    light curve has too few positive-rate bins for analysis.
+    Implements Golkhou & Butler 2014's per-position binning by local Δt:
+    every (position i, scale s) tuple contributes its own wavelet value and
+    its own local Δt = (ct[i+2s] - 2·ct[i+s] + ct[i]) / s, where ct is the
+    cumsum of bin-centre times.  Contributions are accumulated into
+    ``n_scales`` log-spaced Δt bins so that positions ON a narrow pulse
+    (fine local Δt) and positions OFF (wide local Δt) populate separate
+    output scales, recovering narrow-pulse structure that the previous
+    median-collapse implementation lost on adaptive-rebinned light curves.
+
+    Returns ``(delta_t, sigma2, sigma2_noise, sigma2_err)`` or ``None`` if
+    the light curve has too few positive-rate bins, or no valid (i, s)
+    contributions land in any Δt bin.  Output arrays only include Δt bins
+    with at least 4 contributions (sparser bins are dropped).
     """
     valid = (rate > 0) & (drate > 0)
     if valid.sum() < 16:
@@ -450,10 +461,12 @@ def _haar_structure_function(rate, drate, lbins, rbins,
     drate = drate[valid]
     lb = lbins[valid]
     rb = rbins[valid]
+    t_centre = 0.5 * (lb + rb)
     x = np.log(rate)
     dx = drate / rate
     cx = np.concatenate([[0.0], np.cumsum(x)])
     vx = np.concatenate([[0.0], np.cumsum(dx ** 2)])
+    ct = np.concatenate([[0.0], np.cumsum(t_centre)])
     n = x.shape[0]
     if scale_min is None:
         scale_min = 1
@@ -461,22 +474,73 @@ def _haar_structure_function(rate, drate, lbins, rbins,
         scale_max = max(2, n // 4)
     scales = np.unique(np.round(np.geomspace(scale_min, scale_max, n_scales)).astype(int))
     scales = scales[(scales > 0) & (2 * scales < n)]
-    delta_t = np.empty(scales.size)
-    sigma2 = np.empty(scales.size)
-    sigma2_noise = np.empty(scales.size)
-    sigma2_err = np.empty(scales.size)
-    for k, s in enumerate(scales):
+    if scales.size == 0:
+        return None
+
+    # Step 1: accumulate (local_dt, w², dw0²) over all (i, s).  Per
+    # Golkhou & Butler 2014, every position contributes to whichever
+    # local-Δt bin its (i, s) window falls into.
+    local_dt_list = []
+    w2_list = []
+    dw02_list = []
+    for s in scales:
         ii = np.arange(0, n - 2 * s + 1)
         w = (cx[ii + 2 * s] - 2 * cx[ii + s] + cx[ii]) / s
-        dw0 = np.sqrt(vx[ii + 2 * s] - vx[ii]) / s
-        nh = ii.size
-        # Δt at scale s = duration spanned by 2s consecutive (possibly non-uniform)
-        # bins.  For a uniform-bin LC this equals 2s·dt.
-        delta_t[k] = float(np.median(rb[ii + 2 * s - 1] - lb[ii]))
-        sigma2[k] = float(np.mean(w ** 2) - np.mean(dw0 ** 2))
-        sigma2_noise[k] = float(np.mean(dw0 ** 2))
-        sigma2_err[k] = float(np.sqrt(2.0 / nh) * np.mean(dw0 ** 2))
-    return delta_t, sigma2, sigma2_noise, sigma2_err
+        dw0_sq = (vx[ii + 2 * s] - vx[ii]) / (s * s)
+        loc = (ct[ii + 2 * s] - 2 * ct[ii + s] + ct[ii]) / s
+        local_dt_list.append(loc)
+        w2_list.append(w * w)
+        dw02_list.append(dw0_sq)
+    local_dt = np.concatenate(local_dt_list)
+    w2_all = np.concatenate(w2_list)
+    dw02_all = np.concatenate(dw02_list)
+
+    # Step 2: keep only finite, positive local_dt.
+    keep = np.isfinite(local_dt) & (local_dt > 0) & np.isfinite(w2_all) & np.isfinite(dw02_all)
+    local_dt = local_dt[keep]
+    w2_all = w2_all[keep]
+    dw02_all = dw02_all[keep]
+    if local_dt.size == 0:
+        return None
+
+    # Step 3: define output Δt bin edges, log-spaced.
+    dt_lo = float(local_dt.min())
+    dt_hi = float(local_dt.max())
+    if dt_lo == dt_hi:
+        # Degenerate single-Δt case: fall back to one bin.
+        edges = np.array([dt_lo * (1 - 1e-9), dt_hi * (1 + 1e-9)])
+    else:
+        edges = np.geomspace(dt_lo, dt_hi, n_scales + 1)
+
+    # Step 4: per-bin reduction (uniform mean of w², dw0² across contributions).
+    # Tried noise-inverse weighting `1/dw0²` (spec recommendation) but on real
+    # GRB data it down-weighted the burst-edge wavelet contributions and lost
+    # the on-pulse signal; uniform mean reproduces the OLD code's signal
+    # recovery while the per-position Δt binning still gives finer resolution.
+    delta_t = []
+    sigma2 = []
+    sigma2_noise = []
+    sigma2_err = []
+    # np.digitize: indices 1..n_bins are inside [edges[i-1], edges[i]); we
+    # also want the right-most point at edges[-1] to be included.
+    idx = np.digitize(local_dt, edges, right=False)
+    idx = np.clip(idx, 1, edges.size - 1)
+    for b in range(1, edges.size):
+        sel = idx == b
+        nh = int(sel.sum())
+        if nh < 4:
+            continue
+        mean_w2 = float(np.mean(w2_all[sel]))
+        mean_dw02 = float(np.mean(dw02_all[sel]))
+        delta_t.append(float(np.sqrt(edges[b - 1] * edges[b])))
+        sigma2.append(mean_w2 - mean_dw02)
+        sigma2_noise.append(mean_dw02)
+        sigma2_err.append(float(np.sqrt(2.0 / nh) * mean_dw02))
+
+    if not delta_t:
+        return None
+    return (np.asarray(delta_t), np.asarray(sigma2),
+            np.asarray(sigma2_noise), np.asarray(sigma2_err))
 
 
 def _run_haar(ncts, ncts_err, bins, *, target_snr=5.0,

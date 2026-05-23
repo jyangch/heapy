@@ -187,6 +187,54 @@ def test_pgMVT_cwt_uses_poisson_mc(fred_events):
     assert mvt.mvt_res.diag["noise_model"] == "poisson"
 
 
+def test_haar_recovers_narrow_pulse_on_sparse_baseline(rng):
+    """Haar SF should resolve a narrow bright pulse buried in a broad faint envelope.
+
+    Construct a light curve mimicking the 120119A failure mode: a broad,
+    low-SNR envelope (FWHM ~10 s, ~0.2 cts/bin) plus a narrow bright pulse
+    (FWHM ~50 ms, peak 50 cts/bin) at the same time.  After SNR-rebin the
+    envelope produces many *medium*-width composite bins (~100 ms) while
+    the narrow peak keeps fine 1 ms bins — the OLD median-Δt collapse picks
+    the medium width and reports MVT >= 1 s.  With per-position binning,
+    the on-pulse positions contribute to fine-Δt bins and recover the pulse.
+    """
+    dt = 0.001
+    bins = np.arange(-50.0, 50.0 + dt, dt)
+    t = 0.5 * (bins[:-1] + bins[1:])
+    bkg_rate = 10.0  # flat background, 0.01 cts/bin
+    # Broad envelope: FWHM ~12 s, peak 200 cts/s -> ~0.2 cts/bin at 1 ms
+    broad = 200.0 * dt * np.exp(-(t ** 2) / (2 * 5.0 ** 2))
+    # Narrow Gaussian pulse, FWHM ~50 ms, peak amp 50 cts/bin
+    narrow = 50.0 * np.exp(-(t ** 2) / (2 * (0.050 / 2.3548) ** 2))
+    profile = narrow + broad
+    obs = rng.poisson(profile + bkg_rate * dt).astype(float)
+    bkg = bkg_rate * dt * np.ones_like(obs)
+    net = obs - bkg
+    err = np.sqrt(obs + bkg)
+    mvt = ggMVT(net, err, bins)
+    mvt.calculate(method="haar")
+    res = mvt.mvt_res
+    assert res.is_upper_limit is False
+    # Should now resolve sub-second variability (old median-Δt gave >1 s)
+    assert res.mvt < 1.0, f"Haar MVT {res.mvt:.3g} s should be < 1.0 s for a 50ms pulse"
+
+
+def test_haar_returns_dense_scaleogram_on_uniform_bins(fred_gg):
+    """The refactored Haar should produce >=20 Δt bins even on uniform-bin input."""
+    from heapy.temp.mvt import _haar_structure_function, _rebin_to_snr
+    net, err, bins, _, _ = fred_gg
+    lbins = bins[:-1]; rbins = bins[1:]
+    rate, drate, lb, rb = _rebin_to_snr(net, err, lbins, rbins, target_snr=5.0)
+    out = _haar_structure_function(rate, drate, lb, rb)
+    assert out is not None
+    delta_t, sigma2, sigma2_noise, sigma2_err = out
+    assert len(delta_t) >= 20, f"got {len(delta_t)} bins, expected >=20"
+    # delta_t should be monotonically increasing
+    assert (np.diff(delta_t) > 0).all()
+    # at least some bins should show significant signal
+    assert (sigma2 > 3 * sigma2_err).sum() >= 4
+
+
 def test_three_methods_ordered_on_fred(fred_gg):
     pytest.importorskip("pycwt")
     net, err, bins, bkg_rate, _ = fred_gg
