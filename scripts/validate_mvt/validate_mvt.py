@@ -145,46 +145,87 @@ def is_available(grb_name: str) -> bool:
     return any(_find_tte(grb, d) is not None for d in grb["dets"])
 
 
-def load_events(grb: dict) -> tuple[np.ndarray, float]:
-    """Load + stack TTE events from all configured detectors.
+def _load_det_events(grb: dict, det: str):
+    """Read TTE events from one detector, return (t_rel, trigtime) or (None, None)."""
+    f = _find_tte(grb, det)
+    if f is None:
+        return None, None
+    e_lo, e_hi = grb["energy"]
+    with fits.open(f) as hdu:
+        trigtime = float(hdu["PRIMARY"].header["TRIGTIME"])
+        events = hdu["EVENTS"].data
+        ebound = hdu["EBOUNDS"].data
+        chan = np.asarray(ebound["CHANNEL"], dtype=int)
+        emin = np.asarray(ebound["E_MIN"], dtype=float)
+        emax = np.asarray(ebound["E_MAX"], dtype=float)
+        ec = 0.5 * (emin + emax)
+        pha = np.asarray(events["PHA"], dtype=int)
+        ok_pha = (pha >= chan.min()) & (pha <= chan.max())
+        pha_clip = np.clip(pha, chan.min(), chan.max())
+        energy = np.where(ok_pha, ec[pha_clip - chan.min()], -1.0)
+        t_rel = np.asarray(events["TIME"], dtype=float) - trigtime
+        mask = (
+            ok_pha
+            & (energy >= e_lo)
+            & (energy <= e_hi)
+            & (t_rel >= grb["t1"])
+            & (t_rel <= grb["t2"])
+        )
+    return t_rel[mask], trigtime
 
-    Returns ``(times_relative_to_trigger, trigtime_met)``.  Applies the
-    energy filter using each TTE file's own EBOUNDS table.
+
+def _select_brightest_detectors(grb: dict, n_keep=3):
+    """Choose the top-N NaI detectors by net counts in the burst (ignore) window.
+
+    Net counts ≈ counts_in_burst − counts_in_equally_long_off_pulse.  Detectors
+    pointing at the GRB will rank highest; off-axis detectors that contribute
+    only background rank near zero.
     """
+    burst_win = grb.get("ignore", [[0.0, 1.0]])[0]
+    burst_dur = burst_win[1] - burst_win[0]
+    # Use a pre-burst off-pulse window of equal duration (or whatever fits).
+    off_lo = max(grb["t1"], burst_win[0] - burst_dur - 1.0)
+    off_hi = off_lo + burst_dur
+    scored = []
+    for det in grb["dets"]:
+        t_rel, _ = _load_det_events(grb, det)
+        if t_rel is None:
+            continue
+        n_burst = int(np.sum((t_rel >= burst_win[0]) & (t_rel <= burst_win[1])))
+        n_off = int(np.sum((t_rel >= off_lo) & (t_rel <= off_hi)))
+        scored.append((det, n_burst - n_off))
+    scored.sort(key=lambda x: -x[1])
+    chosen = [det for det, score in scored[:n_keep] if score > 0]
+    if not chosen:  # fallback: just keep the first available detector
+        chosen = [scored[0][0]] if scored else list(grb["dets"])[:1]
+    return chosen, scored
+
+
+def load_events(grb: dict) -> tuple[np.ndarray, float, list[str]]:
+    """Load + stack TTE events from the brightest detectors only.
+
+    Returns ``(times_relative_to_trigger, trigtime_met, dets_used)``.
+    When ``grb['auto_dets']`` is truthy (default), picks the top-3 NaI by
+    net-burst counts.  Otherwise stacks all of ``grb['dets']``.
+    """
+    if grb.get("auto_dets", True):
+        chosen, scored = _select_brightest_detectors(grb, n_keep=grb.get("n_keep", 3))
+        print(f"  detector ranking: " + ", ".join(f"{d}={s}" for d, s in scored[:6]))
+        print(f"  using detectors: {chosen}")
+    else:
+        chosen = list(grb["dets"])
     all_t = []
     trigtime = None
-    e_lo, e_hi = grb["energy"]
-    for det in grb["dets"]:
-        f = _find_tte(grb, det)
-        if f is None:
+    for det in chosen:
+        t_rel, tt = _load_det_events(grb, det)
+        if t_rel is None:
             continue
-        with fits.open(f) as hdu:
-            tt = float(hdu["PRIMARY"].header["TRIGTIME"])
-            if trigtime is None:
-                trigtime = tt
-            events = hdu["EVENTS"].data
-            ebound = hdu["EBOUNDS"].data
-            chan = np.asarray(ebound["CHANNEL"], dtype=int)
-            emin = np.asarray(ebound["E_MIN"], dtype=float)
-            emax = np.asarray(ebound["E_MAX"], dtype=float)
-            ec = 0.5 * (emin + emax)
-            # PHA -> channel index (CHANNEL is 0..N-1)
-            pha = np.asarray(events["PHA"], dtype=int)
-            ok_pha = (pha >= chan.min()) & (pha <= chan.max())
-            pha_clip = np.clip(pha, chan.min(), chan.max())
-            energy = np.where(ok_pha, ec[pha_clip - chan.min()], -1.0)
-            t_rel = np.asarray(events["TIME"], dtype=float) - tt
-            mask = (
-                ok_pha
-                & (energy >= e_lo)
-                & (energy <= e_hi)
-                & (t_rel >= grb["t1"])
-                & (t_rel <= grb["t2"])
-            )
-            all_t.append(t_rel[mask])
+        if trigtime is None:
+            trigtime = tt
+        all_t.append(t_rel)
     if not all_t:
         raise RuntimeError(f"no TTE data found for {grb['burstid']}")
-    return np.sort(np.concatenate(all_t)), float(trigtime)
+    return np.sort(np.concatenate(all_t)), float(trigtime), chosen
 
 
 def _fit_polynomial_background(t, obs, ignore_intervals, deg=3):
@@ -205,7 +246,7 @@ def _fit_polynomial_background(t, obs, ignore_intervals, deg=3):
 def analyze(grb_name: str) -> dict:
     grb = GRBS[grb_name]
     print(f"\n=== {grb_name} ({grb['burstid']}, method={grb['method']}) ===")
-    events, trigtime = load_events(grb)
+    events, trigtime, dets_used = load_events(grb)
     print(f"  events: {events.size}, t-range [{events.min():.3f}, {events.max():.3f}]")
     bins = np.arange(grb["t1"], grb["t2"] + grb["dt"], grb["dt"])
     print(f"  bins: {bins.size - 1} at dt={grb['dt']} s")
@@ -224,7 +265,10 @@ def analyze(grb_name: str) -> dict:
 
     method = grb["method"]
     if method == "haar":
-        res = _run_haar(net, err, bins)
+        # Golkhou paper observation: target_snr=3 (lower than the conservative
+        # 5.0 default) retains finer composite bins inside the bright peak,
+        # which is critical for resolving sub-second rise times.
+        res = _run_haar(net, err, bins, target_snr=grb.get("haar_snr", 3.0))
     elif method == "cwt":
         # pg-style Poisson MC at the measured off-pulse rate
         res = _run_cwt(
