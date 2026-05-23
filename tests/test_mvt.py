@@ -119,3 +119,31 @@ def test_ggMVT_haar_upper_limit_on_noise(noise_gg):
     mvt = ggMVT(net, err, bins)
     mvt.calculate(method="haar")
     assert mvt.mvt_res.is_upper_limit is True
+
+
+def test_ggMVT_save_writes_json_and_pdf(tmp_path, fred_gg):
+    net, err, bins, bkg_rate, _ = fred_gg
+    mvt = ggMVT(net, err, bins)
+    mvt.calculate(method="haar")
+    mvt.save(str(tmp_path))
+    assert (tmp_path / "mvt_res.json").exists()
+    assert (tmp_path / "mvt.pdf").exists()
+
+
+def test_ggMVT_save_before_calculate_raises(tmp_path, fred_gg):
+    net, err, bins, bkg_rate, _ = fred_gg
+    mvt = ggMVT(net, err, bins)
+    with pytest.raises(RuntimeError, match="calculate"):
+        mvt.save(str(tmp_path))
+
+
+@pytest.mark.parametrize("method", ["cwt", "haar", "mepsa"])
+def test_ggMVT_save_works_for_all_methods(tmp_path, fred_gg, method):
+    pytest.importorskip("pycwt")  # gates the cwt path; haar/mepsa pass through
+    net, err, bins, bkg_rate, _ = fred_gg
+    mvt = ggMVT(net, err, bins)
+    kw = {"n_sim": 100} if method == "cwt" else {}
+    mvt.calculate(method=method, **kw)
+    mvt.save(str(tmp_path / method))
+    assert (tmp_path / method / "mvt_res.json").exists()
+    assert (tmp_path / method / "mvt.pdf").exists()
