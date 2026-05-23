@@ -274,12 +274,128 @@ def _fwhm_around(y, idx):
     return rx - lx, lx, rx
 
 
+# ---------- CWT helpers (Task 4) ---------------------------------------------
+
+def _next_pow2(n):
+    return 1 if n <= 1 else 2 ** int(np.ceil(np.log2(n)))
+
+
+def _cwt_global_spectrum(counts, dt, dj=0.125, s0=None):
+    """Mexican-Hat CWT global spectrum with Liu 2007 rectification.
+
+    Returns ``(periods_sec, rectified_global_ws)``.  Pads to the next
+    power-of-two length with the input mean, then standardises the
+    signal to zero mean / unit variance so the data and Monte Carlo
+    spectra are directly comparable independent of input amplitude.
+    Per Vianello 2018 eq. ``W(dt) = var * sum_t |W(t,dt)|^2 / N`` --
+    the ``var`` prefactor is absorbed by standardising the input.
+    """
+    import pycwt
+    n = counts.shape[0]
+    n2 = _next_pow2(n)
+    pad = np.full(n2 - n, counts.mean())
+    x = np.concatenate([counts, pad]).astype(float)
+    if x.std() == 0:
+        return np.array([dt]), np.array([np.inf])
+    x = (x - x.mean()) / x.std()
+    if s0 is None:
+        s0 = 2 * dt
+    J = max(int(np.floor(np.log2(n2 * dt / s0) / dj)), 1)
+    mother = pycwt.DOG(2)  # Mexican Hat
+    wave, scales, freqs, coi, fft, fftfreqs = pycwt.cwt(x, dt, dj, s0, J, mother)
+    power = np.abs(wave) ** 2
+    global_ws = power.sum(axis=1) / n2
+    rectified = global_ws / scales
+    periods = scales * mother.flambda()
+    return periods, rectified
+
+
+def _cwt_background_band(noise_model, dt, n_bins, n_sim, sig_level, rng,
+                         *, bkg_rate=None, gauss_sigma=None):
+    """Monte Carlo upper-envelope of the rectified CWT spectrum.
+
+    ``noise_model='poisson'`` requires ``bkg_rate``; ``noise_model='gaussian'``
+    requires ``gauss_sigma`` (per-bin standard deviation).
+    """
+    spectra = []
+    periods = None
+    for _ in range(n_sim):
+        if noise_model == "poisson":
+            sim = rng.poisson(bkg_rate * dt, size=n_bins).astype(float)
+        elif noise_model == "gaussian":
+            sim = rng.normal(0.0, gauss_sigma, size=n_bins)
+        else:
+            raise ValueError(f"unknown noise_model {noise_model!r}")
+        p, ws = _cwt_global_spectrum(sim, dt)
+        spectra.append(ws)
+        if periods is None:
+            periods = p
+    arr = np.array(spectra)
+    upper = np.percentile(arr, sig_level, axis=0)
+    median = np.percentile(arr, 50.0, axis=0)
+    return periods, median, upper
+
+
 # ---------- algorithm free-function stubs (filled in by later tasks) ----------
 
 def _run_cwt(ncts, ncts_err, bins, *, bkg_rate, noise_model,
              n_sim=1000, sig_level=99.0, dj=0.125, random_seed=450001):
-    """Vianello 2018 CWT MVT.  Filled in by Task 4."""
-    raise NotImplementedError("Task 4 fills this in")
+    """Vianello 2018 CWT minimum variability timescale.
+
+    Args:
+        ncts: net counts per bin.
+        ncts_err: 1-sigma errors per bin (used for Gaussian MC std).
+        bins: bin edges, length ``N+1``.
+        bkg_rate: off-pulse background rate in cts/s (required for Poisson MC).
+        noise_model: ``'poisson'`` for pg/pp; ``'gaussian'`` for gg.
+        n_sim: Monte Carlo realisations (paper uses 10 000; default 1 000).
+        sig_level: upper percentile for the noise envelope (paper uses 99.0).
+    """
+    ncts = np.asarray(ncts, dtype=float)
+    ncts_err = np.asarray(ncts_err, dtype=float)
+    bins = np.asarray(bins, dtype=float)
+    dt = float(bins[1] - bins[0])
+    n = ncts.shape[0]
+    rng = np.random.default_rng(random_seed)
+
+    if noise_model == "poisson":
+        if bkg_rate is None:
+            raise ValueError("Poisson CWT MC requires bkg_rate (cts/s)")
+        # Reconstruct observed counts (= ncts + bkg) so the CWT sees the same
+        # noise statistics as the simulated backgrounds.
+        obs = ncts + bkg_rate * dt
+        periods, ws = _cwt_global_spectrum(obs, dt, dj=dj)
+        _, median, upper = _cwt_background_band(
+            "poisson", dt, n, n_sim, sig_level, rng, bkg_rate=bkg_rate,
+        )
+    elif noise_model == "gaussian":
+        # ncts are already net; the Gaussian MC matches their noise std.
+        gauss_sigma = float(np.mean(ncts_err))
+        periods, ws = _cwt_global_spectrum(ncts, dt, dj=dj)
+        _, median, upper = _cwt_background_band(
+            "gaussian", dt, n, n_sim, sig_level, rng, gauss_sigma=gauss_sigma,
+        )
+    else:
+        raise ValueError(f"unknown noise_model {noise_model!r}")
+
+    crossing = np.where(ws > upper)[0]
+    diag = {
+        "noise_model": noise_model,
+        "periods": periods.tolist(),
+        "ws": ws.tolist(),
+        "bkg_median": median.tolist(),
+        "bkg_upper": upper.tolist(),
+    }
+    if crossing.size == 0:
+        return _MVTResult(method="cwt", mvt=float(periods[0]),
+                          mvt_err_lo=0.0, mvt_err_hi=0.0,
+                          is_upper_limit=True, diag=diag)
+    i0 = int(crossing[0])
+    err_lo = float(periods[i0] - periods[i0 - 1]) if i0 > 0 else 0.0
+    err_hi = float(periods[i0 + 1] - periods[i0]) if i0 + 1 < periods.size else 0.0
+    return _MVTResult(method="cwt", mvt=float(periods[i0]),
+                      mvt_err_lo=err_lo, mvt_err_hi=err_hi,
+                      is_upper_limit=False, diag=diag)
 
 
 def _run_haar(ncts, ncts_err, bins, *, target_snr=5.0,

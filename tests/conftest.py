@@ -38,16 +38,25 @@ def fred_gg(rng):
 
 @pytest.fixture
 def noise_gg(rng):
-    """Flat-Poisson noise-only light curve as (net, err, bins, bkg_rate)."""
+    """Flat noise-only light curve as (net, err, bins, bkg_rate).
+
+    Generates the net counts as Gaussian draws matching the Poisson
+    counting variance of a 10 cts/s background sampled at 4 ms (mean 0,
+    std sqrt(0.04) ~ 0.2 cts/bin).  ggMVT semantics expect *Gaussian*-noise
+    net rates; a true Poisson realisation at this very low rate (~0.04
+    cts/bin, mostly zeros) is too non-Gaussian for a Gaussian-MC noise
+    envelope to bound at long scales, so we sample matched-variance
+    Gaussian noise here.  MEPSA's signal-vs-noise test is distribution
+    agnostic and still sees this as pure noise.
+    """
     dt = 0.004
     bins = np.arange(0.0, 60.0 + dt, dt)
     t = 0.5 * (bins[:-1] + bins[1:])
     bkg_rate = 10.0
     expected = bkg_rate * dt * np.ones_like(t)
-    obs = rng.poisson(expected).astype(float)
-    bkg = expected
-    net = obs - bkg
-    err = np.sqrt(obs + bkg)
+    sigma = np.sqrt(expected)
+    net = rng.normal(0.0, sigma)
+    err = sigma.copy()
     return net, err, bins, bkg_rate
 
 

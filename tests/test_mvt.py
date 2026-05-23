@@ -30,7 +30,7 @@ def test_ppMVT_constructs_from_two_event_lists(fred_events):
     assert mvt.ncts is not None  # ppSignal computes ncts in __init__
 
 
-@pytest.mark.parametrize("method", ["cwt", "haar"])
+@pytest.mark.parametrize("method", ["haar"])
 def test_ggMVT_dispatch_raises_until_impls_added(fred_gg, method):
     net, err, bins, bkg_rate, _ = fred_gg
     mvt = ggMVT(net, err, bins)
@@ -77,3 +77,32 @@ def test_ggMVT_mepsa_upper_limit_on_noise(noise_gg):
     mvt = ggMVT(net, err, bins)
     mvt.calculate(method="mepsa")
     assert mvt.mvt_res.is_upper_limit is True
+
+
+def test_ggMVT_cwt_recovers_fred_rise_time(fred_gg):
+    pytest.importorskip("pycwt")
+    net, err, bins, bkg_rate, _ = fred_gg
+    mvt = ggMVT(net, err, bins)
+    mvt.calculate(method="cwt", n_sim=200)
+    res = mvt.mvt_res
+    assert res.is_upper_limit is False
+    # FRED rise = 0.5 s; CWT should hit something between ~0.05 s and ~1.5 s.
+    assert 0.05 < res.mvt < 1.5
+
+
+def test_ggMVT_cwt_upper_limit_on_noise(noise_gg):
+    pytest.importorskip("pycwt")
+    net, err, bins, bkg_rate = noise_gg
+    mvt = ggMVT(net, err, bins)
+    mvt.calculate(method="cwt", n_sim=200)
+    assert mvt.mvt_res.is_upper_limit is True
+
+
+def test_ppMVT_cwt_uses_poisson_mc(fred_events):
+    pytest.importorskip("pycwt")
+    src, bkg, t1, t2, dt, _ = fred_events
+    bins = np.arange(t1, t2 + dt, dt)
+    mvt = ppMVT(src, bkg, bins, backscale=1.0)
+    mvt.calculate(method="cwt", n_sim=200)
+    assert mvt.mvt_res.is_upper_limit is False
+    # Confirms _run_cwt accepted noise_model='poisson' path without crashing.
