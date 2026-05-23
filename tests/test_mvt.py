@@ -185,3 +185,17 @@ def test_pgMVT_cwt_uses_poisson_mc(fred_events):
     mvt = pgMVT(all_t, bins, ignore=[-2.0, 5.0])
     mvt.calculate(method="cwt", n_sim=100)
     assert mvt.mvt_res.diag["noise_model"] == "poisson"
+
+
+def test_three_methods_ordered_on_fred(fred_gg):
+    pytest.importorskip("pycwt")
+    net, err, bins, bkg_rate, _ = fred_gg
+    results = {}
+    for method in ("cwt", "haar", "mepsa"):
+        mvt = ggMVT(net, err, bins)
+        kw = {"n_sim": 200} if method == "cwt" else {}
+        mvt.calculate(method=method, **kw)
+        if not mvt.mvt_res.is_upper_limit:
+            results[method] = mvt.mvt_res.mvt
+    assert set(results) == {"cwt", "haar", "mepsa"}
+    assert results["mepsa"] > min(results["cwt"], results["haar"])
