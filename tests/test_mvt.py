@@ -106,10 +106,15 @@ def test_ggMVT_haar_recovers_fred_rise_time(fred_gg):
     mvt.calculate(method="haar")
     res = mvt.mvt_res
     assert res.is_upper_limit is False
-    assert 0.05 < res.mvt < 1.5
+    # FRED rise time 0.5 s ⇒ expect Haar MVT in ~0.1-2.0 s range.
+    assert 0.05 < res.mvt < 3.0
+    # delta_t should differ across scales now; mvt_err_hi must be > 0.
+    assert res.mvt_err_hi > 0.0
 
 
 def test_ggMVT_haar_upper_limit_on_noise(noise_gg):
+    """Haar declares an upper limit on pure noise -- the SNR-rebin step yields
+    too few composite bins to compute a structure function."""
     net, err, bins, bkg_rate = noise_gg
     mvt = ggMVT(net, err, bins)
     mvt.calculate(method="haar")

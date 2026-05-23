@@ -413,8 +413,8 @@ def _rebin_to_snr(net, err, lbins, rbins, target_snr=5.0):
     while i < n:
         c = net[i]
         v = err[i] ** 2
-        l = lb[i]
-        r = rb[i]
+        lo = lb[i]
+        hi = rb[i]
         j = i + 1
         while True:
             if v > 0 and c > 0 and (c / np.sqrt(v)) >= target_snr:
@@ -423,14 +423,14 @@ def _rebin_to_snr(net, err, lbins, rbins, target_snr=5.0):
                 break
             c += net[j]
             v += err[j] ** 2
-            r = rb[j]
+            hi = rb[j]
             j += 1
-        exposure = r - l
+        exposure = hi - lo
         if exposure > 0:
             rate.append(c / exposure)
             drate.append(np.sqrt(v) / exposure)
-            out_lb.append(l)
-            out_rb.append(r)
+            out_lb.append(lo)
+            out_rb.append(hi)
         i = j
     return (np.array(rate), np.array(drate),
             np.array(out_lb), np.array(out_rb))
@@ -450,12 +450,10 @@ def _haar_structure_function(rate, drate, lbins, rbins,
     drate = drate[valid]
     lb = lbins[valid]
     rb = rbins[valid]
-    t_centre = 0.5 * (lb + rb)
     x = np.log(rate)
     dx = drate / rate
     cx = np.concatenate([[0.0], np.cumsum(x)])
     vx = np.concatenate([[0.0], np.cumsum(dx ** 2)])
-    ct = np.concatenate([[0.0], np.cumsum(t_centre)])
     n = x.shape[0]
     if scale_min is None:
         scale_min = 1
@@ -471,9 +469,10 @@ def _haar_structure_function(rate, drate, lbins, rbins,
         ii = np.arange(0, n - 2 * s + 1)
         w = (cx[ii + 2 * s] - 2 * cx[ii + s] + cx[ii]) / s
         dw0 = np.sqrt(vx[ii + 2 * s] - vx[ii]) / s
-        dt_k = (ct[ii + 2 * s] - ct[ii]) / (2 * s)
         nh = ii.size
-        delta_t[k] = float(np.median(dt_k))
+        # Δt at scale s = duration spanned by 2s consecutive (possibly non-uniform)
+        # bins.  For a uniform-bin LC this equals 2s·dt.
+        delta_t[k] = float(np.median(rb[ii + 2 * s - 1] - lb[ii]))
         sigma2[k] = float(np.mean(w ** 2) - np.mean(dw0 ** 2))
         sigma2_noise[k] = float(np.mean(dw0 ** 2))
         sigma2_err[k] = float(np.sqrt(2.0 / nh) * np.mean(dw0 ** 2))
