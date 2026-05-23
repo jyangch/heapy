@@ -30,7 +30,7 @@ def test_ppMVT_constructs_from_two_event_lists(fred_events):
     assert mvt.ncts is not None  # ppSignal computes ncts in __init__
 
 
-@pytest.mark.parametrize("method", ["cwt", "haar", "mepsa"])
+@pytest.mark.parametrize("method", ["cwt", "haar"])
 def test_ggMVT_dispatch_raises_until_impls_added(fred_gg, method):
     net, err, bins, bkg_rate, _ = fred_gg
     mvt = ggMVT(net, err, bins)
@@ -60,3 +60,20 @@ def test_mepsa_scan_rejects_pure_noise(noise_gg):
     dt = bins[1] - bins[0]
     peaks = _mepsa_scan(net, dt)
     assert len(peaks) == 0
+
+
+def test_ggMVT_mepsa_recovers_fred_fwhm(fred_gg):
+    net, err, bins, bkg_rate, _ = fred_gg
+    mvt = ggMVT(net, err, bins)
+    mvt.calculate(method="mepsa")
+    res = mvt.mvt_res
+    assert res.is_upper_limit is False
+    # FRED (rise=0.5, decay=1.5, p=1.5) ⇒ FWHM ~ 1.4 s; allow generous tol.
+    assert 0.7 < res.mvt < 2.5
+
+
+def test_ggMVT_mepsa_upper_limit_on_noise(noise_gg):
+    net, err, bins, bkg_rate = noise_gg
+    mvt = ggMVT(net, err, bins)
+    mvt.calculate(method="mepsa")
+    assert mvt.mvt_res.is_upper_limit is True

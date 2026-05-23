@@ -79,36 +79,26 @@ def _rebin_mean(x, factor):
     return x[:n].reshape(-1, factor).mean(axis=1)
 
 
-def _moving_stats(x, window):
-    """Centre-excluded moving mean and std (same length as ``x``).
+def _moving_mean(x, window):
+    """Centre-excluded moving mean (same length as ``x``).
 
-    Edges fall back to the global mean/std until the window is fully populated.
-    The centre bin is excluded from each local statistic so that a true spike
-    does not inflate its own noise estimate.  When the local std collapses to
-    zero (or below numerical precision -- e.g. a flat block of identical
-    floats), it is replaced by the global std so a numerical artefact does
-    not produce a spuriously divergent SNR.
+    Edges fall back to the global mean until the window is fully populated.
+    The centre bin is excluded so a true spike does not bias its own local
+    baseline.
     """
     n = x.shape[0]
     half = window // 2
-    out_mean = np.empty(n)
-    out_std = np.empty(n)
+    out = np.empty(n)
     g_mean = float(x.mean())
-    g_std = float(x.std(ddof=1)) if n > 1 else 1.0
-    std_floor = max(g_std, 1.0) * 1e-9
     for i in range(n):
         lo = max(0, i - half)
         hi = min(n, i + half + 1)
         if hi - lo <= 1:
-            out_mean[i] = g_mean
-            out_std[i] = g_std
+            out[i] = g_mean
             continue
         block = np.concatenate([x[lo:i], x[i + 1:hi]])
-        out_mean[i] = block.mean()
-        out_std[i] = block.std(ddof=1) if block.size > 1 else g_std
-    fallback = g_std if g_std > std_floor else 1.0
-    out_std = np.where(out_std > std_floor, out_std, fallback)
-    return out_mean, out_std
+        out[i] = block.mean()
+    return out
 
 
 def _snr_threshold(dt_ms, snr_thresholds):
@@ -125,7 +115,8 @@ def _snr_threshold(dt_ms, snr_thresholds):
 _DEFAULT_SNR_THRESHOLDS = {1: 7.0, 4: 6.8, 64: 6.4, 1000: 6.0}
 
 
-def _mepsa_scan(net, dt, rebin_factors=(1, 4, 16, 64, 256),
+def _mepsa_scan(net, dt, *, bkg_rate=None,
+                rebin_factors=(1, 4, 16, 64, 256),
                 smoothing_windows=(5, 11, 21),
                 snr_thresholds=None, max_rebin=256):
     """Simplified MEPSA-like multi-scale peak detector.
@@ -162,11 +153,15 @@ def _mepsa_scan(net, dt, rebin_factors=(1, 4, 16, 64, 256),
     if snr_thresholds is None:
         snr_thresholds = _DEFAULT_SNR_THRESHOLDS
     net = np.asarray(net, dtype=float)
-    # Estimate the implied background count level subtracted to make ``net``.
-    # ``net = obs - bkg``: baseline-only bins typically sit at ``-bkg``, so
-    # the magnitude of the lower-percentile values bounds the bkg level.
+    # The implied background count level subtracted to make ``net``.  When
+    # supplied explicitly (preferred), use it directly.  Otherwise fall back
+    # to inferring from the lower-percentile values of ``net`` -- baseline-
+    # only bins of a Poisson-subtracted net typically sit at ``-bkg*dt``.
     # Used as a Poisson-noise floor below.
-    bkg_offset = max(0.0, -float(np.percentile(net, 5)))
+    if bkg_rate is not None:
+        bkg_offset = float(bkg_rate) * dt
+    else:
+        bkg_offset = max(0.0, -float(np.percentile(net, 5)))
     candidates = []
     for R in rebin_factors:
         if R > max_rebin:
@@ -176,7 +171,7 @@ def _mepsa_scan(net, dt, rebin_factors=(1, 4, 16, 64, 256),
             continue
         rb_dt = dt * R
         # Camisasca 2023 condition (ii): dt_det must be at least 2x the original bin.
-        if rb_dt < 2 * dt and R != 1:
+        if R > 1 and rb_dt < 2 * dt:
             continue
         thr = _snr_threshold(rb_dt * 1e3, snr_thresholds)
         # Robust baseline level from the off-pulse portion of ``rb``
@@ -197,7 +192,7 @@ def _mepsa_scan(net, dt, rebin_factors=(1, 4, 16, 64, 256),
         for M in smoothing_windows:
             if M < 3 or M >= rb.shape[0]:
                 continue
-            mean, std = _moving_stats(rb, M)
+            mean = _moving_mean(rb, M)
             mean_eff = np.minimum(mean, baseline)
             # Use the per-bin Poisson noise as the noise estimate.  The
             # centre-excluded local std (the spec's literal prescription)
@@ -248,6 +243,37 @@ def _mepsa_scan(net, dt, rebin_factors=(1, 4, 16, 64, 256),
     return peaks
 
 
+def _fwhm_around(y, idx):
+    """Linear-interpolated FWHM around a local maximum at ``idx``.
+
+    Returns ``(fwhm_bins, lx, rx)`` where ``fwhm_bins`` is in bin units and
+    ``lx``/``rx`` are the float-valued half-max crossing indices.  Falls back
+    to ``(NaN, NaN, NaN)`` when no crossing can be found.
+    """
+    n = y.shape[0]
+    if idx <= 0 or idx >= n - 1:
+        return float("nan"), float("nan"), float("nan")
+    ymax = float(y[idx])
+    if ymax <= 0:
+        return float("nan"), float("nan"), float("nan")
+    half = ymax / 2.0
+    lx = float("nan")
+    for j in range(idx, 0, -1):
+        if (y[j - 1] - half) * (y[j] - half) <= 0:
+            denom = y[j] - y[j - 1]
+            lx = (j - 1) if denom == 0 else (j - 1) + (half - y[j - 1]) / denom
+            break
+    rx = float("nan")
+    for j in range(idx, n - 1):
+        if (y[j] - half) * (y[j + 1] - half) <= 0:
+            denom = y[j + 1] - y[j]
+            rx = float(j) if denom == 0 else j + (half - y[j]) / denom
+            break
+    if np.isnan(lx) or np.isnan(rx):
+        return float("nan"), lx, rx
+    return rx - lx, lx, rx
+
+
 # ---------- algorithm free-function stubs (filled in by later tasks) ----------
 
 def _run_cwt(ncts, ncts_err, bins, *, bkg_rate, noise_model,
@@ -262,11 +288,56 @@ def _run_haar(ncts, ncts_err, bins, *, target_snr=5.0,
     raise NotImplementedError("Task 5 fills this in")
 
 
-def _run_mepsa(ncts, ncts_err, bins, *, rebin_factors=(1, 4, 16, 64, 256),
+def _run_mepsa(ncts, ncts_err, bins, *, bkg_rate=None,
+               rebin_factors=(1, 4, 16, 64, 256),
                smoothing_windows=(5, 11, 21), snr_thresholds=None,
                use_camisasca_calibration=False):
-    """Camisasca 2023 / Maccary 2025 MEPSA-FWHM MVT.  Filled in by Task 3."""
-    raise NotImplementedError("Task 3 fills this in")
+    """MEPSA-based FWHM_min following Camisasca 2023 / Maccary 2025."""
+    ncts = np.asarray(ncts, dtype=float)
+    bins = np.asarray(bins, dtype=float)
+    dt = float(bins[1] - bins[0])
+    peaks = _mepsa_scan(ncts, dt, bkg_rate=bkg_rate,
+                        rebin_factors=rebin_factors,
+                        smoothing_windows=smoothing_windows,
+                        snr_thresholds=snr_thresholds)
+    if not peaks:
+        smallest_dt = dt * min(rebin_factors)
+        return _MVTResult(method="mepsa", mvt=smallest_dt,
+                          mvt_err_lo=0.0, mvt_err_hi=0.0,
+                          is_upper_limit=True, diag={"peaks": []})
+
+    fwhms = []
+    for p in peaks:
+        if use_camisasca_calibration:
+            snr_ratio = p["snr"] / 4.7 - 1.0
+            if snr_ratio <= 0:
+                continue
+            fwhm = (10 ** -0.31) * p["dt_det"] * snr_ratio ** 0.60 * p["n_adiac"] ** 1.06
+            sig = fwhm * (10 ** 0.13 - 1)
+        else:
+            rb = _rebin_mean(ncts, p["rebin"])
+            rb_idx = p["idx"] // p["rebin"]
+            fwhm_bins, _, _ = _fwhm_around(rb, rb_idx)
+            if np.isnan(fwhm_bins):
+                continue
+            fwhm = fwhm_bins * p["dt_det"]
+            sig = 0.35 * fwhm   # Maccary 2025 quotes ~35% systematic for this estimator
+        fwhms.append((fwhm, sig, p))
+
+    if not fwhms:
+        smallest_dt = dt * min(rebin_factors)
+        return _MVTResult(method="mepsa", mvt=smallest_dt,
+                          mvt_err_lo=0.0, mvt_err_hi=0.0,
+                          is_upper_limit=True,
+                          diag={"peaks": peaks})
+
+    fwhm, sig, narrowest = min(fwhms, key=lambda t: t[0])
+    return _MVTResult(method="mepsa", mvt=float(fwhm),
+                      mvt_err_lo=float(sig), mvt_err_hi=float(sig),
+                      is_upper_limit=False,
+                      diag={"peaks": peaks,
+                            "narrowest_peak": narrowest,
+                            "calibration": "camisasca_A3" if use_camisasca_calibration else "direct_half_max"})
 
 
 # ---------- helper: dispatch table per data-type subclass --------------------
@@ -282,7 +353,7 @@ def _dispatch(method, ncts, ncts_err, bins, *, bkg_rate, noise_model, **kw):
     if method == "haar":
         return _run_haar(ncts, ncts_err, bins, **kw)
     if method == "mepsa":
-        return _run_mepsa(ncts, ncts_err, bins, **kw)
+        return _run_mepsa(ncts, ncts_err, bins, bkg_rate=bkg_rate, **kw)
     raise AssertionError(method)  # pragma: no cover
 
 
