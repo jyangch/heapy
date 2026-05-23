@@ -39,6 +39,7 @@ setup(
         'plotly>=5.22.0',
         'kaleido>=0.2.1',
         'pybaselines>=1.1.0',
+        'pycwt>=0.3',
     ],
     packages=find_packages(exclude=['examples*']),
     include_package_data=True,
