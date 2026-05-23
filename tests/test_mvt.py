@@ -147,3 +147,41 @@ def test_ggMVT_save_works_for_all_methods(tmp_path, fred_gg, method):
     mvt.save(str(tmp_path / method))
     assert (tmp_path / method / "mvt_res.json").exists()
     assert (tmp_path / method / "mvt.pdf").exists()
+
+
+def test_pgMVT_recovers_fred_via_haar(fred_events):
+    src, bkg, t1, t2, dt, _ = fred_events
+    all_t = np.concatenate([src, bkg])
+    bins = np.arange(t1, t2 + dt, dt)
+    mvt = pgMVT(all_t, bins, ignore=[-2.0, 5.0])
+    mvt.calculate(method="haar")
+    assert mvt.poly_res is not None
+    assert mvt.mvt_res.is_upper_limit is False
+    assert 0.05 < mvt.mvt_res.mvt < 2.0
+
+
+def test_ppMVT_recovers_fred_via_mepsa(fred_events):
+    src, bkg, t1, t2, dt, _ = fred_events
+    bins = np.arange(t1, t2 + dt, dt)
+    mvt = ppMVT(src, bkg, bins, backscale=1.0)
+    mvt.calculate(method="mepsa")
+    assert mvt.mvt_res.is_upper_limit is False
+    assert mvt.mvt_res.mvt > 0
+
+
+def test_ggMVT_cwt_uses_gaussian_mc(fred_gg):
+    pytest.importorskip("pycwt")
+    net, err, bins, bkg_rate, _ = fred_gg
+    mvt = ggMVT(net, err, bins)
+    mvt.calculate(method="cwt", n_sim=100)
+    assert mvt.mvt_res.diag["noise_model"] == "gaussian"
+
+
+def test_pgMVT_cwt_uses_poisson_mc(fred_events):
+    pytest.importorskip("pycwt")
+    src, bkg, t1, t2, dt, _ = fred_events
+    all_t = np.concatenate([src, bkg])
+    bins = np.arange(t1, t2 + dt, dt)
+    mvt = pgMVT(all_t, bins, ignore=[-2.0, 5.0])
+    mvt.calculate(method="cwt", n_sim=100)
+    assert mvt.mvt_res.diag["noise_model"] == "poisson"

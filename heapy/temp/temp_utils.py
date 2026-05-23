@@ -391,7 +391,7 @@ class MVTPlotter:
                     yerr=0.5 * err[mask] / np.sqrt(np.maximum(s2[mask], 1e-30)),
                     fmt="o", ms=4,
                 )
-                if slope:
+                if slope is not None:
                     self.ax_spec.plot(dt, slope * dt, "r--",
                                        label=r"$\sigma \propto \Delta t$")
             self.ax_spec.set_xscale("log")
