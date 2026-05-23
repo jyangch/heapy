@@ -3,6 +3,7 @@ import numpy as np
 import pytest
 
 from heapy.temp.mvt import ggMVT, pgMVT, ppMVT, _MVTResult
+from heapy.temp.mvt import _mepsa_scan  # noqa: E402
 
 
 def test_ggMVT_constructs_from_ncts(fred_gg):
@@ -42,3 +43,20 @@ def test_calculate_rejects_unknown_method(fred_gg):
     mvt = ggMVT(net, err, bins)
     with pytest.raises(ValueError, match="method"):
         mvt.calculate(method="bogus")
+
+
+def test_mepsa_scan_finds_fred_pulse(fred_gg):
+    net, err, bins, bkg_rate, t0 = fred_gg
+    dt = bins[1] - bins[0]
+    peaks = _mepsa_scan(net, dt)
+    assert len(peaks) >= 1
+    strongest = max(peaks, key=lambda p: p["snr"])
+    t = 0.5 * (bins[:-1] + bins[1:])
+    assert abs(t[strongest["idx"]] - t0) < strongest["dt_det"]
+
+
+def test_mepsa_scan_rejects_pure_noise(noise_gg):
+    net, err, bins, bkg_rate = noise_gg
+    dt = bins[1] - bins[0]
+    peaks = _mepsa_scan(net, dt)
+    assert len(peaks) == 0

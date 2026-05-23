@@ -69,6 +69,185 @@ class _MVTResult:
         }
 
 
+# ---------- MEPSA peak detector helpers (Task 2) -----------------------------
+
+def _rebin_mean(x, factor):
+    """Mean-rebin a 1-D array by ``factor`` (drops the tail that doesn't fit)."""
+    n = (x.shape[0] // factor) * factor
+    if n == 0:
+        return np.empty(0, dtype=x.dtype)
+    return x[:n].reshape(-1, factor).mean(axis=1)
+
+
+def _moving_stats(x, window):
+    """Centre-excluded moving mean and std (same length as ``x``).
+
+    Edges fall back to the global mean/std until the window is fully populated.
+    The centre bin is excluded from each local statistic so that a true spike
+    does not inflate its own noise estimate.  When the local std collapses to
+    zero (or below numerical precision -- e.g. a flat block of identical
+    floats), it is replaced by the global std so a numerical artefact does
+    not produce a spuriously divergent SNR.
+    """
+    n = x.shape[0]
+    half = window // 2
+    out_mean = np.empty(n)
+    out_std = np.empty(n)
+    g_mean = float(x.mean())
+    g_std = float(x.std(ddof=1)) if n > 1 else 1.0
+    std_floor = max(g_std, 1.0) * 1e-9
+    for i in range(n):
+        lo = max(0, i - half)
+        hi = min(n, i + half + 1)
+        if hi - lo <= 1:
+            out_mean[i] = g_mean
+            out_std[i] = g_std
+            continue
+        block = np.concatenate([x[lo:i], x[i + 1:hi]])
+        out_mean[i] = block.mean()
+        out_std[i] = block.std(ddof=1) if block.size > 1 else g_std
+    fallback = g_std if g_std > std_floor else 1.0
+    out_std = np.where(out_std > std_floor, out_std, fallback)
+    return out_mean, out_std
+
+
+def _snr_threshold(dt_ms, snr_thresholds):
+    """Log-linear interpolation of the per-Δt SNR threshold (Camisasca 2023 Table 3)."""
+    keys = np.array(sorted(snr_thresholds.keys()), dtype=float)
+    vals = np.array([snr_thresholds[int(k)] for k in keys])
+    if dt_ms <= keys[0]:
+        return float(vals[0])
+    if dt_ms >= keys[-1]:
+        return float(vals[-1])
+    return float(np.interp(np.log10(dt_ms), np.log10(keys), vals))
+
+
+_DEFAULT_SNR_THRESHOLDS = {1: 7.0, 4: 6.8, 64: 6.4, 1000: 6.0}
+
+
+def _mepsa_scan(net, dt, rebin_factors=(1, 4, 16, 64, 256),
+                smoothing_windows=(5, 11, 21),
+                snr_thresholds=None, max_rebin=256):
+    """Simplified MEPSA-like multi-scale peak detector.
+
+    For every ``(R, M)`` combination with ``R <= max_rebin``:
+
+    1. Rebin ``net`` by ``R`` (mean over ``R`` adjacent bins).
+    2. Compute the centre-excluded moving mean over a window of ``M`` bins.
+       Per Camisasca 2023 condition (i), the local mean is clamped at a
+       robust baseline level (25th percentile of the rebinned LC) so a
+       broad pulse cannot mask itself.
+    3. Compute a per-bin Poisson noise estimate
+       ``sqrt((rb + bkg) / R)``.  ``bkg`` is inferred from the most
+       negative values of ``net`` -- baseline-only bins typically sit at
+       ``-bkg``.  This Gehrels 1986 regime estimator is robust where the
+       literal centre-excluded ``movstd`` is degenerate (low-count flat
+       blocks) or pulse-contaminated.
+    4. Form ``SNR = (rb - mean_eff) / noise`` per bin.
+    5. Accept bins whose SNR exceeds the per-``dt`` threshold (Camisasca
+       2023 Table 3) AND which are local maxima of the SNR series.
+
+    Group accepted detections across ``(R, M)`` by proximity in time
+    (within one ``R · dt``).  For each group, report the detection at the
+    best (highest SNR) ``(R, M)``.
+
+    Returns a list of dicts with keys:
+        ``idx``      -- bin index on the *original* grid
+        ``dt_det``   -- best ``R · dt`` (seconds)
+        ``snr``      -- peak SNR at the best ``(R, M)``
+        ``rebin``    -- best R
+        ``window``   -- best M
+        ``n_adiac``  -- number of ``(R, M)`` combinations detecting the peak
+    """
+    if snr_thresholds is None:
+        snr_thresholds = _DEFAULT_SNR_THRESHOLDS
+    net = np.asarray(net, dtype=float)
+    # Estimate the implied background count level subtracted to make ``net``.
+    # ``net = obs - bkg``: baseline-only bins typically sit at ``-bkg``, so
+    # the magnitude of the lower-percentile values bounds the bkg level.
+    # Used as a Poisson-noise floor below.
+    bkg_offset = max(0.0, -float(np.percentile(net, 5)))
+    candidates = []
+    for R in rebin_factors:
+        if R > max_rebin:
+            continue
+        rb = _rebin_mean(net, R)
+        if rb.shape[0] < 5:
+            continue
+        rb_dt = dt * R
+        # Camisasca 2023 condition (ii): dt_det must be at least 2x the original bin.
+        if rb_dt < 2 * dt and R != 1:
+            continue
+        thr = _snr_threshold(rb_dt * 1e3, snr_thresholds)
+        # Robust baseline level from the off-pulse portion of ``rb``
+        # (lower-quartile values).  Used as a floor for the centre-excluded
+        # local mean so a broad pulse cannot mask itself (Camisasca 2023
+        # condition i).
+        baseline = float(np.percentile(rb, 25))
+        # Per-bin Poisson noise estimate on ``rb``: rb is a mean of ``R``
+        # Poisson counts per bin with mean ~= ``rb + bkg_offset``; hence
+        # var(rb) = (rb + bkg_offset) / R.  This gives a noise estimate
+        # that grows with the local count level (Gehrels 1986 regime),
+        # making single-count statistical outliers in a near-empty
+        # baseline have the *correct* low Poisson SNR rather than the
+        # inflated Gaussian SNR from a degenerate centre-excluded std.
+        poisson_noise = np.sqrt(
+            np.maximum(rb + bkg_offset, bkg_offset) / R
+        )
+        for M in smoothing_windows:
+            if M < 3 or M >= rb.shape[0]:
+                continue
+            mean, std = _moving_stats(rb, M)
+            mean_eff = np.minimum(mean, baseline)
+            # Use the per-bin Poisson noise as the noise estimate.  The
+            # centre-excluded local std (the spec's literal prescription)
+            # is fragile both at low counts (collapses to ~0 in flat blocks)
+            # and on broad pulses (inflates by tracking the pulse shape);
+            # ``poisson_noise`` is robust to both.
+            std_eff = poisson_noise
+            snr = (rb - mean_eff) / std_eff
+            for i in range(1, snr.shape[0] - 1):
+                if snr[i] < thr:
+                    continue
+                if snr[i] <= snr[i - 1] or snr[i] <= snr[i + 1]:
+                    continue
+                orig_idx = i * R + R // 2
+                candidates.append({
+                    "idx": int(orig_idx),
+                    "dt_det": float(rb_dt),
+                    "snr": float(snr[i]),
+                    "rebin": int(R),
+                    "window": int(M),
+                })
+
+    # Group by proximity in original-grid index space.
+    candidates.sort(key=lambda c: c["idx"])
+    groups = []
+    for c in candidates:
+        for g in groups:
+            ref = g[0]
+            tol_idx = max(int(round(ref["dt_det"] / dt)),
+                          int(round(c["dt_det"] / dt)))
+            if abs(c["idx"] - ref["idx"]) <= tol_idx:
+                g.append(c)
+                break
+        else:
+            groups.append([c])
+
+    peaks = []
+    for g in groups:
+        best = max(g, key=lambda c: c["snr"])
+        peaks.append({
+            "idx": best["idx"],
+            "dt_det": best["dt_det"],
+            "snr": best["snr"],
+            "rebin": best["rebin"],
+            "window": best["window"],
+            "n_adiac": len(g),
+        })
+    return peaks
+
+
 # ---------- algorithm free-function stubs (filled in by later tasks) ----------
 
 def _run_cwt(ncts, ncts_err, bins, *, bkg_rate, noise_model,
