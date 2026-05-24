@@ -295,9 +295,13 @@ def _cwt_global_spectrum(counts, dt, dj=0.125, s0=None):
     n2 = _next_pow2(n)
     pad = np.full(n2 - n, counts.mean())
     x = np.concatenate([counts, pad]).astype(float)
-    if x.std() == 0:
-        return np.array([dt]), np.array([np.inf])
-    x = (x - x.mean()) / x.std()
+    std = x.std()
+    if std == 0:
+        # Degenerate input (all-zero realisation): treat as no excess power.
+        # Fall through with std=1 so we still produce a full-length spectrum
+        # of zeros — needed by the Monte Carlo band stacker.
+        std = 1.0
+    x = (x - x.mean()) / std
     if s0 is None:
         s0 = 2 * dt
     J = max(int(np.floor(np.log2(n2 * dt / s0) / dj)), 1)
