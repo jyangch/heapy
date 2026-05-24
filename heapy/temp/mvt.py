@@ -585,24 +585,21 @@ def _run_haar(ncts, ncts_err, bins, *, target_snr=5.0,
     sig = np.sqrt(np.maximum(sigma2, 0.0))
     sig_err = 0.5 * sigma2_err / np.maximum(sig, 1e-30)
 
-    # Fit a FREE-SLOPE power-law mu_0(Dt) = alpha * Dt^beta on the smallest
-    # half of significant scales (Golkhou's "smooth-signal" model).  Fit is
-    # performed in log-log space with inverse-variance weights from sig_err.
+    # Fit a FIXED-SLOPE power-law mu_0(Dt) = alpha * Dt on the smallest half
+    # of significant scales (Golkhou's "smooth-signal" model with slope=1
+    # per Golkhou 2014 explicit sigma_X,Dt proportional to Dt expectation).
+    # Only the normalisation alpha is free; fit log(alpha) by inverse-
+    # variance-weighted mean of (log(sig) - log(dt)).
     pos_idx = np.where(pos)[0]
     fit_idx = pos_idx[:max(4, pos_idx.size // 2)]
     log_dt = np.log(delta_t[fit_idx])
     log_sig = np.log(sig[fit_idx])
     log_sig_err = sig_err[fit_idx] / sig[fit_idx]  # log-space error
+    beta = 1.0
+    # Closed form: log_alpha = sum(w * (log_sig - log_dt)) / sum(w).
     weights = 1.0 / np.maximum(log_sig_err, 1e-6) ** 2
-    # Weighted linear fit in log-log: log(sig) = log(alpha) + beta * log(Dt)
-    W = np.diag(weights)
-    A = np.vstack([log_dt, np.ones_like(log_dt)]).T
-    ATA = A.T @ W @ A
-    ATy = A.T @ W @ log_sig
-    sol = np.linalg.solve(ATA, ATy)
-    beta = float(sol[0])
-    log_alpha = float(sol[1])
-    mu0 = np.exp(log_alpha + beta * np.log(delta_t))
+    log_alpha = float(np.sum(weights * (log_sig - log_dt)) / np.sum(weights))
+    mu0 = np.exp(log_alpha) * delta_t  # sigma proportional to Dt
 
     # Per-point chi^2 of data vs mu_0.
     chi2 = ((sig - mu0) / np.maximum(sig_err, 1e-30)) ** 2
