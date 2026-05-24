@@ -460,7 +460,63 @@ def _rebin_to_snr(net, err, lbins, rbins, target_snr=5.0):
             np.array(out_lb), np.array(out_rb))
 
 
-def _haar_structure_function(rate, drate, lbins, rbins,
+def _haar_denoise(x, dx=None, threshold_mult=1.0):
+    """Soft-threshold Haar wavelet denoising of a 1-D log-rate array.
+
+    Mirrors Golkhou's ``haar_denoise.haar_denoise(lrate, dlrate)`` step
+    from ``haar_power_mod_denoising_all.py``.  Golkhou's source isn't
+    bundled with their repo, so we use a defensible approximation:
+
+    * If ``dx`` (per-bin log-rate error) is given, set ``sigma = median(dx)``;
+      otherwise fall back to MAD of the finest detail level divided by 0.6745.
+    * Soft-threshold every detail level at ``threshold_mult * sigma * sqrt(2*log N)``.
+      The default ``threshold_mult=1.0`` is the Donoho universal threshold;
+      smaller values preserve more structure.
+
+    On real GRB rebinned light curves with ~30-100 composite bins, the
+    universal threshold ``sigma * sqrt(2*log N)`` is quite aggressive
+    (kills features < ~2.7 sigma); for a milder result pass
+    ``threshold_mult=0.5`` or smaller.
+    """
+    sqrt2 = float(np.sqrt(2.0))
+    n = x.shape[0]
+    n2 = 1 << int(np.ceil(np.log2(max(n, 2))))
+    pad_val = float(x.mean())
+    xp = np.concatenate([x, np.full(n2 - n, pad_val)])
+    if dx is not None and len(dx) > 0:
+        sigma = float(np.median(np.asarray(dx)))
+    else:
+        # MAD of the finest-level detail (Donoho-Johnstone σ proxy)
+        pairs0 = xp.reshape(-1, 2)
+        finest_detail = (pairs0[:, 0] - pairs0[:, 1]) / sqrt2
+        sigma = float(np.median(np.abs(finest_detail - np.median(finest_detail))) / 0.6745)
+    if sigma == 0:
+        return x.copy()
+    threshold = threshold_mult * sigma * float(np.sqrt(2.0 * np.log(n2)))
+    # Full decomposition
+    cur = xp
+    details = []
+    while len(cur) >= 2:
+        p = cur.reshape(-1, 2)
+        avg = (p[:, 0] + p[:, 1]) / sqrt2
+        det = (p[:, 0] - p[:, 1]) / sqrt2
+        details.append(det)
+        cur = avg
+    smooth = cur
+    # Soft-threshold every detail level
+    details_t = [np.sign(d) * np.maximum(np.abs(d) - threshold, 0.0) for d in details]
+    # Reconstruct
+    rec = smooth
+    for d in details_t[::-1]:
+        out = np.empty(len(rec) * 2)
+        out[0::2] = (rec + d) / sqrt2
+        out[1::2] = (rec - d) / sqrt2
+        rec = out
+    return rec[:n]
+
+
+def _haar_structure_function(rate, drate, lbins, rbins, *,
+                              denoise=True,
                               n_scales=40, scale_min=None, scale_max=None):
     """Non-decimated Haar SF on log-rate (Golkhou 2014 eq 6-8).
 
@@ -488,6 +544,8 @@ def _haar_structure_function(rate, drate, lbins, rbins,
     t_centre = 0.5 * (lb + rb)
     x = np.log(rate)
     dx = drate / rate
+    if denoise:
+        x = _haar_denoise(x, dx=dx)
     cx = np.concatenate([[0.0], np.cumsum(x)])
     vx = np.concatenate([[0.0], np.cumsum(dx ** 2)])
     ct = np.concatenate([[0.0], np.cumsum(t_centre)])
@@ -568,7 +626,8 @@ def _haar_structure_function(rate, drate, lbins, rbins,
 
 
 def _run_haar(ncts, ncts_err, bins, *, target_snr=5.0,
-              n_scales=40, dchi2_threshold=4.0, haar_fit_window=3):
+              n_scales=40, dchi2_threshold=4.0, haar_fit_window=3,
+              denoise=False):
     """Golkhou & Butler 2014 Haar structure-function MVT.
 
     ``haar_fit_window`` controls how many of the smallest significant
@@ -576,6 +635,16 @@ def _run_haar(ncts, ncts_err, bins, *, target_snr=5.0,
     normalization mu_0 = alpha * Dt.  Default is 3 (Golkhou's published
     Fig 3 panels show a ~3-point linear-rise fit).  Larger values include
     more of the downstream pulse-flattening region and bias alpha low.
+
+    ``denoise`` controls whether the log-rate is Haar-soft-threshold
+    denoised before computing the structure function.  Golkhou's reference
+    code (haar_power_mod_denoising_all.py) applies this step before SF
+    computation, but on our pipeline (where the SNR=5 adaptive rebin and
+    explicit ``<dw0^2>`` Poisson-noise subtraction inside the SF already
+    suppress noise) additional denoising tends to over-smooth and biases
+    the smooth-mu_0 normalization low, which moves Δt_min outward.
+    Default ``False``.  When enabled, the threshold inside ``_haar_denoise``
+    can be softened via the function's ``threshold_mult`` kwarg.
     """
     ncts = np.asarray(ncts, dtype=float)
     ncts_err = np.asarray(ncts_err, dtype=float)
@@ -591,7 +660,8 @@ def _run_haar(ncts, ncts_err, bins, *, target_snr=5.0,
                           mvt_err_lo=0.0, mvt_err_hi=0.0,
                           is_upper_limit=True,
                           diag={"reason": "too-few-rebinned-bins"})
-    sf = _haar_structure_function(rate, drate, lb, rb, n_scales=n_scales)
+    sf = _haar_structure_function(rate, drate, lb, rb,
+                                   n_scales=n_scales, denoise=denoise)
     if sf is None:
         return _MVTResult(method="haar", mvt=dt,
                           mvt_err_lo=0.0, mvt_err_hi=0.0,
