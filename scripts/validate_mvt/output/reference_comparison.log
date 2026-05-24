@@ -1,0 +1,43 @@
+============================================================
+Reference comparison: our algorithms vs upstream implementations
+============================================================
+
+Synthetic FRED: rise=0.5 s, decay=1.5 s, FWHM≈1.56 s, amp=200, bkg=10 cts/s, dt=10 ms, N=4096
+
+=== CWT (Vianello 2018) — reference vs ours ===
+
+  reference: 45 scales, period ∈ [0.07948, 162.8]
+  ours:      45 scales, period ∈ [0.07948, 162.8]
+
+  Max |ratio − 1| across all 45 scales: 4.44e-16
+  Mean ratio:                1.00000000
+
+    period (s)     Vianello W/scale       ours W/scale      ratio
+       0.07948               0.5931             0.5931    1.00000
+        0.2248               0.1716             0.1716    1.00000
+        0.6358                2.232              2.232    1.00000
+         1.798                 28.7               28.7    1.00000
+         5.087                94.46              94.46    1.00000
+         14.39                71.86              71.86    1.00000
+         40.69                35.78              35.78    1.00000
+         115.1            7.158e-05          7.158e-05    1.00000
+
+=== Haar SF (Golkhou 2014) — reference vs ours ===
+
+  reference: 37 non-NaN bins
+  ours:      37 bins
+
+        Δt (s)         Golkhou σ²            ours σ²      ratio
+          0.05             -0.108             -0.108     1.0000
+           0.1           -0.04123           -0.04123     1.0000
+           0.3             0.1232             0.1232     1.0000
+             1              1.358              1.358     1.0000
+             3               2.93               2.93     1.0000
+
+============================================================
+VERDICT
+============================================================
+If all ratios are within ±5% of 1.0, the two implementations
+are numerically identical on this LC.  Any residual real-GRB
+discrepancy must come from data preprocessing (detector mask,
+energy band, background subtraction), not from the algorithm.
