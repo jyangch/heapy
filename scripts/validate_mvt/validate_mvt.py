@@ -174,16 +174,16 @@ def _load_det_events(grb: dict, det: str):
     return t_rel[mask], trigtime
 
 
-def _select_brightest_detectors(grb: dict, n_keep=3):
-    """Choose the top-N NaI detectors by net counts in the burst (ignore) window.
+def _select_brightest_detectors(grb, snr_threshold=5.0, min_dets=2, max_dets=6):
+    """Select all NaI detectors with significant signal in the burst window.
 
-    Net counts ≈ counts_in_burst − counts_in_equally_long_off_pulse.  Detectors
-    pointing at the GRB will rank highest; off-axis detectors that contribute
-    only background rank near zero.
+    For each detector, compute SNR = (burst - off) / sqrt(off + 1) over the
+    burst interval (the +1 guard against zero off-pulse counts).  Keep all
+    detectors with SNR >= snr_threshold, capped at ``max_dets``.  If fewer
+    than ``min_dets`` pass, fall back to the top ``min_dets`` by SNR.
     """
     burst_win = grb.get("ignore", [[0.0, 1.0]])[0]
     burst_dur = burst_win[1] - burst_win[0]
-    # Use a pre-burst off-pulse window of equal duration (or whatever fits).
     off_lo = max(grb["t1"], burst_win[0] - burst_dur - 1.0)
     off_hi = off_lo + burst_dur
     scored = []
@@ -193,24 +193,34 @@ def _select_brightest_detectors(grb: dict, n_keep=3):
             continue
         n_burst = int(np.sum((t_rel >= burst_win[0]) & (t_rel <= burst_win[1])))
         n_off = int(np.sum((t_rel >= off_lo) & (t_rel <= off_hi)))
-        scored.append((det, n_burst - n_off))
+        snr = (n_burst - n_off) / max(np.sqrt(n_off + 1), 1.0)
+        scored.append((det, snr, n_burst, n_off))
     scored.sort(key=lambda x: -x[1])
-    chosen = [det for det, score in scored[:n_keep] if score > 0]
-    if not chosen:  # fallback: just keep the first available detector
-        chosen = [scored[0][0]] if scored else list(grb["dets"])[:1]
+    chosen = [d for d, snr, _, _ in scored if snr >= snr_threshold][:max_dets]
+    if len(chosen) < min_dets:
+        chosen = [d for d, _, _, _ in scored[:min_dets]]
     return chosen, scored
 
 
 def load_events(grb: dict) -> tuple[np.ndarray, float, list[str]]:
-    """Load + stack TTE events from the brightest detectors only.
+    """Load + stack TTE events from significantly-illuminated detectors.
 
     Returns ``(times_relative_to_trigger, trigtime_met, dets_used)``.
-    When ``grb['auto_dets']`` is truthy (default), picks the top-3 NaI by
-    net-burst counts.  Otherwise stacks all of ``grb['dets']``.
+    When ``grb['auto_dets']`` is truthy (default), keeps all NaI with
+    SNR >= ``grb['snr_threshold']`` (default 5.0) in the burst window,
+    capped at ``max_dets`` (default 6); falls back to top-``min_dets`` (2)
+    by SNR if no detector passes the threshold.  Otherwise stacks all of
+    ``grb['dets']``.
     """
     if grb.get("auto_dets", True):
-        chosen, scored = _select_brightest_detectors(grb, n_keep=grb.get("n_keep", 3))
-        print(f"  detector ranking: " + ", ".join(f"{d}={s}" for d, s in scored[:6]))
+        chosen, scored = _select_brightest_detectors(
+            grb,
+            snr_threshold=grb.get("snr_threshold", 5.0),
+            min_dets=grb.get("min_dets", 2),
+            max_dets=grb.get("max_dets", 6),
+        )
+        print(f"  detector ranking (SNR): "
+              + ", ".join(f"{d}={snr:.1f}" for d, snr, _, _ in scored[:8]))
         print(f"  using detectors: {chosen}")
     else:
         chosen = list(grb["dets"])
