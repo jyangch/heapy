@@ -571,6 +571,7 @@ def _run_haar(ncts, ncts_err, bins, *, target_snr=5.0,
                           is_upper_limit=True,
                           diag={"reason": "log-rate-undefined-on-too-many-bins"})
     delta_t, sigma2, sigma2_noise, sigma2_err = sf
+    # Pick significant points (3sigma above Poisson noise).
     pos = (sigma2 > 0) & (sigma2 > 3 * sigma2_err)
     if pos.sum() < 4:
         return _MVTResult(method="haar", mvt=float(delta_t[0]),
@@ -580,28 +581,71 @@ def _run_haar(ncts, ncts_err, bins, *, target_snr=5.0,
                                 "delta_t": delta_t.tolist(),
                                 "sigma2": sigma2.tolist(),
                                 "sigma2_err": sigma2_err.tolist()})
+
     sig = np.sqrt(np.maximum(sigma2, 0.0))
     sig_err = 0.5 * sigma2_err / np.maximum(sig, 1e-30)
+
+    # Fit a FREE-SLOPE power-law mu_0(Dt) = alpha * Dt^beta on the smallest
+    # half of significant scales (Golkhou's "smooth-signal" model).  Fit is
+    # performed in log-log space with inverse-variance weights from sig_err.
     pos_idx = np.where(pos)[0]
-    fit_idx = pos_idx[:max(3, pos_idx.size // 3)]
-    slope, *_ = np.linalg.lstsq(delta_t[fit_idx].reshape(-1, 1),
-                                sig[fit_idx], rcond=None)
-    slope = float(slope[0])
-    model = slope * delta_t
-    dchi2 = np.cumsum(((sig - model) / np.maximum(sig_err, 1e-30)) ** 2)
-    base = dchi2[fit_idx[-1]]
-    excess = dchi2 - base
-    cross = np.where(excess[fit_idx[-1] + 1:] >= dchi2_threshold)[0]
+    fit_idx = pos_idx[:max(4, pos_idx.size // 2)]
+    log_dt = np.log(delta_t[fit_idx])
+    log_sig = np.log(sig[fit_idx])
+    log_sig_err = sig_err[fit_idx] / sig[fit_idx]  # log-space error
+    weights = 1.0 / np.maximum(log_sig_err, 1e-6) ** 2
+    # Weighted linear fit in log-log: log(sig) = log(alpha) + beta * log(Dt)
+    W = np.diag(weights)
+    A = np.vstack([log_dt, np.ones_like(log_dt)]).T
+    ATA = A.T @ W @ A
+    ATy = A.T @ W @ log_sig
+    sol = np.linalg.solve(ATA, ATy)
+    beta = float(sol[0])
+    log_alpha = float(sol[1])
+    mu0 = np.exp(log_alpha + beta * np.log(delta_t))
+
+    # Per-point chi^2 of data vs mu_0.
+    chi2 = ((sig - mu0) / np.maximum(sig_err, 1e-30)) ** 2
+
+    # Find first scale OUTSIDE the fit region where chi^2 >= 4 (2sigma).
+    search_start = int(fit_idx[-1]) + 1
+    if search_start >= delta_t.size:
+        return _MVTResult(method="haar", mvt=float(delta_t[-1]),
+                          mvt_err_lo=0.0, mvt_err_hi=0.0,
+                          is_upper_limit=True,
+                          diag={"reason": "no-points-past-fit-region",
+                                "delta_t": delta_t.tolist(),
+                                "sigma2": sigma2.tolist(),
+                                "mu0": mu0.tolist(),
+                                "smooth_slope": beta,
+                                "smooth_norm": float(np.exp(log_alpha))})
+    chi2_tail = chi2[search_start:]
+    cross = np.where(chi2_tail >= 4.0)[0]
     if cross.size == 0:
         return _MVTResult(method="haar", mvt=float(delta_t[-1]),
                           mvt_err_lo=0.0, mvt_err_hi=0.0,
                           is_upper_limit=True,
-                          diag={"reason": "no-departure-from-smooth-model",
+                          diag={"reason": "no-2sigma-departure-from-mu0",
                                 "delta_t": delta_t.tolist(),
                                 "sigma2": sigma2.tolist(),
-                                "model": model.tolist()})
-    cross_idx = int(fit_idx[-1] + 1 + cross[0])
-    mvt_val = float(delta_t[cross_idx])
+                                "mu0": mu0.tolist(),
+                                "smooth_slope": beta,
+                                "smooth_norm": float(np.exp(log_alpha))})
+
+    cross_idx = int(search_start + cross[0])
+
+    # Linear-interpolate the EXACT Dt where chi^2 = 4 in log-Dt space.
+    if cross_idx > 0 and chi2[cross_idx] > chi2[cross_idx - 1]:
+        chi2_prev = chi2[cross_idx - 1]
+        chi2_curr = chi2[cross_idx]
+        log_dt_prev = np.log(delta_t[cross_idx - 1])
+        log_dt_curr = np.log(delta_t[cross_idx])
+        frac = (4.0 - chi2_prev) / (chi2_curr - chi2_prev)
+        log_dt_cross = log_dt_prev + frac * (log_dt_curr - log_dt_prev)
+        mvt_val = float(np.exp(log_dt_cross))
+    else:
+        mvt_val = float(delta_t[cross_idx])
+
     err_lo = float(delta_t[cross_idx] - delta_t[max(cross_idx - 1, 0)])
     err_hi = float(delta_t[min(cross_idx + 1, delta_t.size - 1)] - delta_t[cross_idx])
     return _MVTResult(method="haar", mvt=mvt_val,
@@ -611,7 +655,9 @@ def _run_haar(ncts, ncts_err, bins, *, target_snr=5.0,
                             "sigma2": sigma2.tolist(),
                             "sigma2_noise": sigma2_noise.tolist(),
                             "sigma2_err": sigma2_err.tolist(),
-                            "smooth_slope": slope,
+                            "mu0": mu0.tolist(),
+                            "smooth_slope": beta,
+                            "smooth_norm": float(np.exp(log_alpha)),
                             "fit_idx": fit_idx.tolist()})
 
 

@@ -6,7 +6,7 @@ Peak SNR per bin = 30 (bright, well-detectable).
 
 | Algorithm | Expected metric | Geo-mean ratio | log-scatter (dex) | upper-limits | N used |
 |---|---|---|---|---|---|
-| haar | rise | 0.47 | 0.08 | 0 | 14 |
+| haar | rise | 0.70 | 0.10 | 0 | 14 |
 | cwt | rise | 2.47 | 0.01 | 0 | 14 |
 | mepsa | fwhm | 1.07 | 0.17 | 0 | 14 |
 
