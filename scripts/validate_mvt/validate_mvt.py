@@ -89,6 +89,9 @@ GRBS = {
         published={"t_mv": 0.3},
         paper="Vianello+ 2018 (GBM 8-260 keV; paper also used LLE 100 MeV-)",
         cwt_n_sim=150,
+        # Vianello Fig 6 x-axis caps at ~burst-window/4; beyond ~20 s the
+        # rectified power is dominated by the boundary-artefact tail.
+        cwt_max_time_scale=20.0,
     ),
     "160509A": dict(
         burstid="bn160509374", year=2016,
@@ -100,6 +103,7 @@ GRBS = {
         published={"t_mv": 0.05},
         paper="Vianello+ 2018 (GBM 8-260 keV; paper also used LLE 100 MeV-)",
         cwt_n_sim=150,
+        cwt_max_time_scale=5.0,
     ),
     # ----- Maccary et al. 2025 Fig 5 (GBM 8-1000 keV) -----
     "211211A": dict(
@@ -287,6 +291,7 @@ def analyze(grb_name: str) -> dict:
             noise_model="poisson",
             n_sim=grb.get("cwt_n_sim", 500),
             sig_level=99.0,
+            max_time_scale=grb.get("cwt_max_time_scale"),
         )
     elif method == "mepsa":
         res = _run_mepsa(net, err, bins, bkg_rate=bkg_rate)

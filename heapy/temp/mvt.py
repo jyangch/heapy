@@ -280,7 +280,7 @@ def _next_pow2(n):
     return 1 if n <= 1 else 2 ** int(np.ceil(np.log2(n)))
 
 
-def _cwt_global_spectrum(counts, dt, dj=0.125, s0=None):
+def _cwt_global_spectrum(counts, dt, dj=0.125, s0=None, max_time_scale=None):
     """Mexican-Hat CWT global spectrum with Liu 2007 rectification.
 
     Returns ``(periods_sec, rectified_global_ws)``.  Pads to the next
@@ -289,6 +289,11 @@ def _cwt_global_spectrum(counts, dt, dj=0.125, s0=None):
     spectra are directly comparable independent of input amplitude.
     Per Vianello 2018 eq. ``W(dt) = var * sum_t |W(t,dt)|^2 / N`` --
     the ``var`` prefactor is absorbed by standardising the input.
+
+    ``max_time_scale`` (seconds) caps the largest CWT scale so the
+    spectrum doesn't trail off into the boundary-artefact tail at
+    scales approaching the LC duration.  Mirrors Vianello's mvts.py
+    ``j_max`` selection.
     """
     import pycwt
     n = counts.shape[0]
@@ -305,6 +310,9 @@ def _cwt_global_spectrum(counts, dt, dj=0.125, s0=None):
     if s0 is None:
         s0 = 2 * dt
     J = max(int(np.floor(np.log2(n2 * dt / s0) / dj)), 1)
+    if max_time_scale is not None:
+        J_cap = int(np.floor(np.log2(max_time_scale / s0) / dj))
+        J = min(J, max(J_cap, 1))
     mother = pycwt.DOG(2)  # Mexican Hat
     wave, scales, freqs, coi, fft, fftfreqs = pycwt.cwt(x, dt, dj, s0, J, mother)
     power = np.abs(wave) ** 2
@@ -315,11 +323,14 @@ def _cwt_global_spectrum(counts, dt, dj=0.125, s0=None):
 
 
 def _cwt_background_band(noise_model, dt, n_bins, n_sim, sig_level, rng,
-                         *, bkg_rate=None, gauss_sigma=None):
+                         *, bkg_rate=None, gauss_sigma=None,
+                         max_time_scale=None):
     """Monte Carlo upper-envelope of the rectified CWT spectrum.
 
     ``noise_model='poisson'`` requires ``bkg_rate``; ``noise_model='gaussian'``
-    requires ``gauss_sigma`` (per-bin standard deviation).
+    requires ``gauss_sigma`` (per-bin standard deviation).  ``max_time_scale``
+    is forwarded to :func:`_cwt_global_spectrum` so the MC sims share the
+    same scale grid as the data.
     """
     spectra = []
     periods = None
@@ -330,7 +341,7 @@ def _cwt_background_band(noise_model, dt, n_bins, n_sim, sig_level, rng,
             sim = rng.normal(0.0, gauss_sigma, size=n_bins)
         else:
             raise ValueError(f"unknown noise_model {noise_model!r}")
-        p, ws = _cwt_global_spectrum(sim, dt)
+        p, ws = _cwt_global_spectrum(sim, dt, max_time_scale=max_time_scale)
         spectra.append(ws)
         if periods is None:
             periods = p
@@ -343,7 +354,8 @@ def _cwt_background_band(noise_model, dt, n_bins, n_sim, sig_level, rng,
 # ---------- algorithm free-function stubs (filled in by later tasks) ----------
 
 def _run_cwt(ncts, ncts_err, bins, *, bkg_rate, noise_model,
-             n_sim=1000, sig_level=99.0, dj=0.125, random_seed=450001):
+             n_sim=1000, sig_level=99.0, dj=0.125, random_seed=450001,
+             max_time_scale=None):
     """Vianello 2018 CWT minimum variability timescale.
 
     Args:
@@ -354,6 +366,10 @@ def _run_cwt(ncts, ncts_err, bins, *, bkg_rate, noise_model,
         noise_model: ``'poisson'`` for pg/pp; ``'gaussian'`` for gg.
         n_sim: Monte Carlo realisations (paper uses 10 000; default 1 000).
         sig_level: upper percentile for the noise envelope (paper uses 99.0).
+        max_time_scale: optional cap (s) on the largest CWT scale.  Suppresses
+            the boundary-artefact tail at scales approaching the LC duration
+            (Vianello mvts.py j_max selection).  ``None`` keeps the default
+            scale grid out to ~LC duration.
     """
     ncts = np.asarray(ncts, dtype=float)
     ncts_err = np.asarray(ncts_err, dtype=float)
@@ -368,16 +384,20 @@ def _run_cwt(ncts, ncts_err, bins, *, bkg_rate, noise_model,
         # Reconstruct observed counts (= ncts + bkg) so the CWT sees the same
         # noise statistics as the simulated backgrounds.
         obs = ncts + bkg_rate * dt
-        periods, ws = _cwt_global_spectrum(obs, dt, dj=dj)
+        periods, ws = _cwt_global_spectrum(obs, dt, dj=dj,
+                                           max_time_scale=max_time_scale)
         _, median, upper = _cwt_background_band(
             "poisson", dt, n, n_sim, sig_level, rng, bkg_rate=bkg_rate,
+            max_time_scale=max_time_scale,
         )
     elif noise_model == "gaussian":
         # ncts are already net; the Gaussian MC matches their noise std.
         gauss_sigma = float(np.mean(ncts_err))
-        periods, ws = _cwt_global_spectrum(ncts, dt, dj=dj)
+        periods, ws = _cwt_global_spectrum(ncts, dt, dj=dj,
+                                           max_time_scale=max_time_scale)
         _, median, upper = _cwt_background_band(
             "gaussian", dt, n, n_sim, sig_level, rng, gauss_sigma=gauss_sigma,
+            max_time_scale=max_time_scale,
         )
     else:
         raise ValueError(f"unknown noise_model {noise_model!r}")
