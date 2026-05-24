@@ -209,28 +209,48 @@ class FileFinder:
 
         return True
 
-    def _ensure_ftp_connection(self):
+    def _ensure_ftp_connection(self, max_retries=5, timeout=30):
+        """Open or refresh the FTP_TLS connection, retrying transient errors.
 
-        if self.ftp_connection is None:
-            ftp_host = self.ftp_url.hostname
-            ftp_user = self.ftp_url.username or 'anonymous'
-            ftp_pass = self.ftp_url.password or ''
+        Replaces a previous infinite-recursion retry loop with a bounded
+        ``max_retries`` attempt counter; on persistent failure raises
+        :class:`ConnectionError` so the caller fails fast instead of
+        blowing the stack.
+        """
+        ftp_host = self.ftp_url.hostname
+        ftp_user = self.ftp_url.username or 'anonymous'
+        ftp_pass = self.ftp_url.password or ''
+
+        for attempt in range(1, max_retries + 1):
+            if self.ftp_connection is not None and self._is_ftp_connection_alive():
+                return
+            if self.ftp_connection is not None:
+                # Stale connection; drop and reopen.
+                try:
+                    self.ftp_connection.close()
+                except Exception:  # pragma: no cover -- best effort
+                    pass
+                self.ftp_connection = None
+                print('FTP connection lost, reconnecting...')
 
             try:
-                self.ftp_connection = ftplib.FTP_TLS(ftp_host)
+                self.ftp_connection = ftplib.FTP_TLS(ftp_host, timeout=timeout)
                 self.ftp_connection.login(user=ftp_user, passwd=ftp_pass)
                 self.ftp_connection.prot_p()
                 print(f'Connected to FTP: {ftp_host}')
+                return
             except ftplib.all_errors as e:
-                warnings.warn(f'FTP connection error: {e!s}', UserWarning, stacklevel=2)
                 self.ftp_connection = None
-                self._ensure_ftp_connection()
+                warnings.warn(
+                    f'FTP connection attempt {attempt}/{max_retries} failed: {e!s}',
+                    UserWarning,
+                    stacklevel=2,
+                )
 
-        else:
-            if not self._is_ftp_connection_alive():
-                print('FTP connection lost, reconnecting...')
-                self.ftp_connection = None
-                self._ensure_ftp_connection()
+        raise ConnectionError(
+            f'Could not establish FTP_TLS connection to {ftp_host} after '
+            f'{max_retries} attempts'
+        )
 
     def _is_ftp_connection_alive(self):
 

@@ -341,3 +341,75 @@ class TxxPlotter:
 
         self.fig.savefig(filename, bbox_inches='tight', pad_inches=0.1, dpi=dpi)
         plt.close(self.fig)
+
+
+class MVTPlotter:
+    """Two-panel diagnostic for :mod:`heapy.temp.mvt`.
+
+    Top panel: net light curve with the MVT value annotated.
+    Bottom panel: method-specific scaleogram or wavelet power spectrum.
+    """
+
+    def __init__(self):
+        self.fig, (self.ax_lc, self.ax_spec) = plt.subplots(
+            nrows=2, figsize=(7, 7), constrained_layout=True,
+        )
+
+    def plot_lc(self, time, net_rate, mvt, is_upper_limit):
+        self.ax_lc.step(time, net_rate, where="mid", lw=0.8)
+        self.ax_lc.set_xlabel("Time (s)")
+        self.ax_lc.set_ylabel("Net rate")
+        label = (r"MVT $\leq$ " if is_upper_limit else "MVT = ") + f"{mvt:.3g} s"
+        self.ax_lc.set_title(label)
+
+    def plot_diag(self, method, diag):
+        if method == "cwt":
+            p = np.array(diag.get("periods", []))
+            ws = np.array(diag.get("ws", []))
+            up = np.array(diag.get("bkg_upper", []))
+            med = np.array(diag.get("bkg_median", []))
+            if p.size:
+                ws_plot = np.where(ws > 0, ws, np.nan)
+                up_plot = np.where(up > 0, up, np.nan)
+                med_plot = np.where(med > 0, med, np.nan)
+                self.ax_spec.plot(p, ws_plot, "o", ms=4, label="observed")
+                self.ax_spec.plot(p, med_plot, "--k", label="bkg median")
+                self.ax_spec.plot(p, up_plot, ":", label="upper")
+                self.ax_spec.set_xscale("log")
+                self.ax_spec.set_yscale("log")
+            self.ax_spec.set_xlabel(r"$\delta t$ (s)")
+            self.ax_spec.set_ylabel("Rectified W")
+        elif method == "haar":
+            dt = np.array(diag.get("delta_t", []))
+            s2 = np.array(diag.get("sigma2", []))
+            err = np.array(diag.get("sigma2_err", []))
+            slope = diag.get("smooth_slope")
+            if dt.size:
+                mask = s2 > 0
+                self.ax_spec.errorbar(
+                    dt[mask], np.sqrt(s2[mask]),
+                    yerr=0.5 * err[mask] / np.sqrt(np.maximum(s2[mask], 1e-30)),
+                    fmt="o", ms=4,
+                )
+                if slope is not None:
+                    self.ax_spec.plot(dt, slope * dt, "r--",
+                                       label=r"$\sigma \propto \Delta t$")
+            self.ax_spec.set_xscale("log")
+            self.ax_spec.set_yscale("log")
+            self.ax_spec.set_xlabel(r"$\Delta t$ (s)")
+            self.ax_spec.set_ylabel(r"$\sigma_{X,\Delta t}$")
+        elif method == "mepsa":
+            peaks = diag.get("peaks", [])
+            if peaks:
+                dt = np.array([p["dt_det"] for p in peaks])
+                snr = np.array([p["snr"] for p in peaks])
+                self.ax_spec.semilogx(dt, snr, "o")
+                self.ax_spec.set_xlabel(r"$\Delta t_{\rm det}$ (s)")
+                self.ax_spec.set_ylabel("Peak SNR")
+        handles, labels = self.ax_spec.get_legend_handles_labels()
+        if handles:
+            self.ax_spec.legend(loc="best", fontsize=8)
+
+    def save(self, filename):
+        self.fig.savefig(filename)
+        plt.close(self.fig)
