@@ -33,6 +33,8 @@ if str(REPO_ROOT) not in sys.path:
 
 from heapy.temp.mvt import (  # noqa: E402
     _MVTResult,
+    _fwhm_around,
+    _rebin_mean,
     _run_cwt,
     _run_haar,
     _run_mepsa,
@@ -115,6 +117,11 @@ GRBS = {
         method="mepsa",
         published={"fwhm_min": 0.005},  # ~5 ms per Maccary main text
         paper="Maccary+ 2025 (GBM 8-1000 keV)",
+        # Restrict peak search to the initial spike train per Maccary
+        # Fig 5 left-panel inset at t ~ 1.77 s; otherwise the narrowest
+        # peak lands deep in extended emission and reports the wrong
+        # variability scale.
+        mepsa_restrict_to=[-1.0, 3.0],
     ),
     "230307A": dict(
         burstid="bn230307656", year=2023,
@@ -125,6 +132,8 @@ GRBS = {
         method="mepsa",
         published={"fwhm_min": 0.017},  # ~17 ms per Maccary main text
         paper="Maccary+ 2025 (GBM 8-1000 keV)",
+        # Same: restrict to the initial bright phase.
+        mepsa_restrict_to=[-1.0, 3.0],
     ),
 }
 
@@ -295,6 +304,40 @@ def analyze(grb_name: str) -> dict:
         )
     elif method == "mepsa":
         res = _run_mepsa(net, err, bins, bkg_rate=bkg_rate)
+        # Optional time-window restriction: filter peaks to those inside
+        # ``mepsa_restrict_to`` and re-measure MVT as the narrowest peak
+        # among the survivors.  Used for 211211A / 230307A where the
+        # globally narrowest peak lands deep in extended emission while
+        # the paper-reported MVT sits in the initial spike train.
+        if grb.get("mepsa_restrict_to") and not res.is_upper_limit:
+            t1_w, t2_w = grb["mepsa_restrict_to"]
+            dt_orig = grb["dt"]
+
+            def _in_window(p):
+                t_peak = grb["t1"] + p["idx"] * dt_orig
+                return t1_w <= t_peak <= t2_w
+            restricted_peaks = [p for p in res.diag.get("peaks", []) if _in_window(p)]
+            if restricted_peaks:
+                fwhms = []
+                for p in restricted_peaks:
+                    rb = _rebin_mean(net, p["rebin"])
+                    rb_idx = p["idx"] // p["rebin"]
+                    fwhm_bins, _, _ = _fwhm_around(rb, rb_idx)
+                    if not np.isnan(fwhm_bins):
+                        fwhms.append((fwhm_bins * p["dt_det"], p))
+                if fwhms:
+                    fwhm, narrowest = min(fwhms, key=lambda t: t[0])
+                    sig = 0.35 * fwhm
+                    res = _MVTResult(
+                        method="mepsa", mvt=float(fwhm),
+                        mvt_err_lo=float(sig), mvt_err_hi=float(sig),
+                        is_upper_limit=False,
+                        diag={**res.diag,
+                              "narrowest_peak": narrowest,
+                              "restricted_window": [t1_w, t2_w],
+                              "restricted_peaks": len(restricted_peaks),
+                              "calibration": "direct_half_max_restricted"},
+                    )
     else:
         raise ValueError(method)
 
