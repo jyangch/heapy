@@ -106,8 +106,10 @@ def test_ggMVT_haar_recovers_fred_rise_time(fred_gg):
     mvt.calculate(method="haar")
     res = mvt.mvt_res
     assert res.is_upper_limit is False
-    # FRED rise time 0.5 s ⇒ expect Haar MVT in ~0.1-2.0 s range.
-    assert 0.05 < res.mvt < 3.0
+    # FRED rise=0.5s, Haar's intrinsic scale ~0.13×FWHM (synthetic-recovery).
+    # With the smallest-3-significant-points smooth-norm fit, departure
+    # detection is at smaller Δt than with the wider fit windows.
+    assert 0.01 < res.mvt < 3.0
     # delta_t should differ across scales now; mvt_err_hi must be > 0.
     assert res.mvt_err_hi > 0.0
 

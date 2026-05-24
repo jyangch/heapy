@@ -568,8 +568,15 @@ def _haar_structure_function(rate, drate, lbins, rbins,
 
 
 def _run_haar(ncts, ncts_err, bins, *, target_snr=5.0,
-              n_scales=40, dchi2_threshold=4.0):
-    """Golkhou & Butler 2014 Haar structure-function MVT."""
+              n_scales=40, dchi2_threshold=4.0, haar_fit_window=3):
+    """Golkhou & Butler 2014 Haar structure-function MVT.
+
+    ``haar_fit_window`` controls how many of the smallest significant
+    scaleogram points are used to constrain the smooth-signal model
+    normalization mu_0 = alpha * Dt.  Default is 3 (Golkhou's published
+    Fig 3 panels show a ~3-point linear-rise fit).  Larger values include
+    more of the downstream pulse-flattening region and bias alpha low.
+    """
     ncts = np.asarray(ncts, dtype=float)
     ncts_err = np.asarray(ncts_err, dtype=float)
     bins = np.asarray(bins, dtype=float)
@@ -605,13 +612,20 @@ def _run_haar(ncts, ncts_err, bins, *, target_snr=5.0,
     sig = np.sqrt(np.maximum(sigma2, 0.0))
     sig_err = 0.5 * sigma2_err / np.maximum(sig, 1e-30)
 
-    # Fit a FIXED-SLOPE power-law mu_0(Dt) = alpha * Dt on the smallest half
-    # of significant scales (Golkhou's "smooth-signal" model with slope=1
-    # per Golkhou 2014 explicit sigma_X,Dt proportional to Dt expectation).
-    # Only the normalisation alpha is free; fit log(alpha) by inverse-
-    # variance-weighted mean of (log(sig) - log(dt)).
+    # Fit a FIXED-SLOPE power-law mu_0(Dt) = alpha * Dt on the SMALLEST
+    # FEW significant scales (Golkhou's "linear-rise phase"; paper text:
+    # sigma_X,Dt proportional to Dt where signal is smooth).  Only the
+    # normalisation alpha is free.  Limit the fit window to the smallest
+    # 3-5 significant points to avoid dragging alpha low by including
+    # downstream pulse-flattening scatter.
     pos_idx = np.where(pos)[0]
-    fit_idx = pos_idx[:max(4, pos_idx.size // 2)]
+    # Take the smallest 3 significant points by default (matches Golkhou's
+    # linear-rise window in published Fig 3 panels — typically 3 points).
+    # The fit is slope=1 forced, so 3 points are sufficient to constrain
+    # the single free normalization alpha.  Using more points drags alpha
+    # low when the scaleogram flattens past the rise region.
+    n_fit = max(3, min(haar_fit_window, pos_idx.size))
+    fit_idx = pos_idx[:n_fit]
     log_dt = np.log(delta_t[fit_idx])
     log_sig = np.log(sig[fit_idx])
     log_sig_err = sig_err[fit_idx] / sig[fit_idx]  # log-space error
