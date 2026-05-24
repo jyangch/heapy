@@ -340,7 +340,16 @@ def _binned_rate(events, t1, t2, dt):
 
 
 def _plot_haar_scaleogram(grb_name, grb, res, events, out_dir):
-    """Reproduce Golkhou+Littlejohns 2015 Fig 3 layout: scaleogram + LC."""
+    """Reproduce Golkhou+Littlejohns 2015 Fig 3 layout: scaleogram + LC.
+
+    Distinctive Fig 3 features rendered:
+    - faint grey dotted diagonal grid (constant sigma * Δt^-0.5 reference lines)
+    - blue circles with errorbars for significant points
+    - downward-pointing black triangles for 3σ upper limits
+    - red dashed line for the fitted smooth μ_0(Δt) power-law
+    - large red filled circle at Δt_min
+    - upper-right inset text: Δt_S/N, t_β, Δt_min
+    """
     diag = res.diag
     fig, (ax_sf, ax_lc) = plt.subplots(
         nrows=2, figsize=(6, 6.5), gridspec_kw={"height_ratios": [2, 1]},
@@ -350,113 +359,250 @@ def _plot_haar_scaleogram(grb_name, grb, res, events, out_dir):
     s2 = np.asarray(diag.get("sigma2", []))
     s2_err = np.asarray(diag.get("sigma2_err", []))
     slope = diag.get("smooth_slope")
-    # Significance gate, mimicking the paper's "3sigma excess" markers.
+    norm = diag.get("smooth_norm")
+    fit_idx = diag.get("fit_idx", [])
     pos = (s2 > 0) & (s2 > 3 * s2_err)
-    if pos.sum():
-        sig = np.sqrt(s2[pos])
-        ax_sf.errorbar(dt[pos], sig,
-                       yerr=0.5 * s2_err[pos] / np.maximum(sig, 1e-30),
-                       fmt="o", ms=4, color="C0", label="Fermi/GBM")
-    # Upper-limit triangles for non-significant scales.
-    if (~pos).sum():
-        ax_sf.plot(dt[~pos], np.maximum(np.sqrt(np.maximum(s2[~pos], 0)), 1e-3),
-                   "v", ms=5, color="black", label="$3\\sigma$ upper")
-    if slope is not None:
-        x_line = np.geomspace(dt.min(), dt.max(), 60)
-        ax_sf.plot(x_line, slope * x_line, "r--", lw=1, label=r"$\sigma \propto \Delta t$")
+
+    # Establish plot extent for diagonal grid.
+    if dt.size:
+        x_lo = float(dt.min()) * 0.5
+        x_hi = float(dt.max()) * 2.0
+    else:
+        x_lo, x_hi = 1e-3, 10.0
+    if pos.any():
+        sig_pos = np.sqrt(s2[pos])
+        err_pos = 0.5 * s2_err[pos] / np.maximum(sig_pos, 1e-30)
+        y_lo = float(np.min(sig_pos - err_pos)) * 0.3
+        y_hi = float(np.max(sig_pos + err_pos)) * 3.0
+    else:
+        y_lo, y_hi = 1e-3, 1.0
+    y_lo = max(y_lo, 1e-4)
+
+    # Faint grey dotted diagonal grid: constant sigma * Δt^-0.5 contours.
+    # In log-log these are parallel lines of slope -0.5.  Draw ~8 of them
+    # spanning the plot region (Fig 3's most distinctive visual element).
+    log_x = np.log10([x_lo, x_hi])
+    log_y = np.log10([y_lo, y_hi])
+    # Range of intercepts c where log y = -0.5 * log x + c covers the box.
+    c_lo = log_y[0] + 0.5 * log_x[0]
+    c_hi = log_y[1] + 0.5 * log_x[1]
+    for c in np.linspace(c_lo, c_hi, 8):
+        xs = np.geomspace(x_lo, x_hi, 50)
+        ys = 10.0 ** (-0.5 * np.log10(xs) + c)
+        ax_sf.plot(xs, ys, ls=":", color="grey", lw=0.6, alpha=0.5, zorder=0)
+
+    # Blue dots with errorbars for significant points.
+    if pos.any():
+        ax_sf.errorbar(dt[pos], sig_pos, yerr=err_pos,
+                       fmt="o", ms=5, color="C0", ecolor="C0",
+                       capsize=0, zorder=3, label="Fermi/GBM")
+
+    # Downward-pointing BLACK TRIANGLES for upper limits.
+    if (~pos).any():
+        ul = np.where(~pos)[0]
+        ul_y = np.sqrt(np.maximum(s2[ul], 0.0))
+        # Use a small finite floor for any sigma2<=0 to keep them on the plot.
+        floor = y_lo * 3
+        ul_y = np.where(ul_y > floor, ul_y, floor)
+        ax_sf.plot(dt[ul], ul_y, "v", ms=6, color="black",
+                   zorder=2, label=r"$3\sigma$ upper limit")
+
+    # Red dashed line for the fitted μ_0 power-law.
+    if slope is not None and norm is not None:
+        xs = np.geomspace(x_lo, x_hi, 80)
+        mu0_line = norm * xs ** slope
+        ax_sf.plot(xs, mu0_line, "r--", lw=1.2, zorder=4,
+                   label=fr"$\mu_0 \propto \Delta t^{{{slope:.2f}}}$")
+
+    # Large red filled circle at Δt_min.
+    if not res.is_upper_limit:
+        # y-position from the smooth model at Δt_min.
+        if slope is not None and norm is not None:
+            y_at_mvt = float(norm * res.mvt ** slope)
+        else:
+            y_at_mvt = float(sig_pos.max() * 0.5) if pos.any() else 1e-2
+        ax_sf.plot([res.mvt], [y_at_mvt], "o", ms=14, mfc="red", mec="darkred",
+                   mew=1.5, zorder=5, label=r"$\Delta t_{\min}$")
+
     ax_sf.set_xscale("log"); ax_sf.set_yscale("log")
+    ax_sf.set_xlim(x_lo, x_hi)
+    ax_sf.set_ylim(y_lo, y_hi)
     ax_sf.set_xlabel(r"$\Delta t$ (sec)")
     ax_sf.set_ylabel(r"Flux Variation $\sigma_{X,\Delta t}$")
-    if not res.is_upper_limit:
-        ax_sf.axvline(res.mvt, color="red", ls=":", alpha=0.6)
-        ax_sf.plot([res.mvt], [np.sqrt(max(s2[pos].max() if pos.any() else 1e-3, 1e-3)) * 0.7],
-                   "o", ms=10, mfc="red", mec="darkred", label=r"$\Delta t_{\min}$")
-    title = f"{grb_name}  (events={events.size:,})"
+
+    # Title with measured / published.
     pub = grb["published"].get("dt_min")
-    ax_sf.set_title(
-        title
-        + f"\n  measured $\\Delta t_{{\\min}}$ = {res.mvt:.3g} s"
-        + (f"  vs published {pub} s" if pub is not None else "")
+    title = f"{grb_name}  (events={events.size:,})"
+    if pub is not None:
+        title += f"\n measured $\\Delta t_{{\\min}}$ = {res.mvt:.3g} s  vs published {pub} s"
+    else:
+        title += f"\n measured $\\Delta t_{{\\min}}$ = {res.mvt:.3g} s"
+    ax_sf.set_title(title)
+
+    # Upper-right inset text annotations.
+    if pos.any():
+        first_sig = int(np.where(pos)[0][0])
+        dt_sn = float(dt[first_sig])
+    else:
+        dt_sn = float("nan")
+    if fit_idx:
+        t_beta = float(dt[fit_idx[-1]])
+    else:
+        t_beta = float("nan")
+    inset_text = (
+        f"$\\Delta t_{{S/N}}$ = {dt_sn:.3g} s\n"
+        f"$t_\\beta$ = {t_beta:.3g} s\n"
+        f"$\\Delta t_{{\\min}}$ = {res.mvt:.3g} s"
     )
-    ax_sf.legend(loc="lower right", fontsize=8)
-    # LC panel
-    t, rate = _binned_rate(events, grb["t1"], grb["t2"], 0.064)  # 64 ms bins for display
-    ax_lc.step(t, rate, where="mid", lw=0.6, color="C0")
+    ax_sf.text(0.97, 0.97, inset_text, transform=ax_sf.transAxes,
+               ha="right", va="top", fontsize=9,
+               bbox=dict(boxstyle="round,pad=0.3", facecolor="white",
+                         edgecolor="grey", alpha=0.85))
+    ax_sf.legend(loc="lower right", fontsize=8, framealpha=0.85)
+
+    # LC panel: net rate (display-binned), blue step.
+    t, rate = _binned_rate(events, grb["t1"], grb["t2"], 0.064)
+    ax_lc.step(t, rate, where="mid", lw=0.6, color="C0", label="Fermi/GBM")
     ax_lc.set_xlabel("Time Since Trigger (sec)")
     ax_lc.set_ylabel("Count Rate (cts/s)")
+    ax_lc.legend(loc="upper right", fontsize=8)
     fig.savefig(out_dir / "validation.pdf")
     plt.close(fig)
 
 
 def _plot_cwt_spectrum(grb_name, grb, res, events, out_dir):
-    """Reproduce Vianello+2018 Fig 6 layout: rectified power spectrum + MC band."""
+    """Reproduce Vianello+2018 Fig 6 layout: rectified power spectrum + MC band.
+
+    Single-panel log-log:
+    - blue dots for the observed rectified spectrum
+    - BLACK DASHED line for the MC median
+    - LIGHT BLUE filled band between MC median and 99% upper percentile
+    - NO red vertical line for t_mv (paper doesn't show one)
+    """
     diag = res.diag
     p = np.asarray(diag.get("periods", []))
     ws = np.asarray(diag.get("ws", []))
     med = np.asarray(diag.get("bkg_median", []))
     up = np.asarray(diag.get("bkg_upper", []))
-    fig, ax = plt.subplots(figsize=(6, 4.5), constrained_layout=True)
+    fig, ax = plt.subplots(figsize=(6.5, 4.8), constrained_layout=True)
     if p.size:
+        # Light blue filled band first (so the line + points sit on top).
+        ax.fill_between(p, med, up, color="#9ecae1", alpha=0.55,
+                        label="99% MC envelope")
+        ax.plot(p, med, ls="--", color="black", lw=1.2, label="MC median")
         ax.plot(p, ws, "o", ms=4, color="C0", label="observed")
-        ax.plot(p, med, "k--", lw=1.0, label="bkg median")
-        ax.fill_between(p, med, up, alpha=0.25, color="C0", label="99% upper")
     ax.set_xscale("log"); ax.set_yscale("log")
     ax.set_xlabel(r"$\delta t$ (s)")
-    ax.set_ylabel("Power")
+    ax.set_ylabel(r"Rectified power $W(\delta t)$")
     pub = grb["published"].get("t_mv")
     upper = "upper limit " if res.is_upper_limit else ""
-    ax.set_title(
+    title = (
         f"{grb_name}  (events={events.size:,})"
-        f"\n  measured $t_{{mv}}$ = {upper}{res.mvt:.3g} s"
-        + (f"  vs published {pub} s" if pub is not None else "")
+        f"\n measured $t_{{mv}}$ = {upper}{res.mvt:.3g} s"
     )
-    if not res.is_upper_limit:
-        ax.axvline(res.mvt, color="red", ls=":", alpha=0.7)
-    ax.legend(loc="upper right", fontsize=8)
+    if pub is not None:
+        title += f"  vs published {pub} s"
+    ax.set_title(title)
+    ax.legend(loc="upper left", fontsize=9)
     fig.savefig(out_dir / "validation.pdf")
     plt.close(fig)
 
 
 def _plot_mepsa_narrowest(grb_name, grb, res, events, out_dir):
-    """Reproduce Maccary+2025 Fig 5 layout: LC + narrowest-pulse inset."""
+    """Reproduce Maccary+2025 Fig 5 layout: LC + narrowest-pulse inset.
+
+    Main panel: red step net rate vs time since trigger; yellow translucent
+    band over the initial-spike interval; blue translucent band over the
+    extended-emission interval.
+
+    Inset (top-right): zoom on the narrowest peak, red step LC at dt_det,
+    orange band marking [t_peak - 0.5*mvt, t_peak + 0.5*mvt], black dot at
+    the peak with horizontal error bar of width dt_det.
+    """
     diag = res.diag
+    pub = grb["published"].get("fwhm_min")
     fig, ax = plt.subplots(figsize=(8, 4.5), constrained_layout=True)
-    # Display LC at a sensible bin width.
     dt_show = 0.064
     t, rate = _binned_rate(events, grb["t1"], grb["t2"], dt_show)
-    ax.step(t, rate, where="mid", lw=0.6, color="red", label=f"GBM {grb['energy'][0]:.0f}-{grb['energy'][1]:.0f} keV")
+    ax.step(t, rate, where="mid", lw=0.7, color="red",
+            label=f"GBM {grb['energy'][0]:.0f}-{grb['energy'][1]:.0f} keV")
     ax.set_xlabel("Time (s)"); ax.set_ylabel("Count rate (cts/s)")
-    pub = grb["published"].get("fwhm_min")
+
     if res.is_upper_limit:
         ax.set_title(
             f"{grb_name}  (events={events.size:,})"
-            f"\n  no narrow peak detected; upper limit {res.mvt:.3g} s"
+            f"\n no narrow peak detected; upper limit {res.mvt:.3g} s"
             + (f"  vs published FWHMmin {pub} s" if pub is not None else "")
         )
+        ax.legend(loc="upper right", fontsize=9)
+        fig.savefig(out_dir / "validation.pdf")
+        plt.close(fig)
+        return
+
+    peaks = diag.get("peaks", [])
+    narrowest = diag.get("narrowest_peak", {})
+    t_pk = grb["t1"] + narrowest.get("idx", 0) * grb["dt"]
+    dt_det_n = float(narrowest.get("dt_det", grb["dt"]))
+
+    # ----- Initial-spike interval (yellow band) -----
+    # Use the EARLIEST peak in time as the initial spike.  Its bin width
+    # gives the spike extent.
+    if peaks:
+        first_peak = min(peaks, key=lambda p: p["idx"])
+        t_first = grb["t1"] + first_peak["idx"] * grb["dt"]
+        dt_first = float(first_peak["dt_det"])
+        # Spike extent: +/- one dt_det around the peak position.
+        spike_lo = t_first - dt_first
+        spike_hi = t_first + dt_first
+        ax.axvspan(spike_lo, spike_hi, color="gold", alpha=0.35,
+                   label="initial spike")
+        # ----- Extended-emission interval (blue band) -----
+        # Starts after the spike (+ 2*dt of the display bin) and runs to
+        # the ignore-window upper bound.
+        burst_win = grb.get("ignore", [[grb["t1"], grb["t2"]]])[0]
+        ext_lo = spike_hi + 2 * grb["dt"]
+        ext_hi = float(burst_win[1])
+        if ext_hi > ext_lo:
+            ax.axvspan(ext_lo, ext_hi, color="steelblue", alpha=0.18,
+                       label="extended emission")
+
+    # ----- Inset zoom on the narrowest peak -----
+    from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+    ax_in = inset_axes(ax, width="35%", height="40%", loc="upper right",
+                       borderpad=1.5)
+    # Inset uses dt_det of the narrowest peak as its bin width.
+    dt_zoom = max(dt_det_n, grb["dt"])
+    zoom_half = max(20 * dt_det_n, 0.05)
+    zoom_t1, zoom_t2 = t_pk - zoom_half, t_pk + zoom_half
+    tz, rz = _binned_rate(events, zoom_t1, zoom_t2, dt_zoom)
+    ax_in.step(tz, rz, where="mid", lw=0.7, color="red")
+    # Orange translucent band over [t_pk - 0.5*mvt, t_pk + 0.5*mvt].
+    ax_in.axvspan(t_pk - 0.5 * res.mvt, t_pk + 0.5 * res.mvt,
+                  color="orange", alpha=0.45)
+    # Black dot at peak position with horizontal error bar of width dt_det.
+    if rz.size:
+        # Peak rate near the inset's centre.
+        i_centre = int(np.argmin(np.abs(tz - t_pk))) if tz.size else 0
+        y_pk = float(rz[i_centre]) if rz.size else 0.0
     else:
-        narrowest = diag.get("narrowest_peak", {})
-        t_pk = grb["t1"] + narrowest.get("idx", 0) * grb["dt"]
-        ax.axvline(t_pk, color="orange", ls="-", alpha=0.7)
-        # Inset zoom around the narrowest peak.
-        from mpl_toolkits.axes_grid1.inset_locator import inset_axes
-        ax_in = inset_axes(ax, width="35%", height="35%", loc="upper right")
-        dt_zoom = grb["dt"]
-        zoom_half = max(20 * narrowest.get("dt_det", 0.01), 0.05)
-        zoom_t1, zoom_t2 = t_pk - zoom_half, t_pk + zoom_half
-        tz, rz = _binned_rate(events, zoom_t1, zoom_t2, dt_zoom)
-        ax_in.step(tz, rz, where="mid", lw=0.6, color="red")
-        ax_in.axvspan(t_pk - 0.5 * res.mvt, t_pk + 0.5 * res.mvt,
-                      color="orange", alpha=0.3)
-        ax_in.set_xlabel("Time [s]", fontsize=7)
-        ax_in.set_ylabel("cts/s", fontsize=7)
-        ax_in.tick_params(labelsize=7)
-        title = (
-            f"{grb_name}  (events={events.size:,})"
-            f"\n  FWHM_min = {res.mvt*1e3:.2f} ms"
-            + (f"  vs published {pub*1e3:.1f} ms" if pub is not None else "")
-        )
-        ax.set_title(title)
-    ax.legend(loc="upper left", fontsize=8)
+        y_pk = 0.0
+    ax_in.errorbar([t_pk], [y_pk], xerr=[0.5 * dt_det_n],
+                   fmt="o", color="black", ms=4, capsize=2,
+                   ecolor="black", zorder=5)
+    ax_in.set_xlabel("Time (s)", fontsize=7)
+    ax_in.set_ylabel("cts/s", fontsize=7)
+    ax_in.tick_params(labelsize=7)
+    ax_in.set_title(f"narrowest peak  (Δt_det={dt_det_n*1e3:.1f} ms)",
+                    fontsize=7)
+
+    title = (
+        f"{grb_name}  (events={events.size:,})"
+        f"\n FWHM$_{{\\min}}$ = {res.mvt*1e3:.2f} ms"
+    )
+    if pub is not None:
+        title += f"  vs published {pub*1e3:.1f} ms"
+    ax.set_title(title)
+    ax.legend(loc="upper left", fontsize=9)
     fig.savefig(out_dir / "validation.pdf")
     plt.close(fig)
 
