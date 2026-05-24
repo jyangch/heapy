@@ -16,9 +16,9 @@
   ],
   "result": {
     "method": "mepsa",
-    "mvt": 0.007304216006787721,
-    "mvt_err_lo": 0.002556475602375702,
-    "mvt_err_hi": 0.002556475602375702,
+    "mvt": 0.04200352246471305,
+    "mvt_err_lo": 0.014701232862649566,
+    "mvt_err_hi": 0.014701232862649566,
     "is_upper_limit": false,
     "diag": {
       "peaks": [
@@ -25936,14 +25936,19 @@
         }
       ],
       "narrowest_peak": {
-        "idx": 9797,
+        "idx": 6713,
         "dt_det": 0.001000000000000334,
-        "snr": 8.31152387612782,
+        "snr": 8.023140713062034,
         "rebin": 1,
         "window": 5,
         "n_adiac": 3
       },
-      "calibration": "direct_half_max"
+      "calibration": "direct_half_max_restricted",
+      "restricted_window": [
+        -1.0,
+        3.0
+      ],
+      "restricted_peaks": 318
     }
   },
   "published": {
@@ -25953,13 +25958,18 @@
   "diag_compact": {
     "peaks": "<3239 pts>",
     "narrowest_peak": {
-      "idx": 9797,
+      "idx": 6713,
       "dt_det": 0.001000000000000334,
-      "snr": 8.31152387612782,
+      "snr": 8.023140713062034,
       "rebin": 1,
       "window": 5,
       "n_adiac": 3
     },
-    "calibration": "direct_half_max"
+    "calibration": "direct_half_max_restricted",
+    "restricted_window": [
+      -1.0,
+      3.0
+    ],
+    "restricted_peaks": 318
   }
 }

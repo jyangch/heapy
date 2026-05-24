@@ -36,90 +36,96 @@ For each GRB, the script:
 6. Writes `summary.json` (full diagnostic dict) and `validation.pdf`
    (paper-style plot for that algorithm).
 
-**For Haar:** uses a free-slope power-law smooth-signal model
-μ_0(Δt) = α · Δt^β fit in log-log space on the smallest half of
-significant scales, then flags the first scale past the fit region where
-per-point χ² >= 4 (2σ).  Linear-interpolates the exact crossing in
-log-Δt for sub-bin resolution.  This replaces the previous fixed-slope-1
-fit + cumulative Δχ² heuristic and follows Golkhou's reference
-`mu0_minimize_CHI2_fmin` exactly.  `target_snr=3` for the SNR-rebin.
+**For Haar:** uses a **fixed-slope** smooth-signal model μ_0(Δt) = α · Δt
+(paper-explicit σ_X,Δt ∝ Δt per Golkhou 2014).  Only the normalisation α
+is free, fit by inverse-variance-weighted mean of (log(sig) − log(Δt))
+over the smallest half of significant scales.  Departure flagged at the
+first scale past the fit region where per-point χ² ≥ 4 (2σ); the exact
+crossing is linearly interpolated in log-Δt for sub-bin resolution.
+`target_snr=3` for the SNR-rebin.
 
 **For CWT:** uses `n_sim=150` Monte Carlo background realisations
 (reduced from the paper's 10000 for compute time; statistical floor of
-the 99 % envelope is preserved).
+the 99 % envelope is preserved).  Per-GRB `cwt_max_time_scale` caps the
+largest CWT scale to suppress the boundary-artefact tail at scales
+approaching the LC duration (mirrors Vianello mvts.py `j_max` selection).
+
+**For MEPSA:** an optional `mepsa_restrict_to=[t_lo, t_hi]` per-GRB
+window filters the global peak list to peaks inside the window; MVT is
+then re-measured as the minimum FWHM among the in-window peaks.  Used
+for 211211A / 230307A where the globally narrowest peak lands deep in
+extended emission while Maccary report the MVT from the initial spike
+train at t ~ 1.77 s.
 
 ---
 
-## Results (post-improvement run, all detectors with SNR >= 5)
+## Results (post-refinement run: slope=1 Haar, capped CWT, restricted MEPSA)
 
 | GRB | Algorithm | Detectors | Measured | Published | Ratio | Notes |
 |---|---|---|---|---|---|---|
-| 110213A | Haar | n8, nb | **1.51 s** | 0.40 s | 3.8× | Weak burst; 2 detectors pass SNR>=5 threshold |
-| **080916A** | Haar | n3, n4, n0, n7, n6, n5 | **1.39 s** | 1.09 s | **1.27×** | **Within factor 1.3** — best Haar match |
-| 120119A | Haar | n1, n0 | **3.57 s** | 0.20 s | 17.9× | Faint pulse; near GBM sensitivity floor |
+| 110213A | Haar | n8, nb | **1.64 s** | 0.40 s | 4.1× | Weak burst; 2 detectors pass SNR>=5 |
+| **080916A** | Haar | n3, n4, n0, n7, n6, n5 | **1.75 s** | 1.09 s | **1.60×** | Within factor 1.6 |
+| 120119A | Haar | n1, n0 | **3.27 s** | 0.20 s | 16.3× | Faint pulse near GBM sensitivity floor |
 | **100724B** | CWT | n1, n0 | **0.509 s** | 0.30 s | **1.7×** | **Within factor of 2** |
 | 160509A | CWT | n3, n0, n1, n5, n4, n2 | **0.509 s** | 0.05 s | 10× | Paper used GBM+**LLE** (LAT high-energy); we use GBM only |
-| **211211A** | MEPSA | n2, na | **6.85 ms** | 5 ms | **1.37×** | **Within factor 1.4** — improved from 3.4× |
-| 230307A | MEPSA | na, n6 | **7.3 ms** | 17 ms | 0.43× | Measured ~2× finer than paper |
+| **211211A** | MEPSA | n2, na | **15.0 ms** | 5 ms | **3.0×** | Restricted to initial spike at t ~ 1.77 s |
+| **230307A** | MEPSA | na, n6 | **42.0 ms** | 17 ms | **2.5×** | Restricted to initial spike at t ~ 1.71 s |
 
 ### Headline findings
 
-- **3 of 7 within a factor of 2** of published; **5 of 7 within a factor of 4**.
-- **080916A and 211211A reproduce the paper values to 25–40 %.**
-- **MEPSA on 211211A improved from 16.9 ms to 6.85 ms** (3.4× error → 1.37×)
-  thanks to the SNR-thresholded detector selection picking only the two
-  brightest illuminated NaIs.
-- **Haar plots now reproduce the distinctive Golkhou Fig 3 layout exactly**:
-  faint dotted diagonal grid (Δt^-0.5 reference contours), blue dots with
-  errorbars, downward-pointing black triangles for 3σ upper limits, red
-  dashed μ_0(Δt) power-law line, large red filled circle at Δt_min, and
-  upper-right inset text with Δt_S/N, t_β, Δt_min.
-- **CWT plots now match Vianello Fig 6 exactly**: light-blue 99% MC
-  envelope band, black dashed MC median, blue dots for observed power.
-- **MEPSA plots now match Maccary Fig 5 exactly**: yellow translucent band
-  over the initial spike, blue band over extended emission, inset zoom of
-  the narrowest peak with an orange FWHM_min band and a black dot at the
-  peak with horizontal Δt_det error bar.
+- **2 of 7 within a factor of 2** of published; **5 of 7 within a factor of 3.5**.
+- **080916A reproduces the paper to 60 %**; **100724B to 70 %**.
+- **MEPSA inset zooms now land in the published initial spike (t ~ 1.7 s)**
+  for both 211211A and 230307A rather than at t ~ 24 s in extended emission.
+- **CWT y-axis now spans only ~4 decades** (was 14+ decades dominated by
+  the boundary-artefact tail) thanks to the `cwt_max_time_scale` cap.
+- **Haar μ_0 line is now slope=1.00** on every plot (paper-explicit σ ∝ Δt).
 
 ### What changed in this revision
 
-1. **Haar departure criterion now uses Golkhou's free-slope μ_0 + per-step
-   Δχ² test** (was: fixed σ ∝ Δt slope + cumulative Δχ²).  Synthetic
-   recovery: geo-mean ratio 0.47 → 0.70, log-scatter 0.16 → 0.095 dex.
-2. **Detector selection is now SNR-thresholded** (was: top-3 by net counts).
-   Bright bursts (080916A, 160509A) get 6 detectors; weak bursts
-   (110213A, 120119A, 211211A, 230307A) get exactly 2.
-3. **All three plot styles rewritten** to match the published figures
-   element-by-element (see headline findings).
+1. **Haar μ_0 uses fixed slope=1** with per-step Δχ² criterion (was
+   free-slope + per-step Δχ²; the free-slope version fit shallow slopes
+   ~0.45 on real GRBs).  Closed-form weighted mean replaces the 2-param
+   weighted linear regression; the per-step Δχ² ≥ 4 departure test and
+   log-Δt linear interpolation of the exact crossing are unchanged.
+2. **CWT supports `max_time_scale`** caps to suppress the boundary tail
+   at large scales.  Wired through `_run_cwt → _cwt_global_spectrum →
+   _cwt_background_band` so MC sims share the data's scale grid.
+3. **MEPSA validation supports `mepsa_restrict_to`** time windows for
+   peak-search restriction.  Filter is applied post-scan; surviving
+   peaks are re-measured for FWHM using direct half-max and the
+   narrowest is reported.
 
 ### Where we still differ from the paper
 
 - **160509A (CWT 10× larger than paper):** The paper combines GBM
   (8–260 keV) **with LLE** (100 MeV–~30 GeV) to detect short pulses
-  visible only at LAT energies. We use GBM-only; the 50 ms paper value
+  visible only at LAT energies.  We use GBM-only; the 50 ms paper value
   is genuinely below GBM sensitivity for this burst.
-- **110213A, 120119A (Haar 4–18× larger):** Weak GRBs near the GBM
-  detection threshold with very faint pulses; published 0.2–0.4 s sits
-  near the noise floor.  The new free-slope μ_0 fit picks up the
-  broader-than-pulse envelope here rather than the narrow burst spike.
-- **230307A (MEPSA 2× narrower):** Pipeline finds a 7.3 ms FWHM peak
-  near T0+0.1 s; Maccary report 17 ms.  May be picking a different peak
-  inside the busy extended emission, or measuring the narrowest sibling
-  pulse.  Worth manual cross-check by overplotting peak locations.
+- **110213A, 120119A (Haar 4–16× larger):** Weak GRBs near the GBM
+  detection threshold.  Slope=1 μ_0 makes the smooth-signal line
+  steeper than the data trend, pushing the departure further out in Δt.
+- **211211A, 230307A (MEPSA 2.5–3× larger):** Even within the restricted
+  initial-spike window, the narrowest reliably-detected peak is wider
+  than the published Maccary value.  Could be a residual sensitivity
+  difference vs the canonical MEPSA Fortran binary, or the official
+  Maccary detector mask not matching our SNR-thresholded selection.
 
 ### Synthetic-recovery baseline
 
-The algorithm CORES are correct (`scripts/validate_mvt/synthetic_recovery.py`):
+The algorithm CORES remain correct (`scripts/validate_mvt/synthetic_recovery.py`):
 
 | Algorithm | Geo-mean ratio | Log-scatter (dex) | Interpretation |
 |---|---|---|---|
-| Haar | 0.70 | 0.095 | Recovers 0.7× the rise time consistently (Haar reference scale) |
-| CWT | 2.47 | 0.010 | Recovers 2.5× the rise time (CWT reference scale) |
-| MEPSA | 1.07 | 0.170 | Recovers FWHM directly, ≈1.0× truth |
+| Haar | 0.71 | 0.08 | Recovers 0.7× the rise time consistently (Haar reference scale) |
+| CWT | 2.47 | 0.01 | Recovers 2.5× the rise time (CWT reference scale) |
+| MEPSA | 1.07 | 0.17 | Recovers FWHM directly, ≈1.0× truth |
 
-Tight log-scatter on synthetic recovery means real-GRB ratios above ~2×
-are dominated by methodological differences (detector mask, exact time
-windows, MC parameters, multi-instrument stacking), not algorithm bugs.
+The fixed-slope=1 Haar yields essentially the same synthetic recovery
+(0.71 vs the previous free-slope 0.70) but with tighter log-scatter
+(0.08 dex vs 0.10 dex).  Real-GRB ratios above ~2× are dominated by
+methodological differences (detector mask, exact time windows, MC
+parameters, multi-instrument stacking), not algorithm bugs.
 
 ---
 
