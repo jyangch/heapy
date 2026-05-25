@@ -5,15 +5,15 @@ Fermi/GBM TTE data using the three algorithms in `heapy/temp/mvt.py`.
 
 **Reproduce all 7 GRBs:**
 ```bash
-python scripts/validate_mvt/validate_mvt.py
+python tests/validate_mvt/validate_mvt.py
 ```
 
 **Reproduce one GRB:**
 ```bash
-python scripts/validate_mvt/validate_mvt.py 080916A
+python tests/validate_mvt/validate_mvt.py 080916A
 ```
 
-**Per-GRB outputs:** `scripts/validate_mvt/output/<GRB>/{summary.json,validation.pdf}`
+**Per-GRB outputs:** `tests/validate_mvt/output/<GRB>/{summary.json,validation.pdf}`
 
 ---
 
@@ -113,7 +113,7 @@ train at t ~ 1.77 s.
 
 ### Synthetic-recovery baseline
 
-The algorithm CORES remain correct (`scripts/validate_mvt/synthetic_recovery.py`):
+The algorithm CORES remain correct (`tests/validate_mvt/synthetic_recovery.py`):
 
 | Algorithm | Geo-mean ratio | Log-scatter (dex) | Interpretation |
 |---|---|---|---|

@@ -6,9 +6,9 @@ recovered MVT should match the ground truth within ~30% (the published
 between-algorithm scatter on the same GRB).
 
 Outputs:
-    scripts/validate_mvt/output/synthetic/recovery_<algo>.csv
-    scripts/validate_mvt/output/synthetic/recovery_<algo>.pdf
-    scripts/validate_mvt/output/synthetic/RECOVERY_REPORT.md
+    tests/validate_mvt/output/synthetic/recovery_<algo>.csv
+    tests/validate_mvt/output/synthetic/recovery_<algo>.pdf
+    tests/validate_mvt/output/synthetic/RECOVERY_REPORT.md
 """
 
 from __future__ import annotations

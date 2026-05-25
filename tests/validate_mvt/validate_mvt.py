@@ -6,12 +6,12 @@ Validates the three algorithms in `heapy.temp.mvt` against:
 - Maccary et al. 2025 (A&A 702, A95) Fig 5 — MEPSA-FWHM on GRB 211211A, 230307A
 
 Usage:
-    python scripts/validate_mvt/validate_mvt.py [grb_name ...]
+    python tests/validate_mvt/validate_mvt.py [grb_name ...]
 
 If no GRB names are given, all configured ones are attempted; those without
 cached data are skipped with a warning.
 
-Output: per-GRB JSON + PDF in `scripts/validate_mvt/output/<grb>/`.
+Output: per-GRB JSON + PDF in `tests/validate_mvt/output/<grb>/`.
 """
 
 from __future__ import annotations

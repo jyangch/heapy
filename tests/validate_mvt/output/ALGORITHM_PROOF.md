@@ -12,7 +12,7 @@ the numerical outputs agree to machine precision.
 
 Reproduce:
 ```bash
-python scripts/validate_mvt/reference_comparison.py
+python tests/validate_mvt/reference_comparison.py
 ```
 
 ## Setup

@@ -31,7 +31,7 @@ geometry).
 
 Run:
 ```bash
-python scripts/validate_mvt/synthetic_recovery.py
+python tests/validate_mvt/synthetic_recovery.py
 ```
 
 ## Results

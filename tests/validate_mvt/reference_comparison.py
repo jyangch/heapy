@@ -22,7 +22,7 @@ Reference repos must be cloned to:
     /tmp/mvt-research/GRB_Lightcurve_MinimumVariability-tmin--master  (Golkhou's repo)
 
 Reproduce:
-    python scripts/validate_mvt/reference_comparison.py
+    python tests/validate_mvt/reference_comparison.py
 """
 
 from __future__ import annotations

@@ -55,3 +55,7 @@ docs/
 CLAUDE.md
 # Ignore test-run intermediate artifacts (tracked test_*.py files remain tracked)
 tests/
+
+# Claude Code / Gemini Antigravity local state
+.claude/
+.gemini_worktree
