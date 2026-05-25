@@ -53,3 +53,5 @@ dist/
 # Local-only docs and Claude Code project config
 docs/
 CLAUDE.md
+# Ignore test-run intermediate artifacts (tracked test_*.py files remain tracked)
+tests/
