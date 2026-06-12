@@ -206,7 +206,7 @@ def classify_bins(snr, left, right, sigma, bad_sentinel=-5):
     sig_idx, bkg_idx, bad_idx = [], [], []
     sig_int, bkg_int, bad_int = [], [], []
     for i, s in enumerate(snr):
-        pair = [left[i], right[i]]
+        pair = [float(left[i]), float(right[i])]
         if s > sigma:
             sig_idx.append(i)
             sig_int.append(pair)
