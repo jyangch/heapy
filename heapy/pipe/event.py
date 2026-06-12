@@ -894,7 +894,7 @@ class Event:
 
         return np.cumsum(self.lc_net_cts)
 
-    def extract_curve(self, savepath='./curve', autobs=True, show=False):
+    def extract_curve(self, savepath='./curve', autobs=True, show=False, save=True):
         """Extract and save the light curve as interactive HTML and JSON files.
 
         Generates a source light curve plot and, when ``autobs`` is enabled,
@@ -906,14 +906,15 @@ class Event:
             autobs: If ``True``, compute the automatic polynomial background
                 and overlay it on the light curve.
             show: If ``True``, display plots interactively in the browser.
+            save: If ``True``, save the plots to disk.
         """
 
         savepath = os.path.abspath(savepath)
 
-        if not os.path.exists(savepath):
+        if save and not os.path.exists(savepath):
             os.makedirs(savepath)
 
-        if autobs:
+        if save and autobs:
             self.lc_bs.save(savepath=savepath + '/pgsignal')
 
         fig = go.Figure()
@@ -947,8 +948,9 @@ class Event:
 
         if show:
             fig.show()
-        fig.write_html(savepath + '/lc.html', include_plotlyjs='cdn')
-        # fig.write_image(savepath + '/lc.pdf')
+        if save:
+            fig.write_html(savepath + '/lc.html', include_plotlyjs='cdn')
+            # fig.write_image(savepath + '/lc.pdf')
 
         if autobs:
             fig = go.Figure()
@@ -967,8 +969,9 @@ class Event:
             fig.update_layout(template='plotly_white', height=600, width=800)
             fig.update_layout(legend=dict(x=1, y=1, xanchor='right', yanchor='bottom'))
 
-            fig.write_html(savepath + '/cum_lc.html', include_plotlyjs='cdn')
-            # fig.write_image(savepath + '/cum_lc.pdf')
+            if save:
+                fig.write_html(savepath + '/cum_lc.html', include_plotlyjs='cdn')
+                # fig.write_image(savepath + '/cum_lc.pdf')
 
     def calculate_txx(
         self,
