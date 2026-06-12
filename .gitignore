@@ -56,6 +56,9 @@ CLAUDE.md
 # Ignore test-run intermediate artifacts (tracked test_*.py files remain tracked)
 tests/
 
+# Unfinished MVT modules in temp/ (work in progress, not yet under version control)
+heapy/temp/mvt*.py
+
 # Claude Code / Gemini Antigravity local state
 .claude/
 .gemini_worktree
