@@ -265,7 +265,7 @@ def rebin(
 
         evt = cc - cb * backscale
 
-        if ((sigma >= min_sigma) and (evt >= min_evt)) or ((j - i + 1) == max_bin):
+        if ((sigma >= min_sigma) and (evt >= min_evt)) or ((i - j + 1) == max_bin):
             new_bins.append([bins[j][0], bins[i][1]])
             new_cts.append(cc)
             new_bcts.append(cb)
@@ -278,7 +278,7 @@ def rebin(
         if (
             (i == len(bins) - 1)
             and ((sigma < min_sigma) or (evt < min_evt))
-            and (j - i + 1) < max_bin
+            and (i - j + 1) < max_bin
         ):
             if k >= 1:
                 new_bins[k - 1][1] = bins[i][1]
