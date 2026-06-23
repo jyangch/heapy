@@ -137,29 +137,43 @@ def intervals_equal(a, b):
     return a_sorted == b_sorted
 
 
-def filter_block_edges(edges_raw, min_binsize, margin=1.8, protected=None):
-    """Drop interior Bayesian-block edges that produce undersized blocks.
+def filter_block_edges(edges_raw, merge_threshold, protected=None, mode='full'):
+    """Drop Bayesian-block edges that produce undersized blocks.
 
-    An interior edge is kept only when both neighboring gaps exceed
-    ``min_binsize / margin``. The two endpoint edges are always preserved.
-    ``edges_raw`` must already be clamped to the data range by the caller.
-    When ``protected`` is supplied, those edges are force-injected into
-    the output and any auto-derived edge within ``min_binsize / margin``
-    of a protected point is discarded in favor of the protected one.
+    Both modes share one mechanism: flag interior edges for removal, then
+    return the surviving edges with the endpoints kept and ``protected``
+    points force-injected. Only the flagging rule differs.
+
+    - ``mode='full'`` (binned grid): a block narrower than ``merge_threshold``
+      is below the sampling resolution, so an interior edge is flagged when
+      either adjacent block is undersized, or when it crowds a protected
+      point. This checks every block.
+    - ``mode='edges'`` (unbinned event-time blocks): every block is already
+      significant at the ``p0`` level -- narrow spikes included -- so interior
+      edges are kept verbatim and only an undersized *first* or *last* block
+      (the inserted observation-window boundary, which may be spuriously thin)
+      is merged into its neighbor.
 
     Args:
         edges_raw: Candidate block edges (1D, sorted, endpoints clamped).
-        min_binsize: Minimum physical bin size from the raw histogram.
-        margin: Safety factor relaxing ``min_binsize``; larger keeps more edges.
+        merge_threshold: Minimum block width; a block narrower than this is
+            merged into a neighbor. Callers typically pass the smallest raw
+            bin size relaxed by a safety factor (e.g. ``min(binsize) / 1.8``).
         protected: Optional 1D array-like of edges that must appear in
             the output. Points outside ``(edges_raw[0], edges_raw[-1])``
             are silently ignored.
+        mode: ``'full'`` to filter every block (default), or ``'edges'`` to
+            filter only the first and last block.
 
     Returns:
         Sorted unique edges with undersized neighbors removed.
+
+    Raises:
+        ValueError: If ``mode`` is neither ``'full'`` nor ``'edges'``.
     """
 
-    threshold = min_binsize / margin
+    if mode not in ('full', 'edges'):
+        raise ValueError(f"mode must be 'full' or 'edges', got {mode!r}")
 
     if protected is None or len(protected) == 0:
         protected = np.empty(0, dtype=float)
@@ -167,18 +181,19 @@ def filter_block_edges(edges_raw, min_binsize, margin=1.8, protected=None):
         protected = np.asarray(protected, dtype=float)
         protected = protected[(protected > edges_raw[0]) & (protected < edges_raw[-1])]
 
-    edges = [edges_raw[0], edges_raw[-1]]
-    edges.extend(protected.tolist())
-    for i in range(1, len(edges_raw) - 1):
-        flag1 = (edges_raw[i] - edges_raw[i - 1]) > threshold
-        flag2 = (edges_raw[i + 1] - edges_raw[i]) > threshold
-        if not (flag1 and flag2):
-            continue
-        if protected.size > 0 and np.any(np.abs(edges_raw[i] - protected) <= threshold):
-            continue
-        edges.append(edges_raw[i])
+    edges = np.asarray(edges_raw, dtype=float)
+    drop = np.zeros(len(edges), dtype=bool)
 
-    return np.unique(edges)
+    if mode == 'full':
+        for i in range(1, len(edges) - 1):
+            drop[i] = (edges[i] - edges[i - 1]) < merge_threshold or (
+                edges[i + 1] - edges[i]
+            ) < merge_threshold
+    elif len(edges) >= 3:
+        drop[1] |= (edges[1] - edges[0]) < merge_threshold
+        drop[-2] |= (edges[-1] - edges[-2]) < merge_threshold
+
+    return np.unique(np.concatenate([edges[~drop], protected]))
 
 
 def classify_bins(snr, left, right, sigma, bad_sentinel=-5):

@@ -389,7 +389,8 @@ class pgSignal:
             bkg_integral = None
 
         if len(self.ts) <= 1e4:
-            edges_ = time_rescaling_bblock(self.ts, p0=p0, bkg_integral=bkg_integral)
+            edges = time_rescaling_bblock(self.ts, p0=p0, bkg_integral=bkg_integral)
+            mode = 'edges'
         else:
             # frombin keeps cts as float when NaN gap bins are present so the
             # missing-data semantic stays distinguishable from a measured zero.
@@ -397,15 +398,20 @@ class pgSignal:
             # input; ``pos`` already filters NaN via ``> 0`` so the surviving
             # counts are integer-valued and safe to cast for this call.
             pos = np.where(self.cts > 0)[0]
-            edges_ = time_rescaling_bblock(
+            edges = time_rescaling_bblock(
                 self.time[pos], cts=self.cts[pos].astype(int), p0=p0, bkg_integral=bkg_integral
             )
+            mode = 'full'
 
-        edges_[0] = max(edges_[0], self.time[0])
-        edges_[-1] = min(edges_[-1], self.time[-1])
+        lowest = self.time[0] - self.binsize[0] / 2
+        highest = self.time[-1] + self.binsize[-1] / 2
+        edges = np.clip(edges, lowest, highest)
+        edges = np.unique(np.concatenate([[lowest], edges, [highest]]))
 
         gap_eps = np.unique([e for pair in self._gap_int for e in pair]) if self._gap_int else None
-        self.edges = filter_block_edges(edges_, np.min(self.binsize), protected=gap_eps)
+        self.edges = filter_block_edges(
+            edges, np.min(self.binsize) / 1.8, protected=gap_eps, mode=mode
+        )
 
         self.nblock = len(self.edges) - 1
         self.re_binsize = self.edges[1:] - self.edges[:-1]
@@ -949,15 +955,19 @@ class ppSignal:
         """
 
         if len(self.ts) <= 1e4:
-            edges_ = bayesian_blocks(self.ts, fitness='events', p0=p0)
+            edges = bayesian_blocks(self.ts, fitness='events', p0=p0)
+            mode = 'edges'
         else:
             pos = np.where(self.cts > 0)[0]
-            edges_ = bayesian_blocks(self.time[pos], self.cts[pos], fitness='events', p0=p0)
+            edges = bayesian_blocks(self.time[pos], self.cts[pos], fitness='events', p0=p0)
+            mode = 'full'
 
-        edges_[0] = max(edges_[0], self.time[0])
-        edges_[-1] = min(edges_[-1], self.time[-1])
+        lowest = self.time[0] - self.binsize[0] / 2
+        highest = self.time[-1] + self.binsize[-1] / 2
+        edges = np.clip(edges, lowest, highest)
+        edges = np.unique(np.concatenate([[lowest], edges, [highest]]))
 
-        self.edges = filter_block_edges(edges_, np.min(self.binsize))
+        self.edges = filter_block_edges(edges, np.min(self.binsize) / 1.8, mode=mode)
         self.nblock = len(self.edges) - 1
         self.re_binsize = self.edges[1:] - self.edges[:-1]
 
@@ -1167,12 +1177,14 @@ class ggSignal:
             p0: False-alarm probability passed to ``bayesian_blocks``.
         """
 
-        edges_ = bayesian_blocks(self.time, self.net, self.net_err, fitness='measures', p0=p0)
+        edges = bayesian_blocks(self.time, self.net, self.net_err, fitness='measures', p0=p0)
 
-        edges_[0] = max(edges_[0], self.time[0])
-        edges_[-1] = min(edges_[-1], self.time[-1])
+        lowest = self.time[0] - self.binsize[0] / 2
+        highest = self.time[-1] + self.binsize[-1] / 2
+        edges = np.clip(edges, lowest, highest)
+        edges = np.unique(np.concatenate([[lowest], edges, [highest]]))
 
-        self.edges = filter_block_edges(edges_, np.min(self.binsize))
+        self.edges = filter_block_edges(edges, np.min(self.binsize) / 1.8)
         self.nblock = len(self.edges) - 1
         self.re_binsize = self.edges[1:] - self.edges[:-1]
 

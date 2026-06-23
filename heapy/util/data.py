@@ -495,6 +495,106 @@ def multi_rebin(
     return new_bins, new_cts_list, new_cts_err_list, new_bcts_list, new_bcts_err_list
 
 
+def find_peak_interval(dt, mode='unbinned', ts=None, edges=None, counts=None):
+    """Find the ``dt``-second window with the largest counts in a light curve.
+
+    A fixed-width window of duration ``dt`` is slid along the time axis and the
+    interval holding the most counts is returned.
+
+    Two input modes are supported:
+
+    - ``'unbinned'``: ``ts`` is a list of photon arrival times (TTE), generally
+        still containing background.  The window can slide continuously, so the
+        optimum always has its right edge on a photon; only ``N`` candidate
+        windows are scanned.  The reported counts are **total** counts.
+    - ``'binned'``: ``edges`` (length ``N+1``) and ``counts`` (length ``N``)
+        describe an equal-width binned light curve.  A rolling sum over
+        ``k = round(dt / binsize)`` bins is taken.  ``counts`` may be either
+        total or net (background-subtracted) counts; the choice is the caller's.
+
+    The reported rate uses the nominal ``dt`` as the denominator and is **not**
+    deadtime/exposure corrected; apply any exposure correction in the caller.
+
+    Args:
+        dt: Window width in seconds (required).
+        mode: Either ``'unbinned'`` or ``'binned'``.
+        ts: Photon arrival times for ``mode='unbinned'``.  Sorted internally.
+        edges: Bin edges (length ``N+1``) for ``mode='binned'``.
+        counts: Counts per bin (length ``N``) for ``mode='binned'``.
+
+    Returns:
+        A tuple ``(t_start, t_stop, peak_counts, peak_rate)`` describing the
+        winning window ``[t_start, t_stop]``, the counts inside it, and
+        ``peak_counts / dt``.  In ``'binned'`` mode the bounds are aligned to
+        bin edges.
+
+    Raises:
+        ValueError: If ``mode`` is unknown, required inputs are missing or
+            empty, the binned ``edges``/``counts`` lengths are inconsistent, or
+            the binned edges are not equal width.
+    """
+
+    if mode == 'unbinned':
+        if ts is None:
+            raise ValueError("mode='unbinned' requires ts")
+        photon_times = np.sort(np.asarray(ts, dtype=float))
+        if photon_times.size == 0:
+            raise ValueError('ts is empty')
+
+        window_start_index = np.searchsorted(photon_times, photon_times - dt, side='left')
+        counts_in_window = np.arange(photon_times.size) - window_start_index + 1
+        peak_index = int(np.argmax(counts_in_window))
+        window_stop = float(photon_times[peak_index])
+        peak_counts = int(counts_in_window[peak_index])
+
+        return window_stop - dt, window_stop, peak_counts, peak_counts / dt
+
+    if mode == 'binned':
+        if edges is None or counts is None:
+            raise ValueError("mode='binned' requires edges and counts")
+        bin_edges = np.asarray(edges, dtype=float)
+        bin_counts = np.asarray(counts)
+        if bin_edges.size != bin_counts.size + 1:
+            raise ValueError(
+                f'edges (length {bin_edges.size}) must have one more element than '
+                f'counts (length {bin_counts.size})'
+            )
+
+        bin_widths = np.diff(bin_edges)
+        bin_width = float(bin_widths[0])
+        if not np.allclose(bin_widths, bin_width):
+            raise ValueError('binned mode requires equal-width edges')
+
+        bins_per_window = round(dt / bin_width)
+        if bins_per_window < 1:
+            raise ValueError(f'dt={dt}s is smaller than one bin ({bin_width}s)')
+        if not np.isclose(bins_per_window * bin_width, dt):
+            warnings.warn(
+                f'dt={dt}s is not an integer multiple of bin width {bin_width}s; '
+                f'using nearest {bins_per_window} bins '
+                f'(actual window={bins_per_window * bin_width}s)',
+                UserWarning,
+                stacklevel=2,
+            )
+        if bins_per_window > bin_counts.size:
+            raise ValueError(
+                f'window of {bins_per_window} bins exceeds the {bin_counts.size} available bins'
+            )
+
+        cumulative_counts = np.concatenate(([0], np.cumsum(bin_counts)))
+        counts_in_window = (
+            cumulative_counts[bins_per_window:] - cumulative_counts[:-bins_per_window]
+        )
+        peak_index = int(np.argmax(counts_in_window))
+        peak_counts = counts_in_window[peak_index].item()
+        window_start = float(bin_edges[peak_index])
+        window_stop = float(bin_edges[peak_index + bins_per_window])
+
+        return window_start, window_stop, peak_counts, peak_counts / dt
+
+    raise ValueError(f"unsupported mode: {mode!r}; expected 'unbinned' or 'binned'")
+
+
 def split_bool_mask(mask, times, selection_value=False):
     """Convert a boolean mask into time intervals where the mask equals a value.
 

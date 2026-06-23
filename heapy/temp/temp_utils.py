@@ -56,7 +56,11 @@ def accumcts(time, ccts, pstart, pstop, xx, simple_err=False, random_seed=450001
     if len(np.where((time >= pstart[idx]) & (time <= pstop[idx]))[0]) < 1000:
         interp_dt = (pstop[idx] - pstart[idx]) / 1000
         interp_time = np.arange(time[0], time[-1] - 1e-5, interp_dt)
-        interp = interp1d(time, ccts, kind='quadratic')
+        # Quadratic splines need >= 3 nodes; coarse light curves (e.g. the
+        # ~3 s Konus-Wind binning) can leave only 2 samples in the analysis
+        # window, so fall back to linear interpolation there.
+        interp_kind = 'quadratic' if len(time) >= 3 else 'linear'
+        interp = interp1d(time, ccts, kind=interp_kind)
         interp_ccts = interp(interp_time)
     else:
         interp_time = time
