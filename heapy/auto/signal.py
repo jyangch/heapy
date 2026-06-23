@@ -360,66 +360,6 @@ class pgSignal:
 
         return inst
 
-    def bblock(self, p0=0.05):
-        """Run time-rescaling Bayesian blocks under the current background estimate.
-
-        The background cumulative integral is taken from :attr:`poly`
-        when :meth:`polyfit` (or :meth:`from_components`) has run, and
-        from the drpls :attr:`bl` set by :meth:`basefit` otherwise.
-        With neither available the call degenerates to plain
-        ``events``-mode Bayesian blocks. Inputs at most ``1e4`` events
-        long use the unbinned branch; larger event lists fall back to
-        the binned branch over :attr:`bins` (positive bins only).
-        Composite instances always take the polynomial branch since
-        :attr:`poly` is populated at construction.
-
-        Args:
-            p0: False-alarm probability passed to ``bayesian_blocks``.
-        """
-
-        if self.poly_res is not None:
-
-            def bkg_integral(t):
-                return self.poly.integral(t)[0]
-
-        elif self.base_res is not None:
-            bkg_integral = self.bl.integral
-
-        else:
-            bkg_integral = None
-
-        if len(self.ts) <= 1e4:
-            edges = time_rescaling_bblock(self.ts, p0=p0, bkg_integral=bkg_integral)
-            mode = 'edges'
-        else:
-            # frombin keeps cts as float when NaN gap bins are present so the
-            # missing-data semantic stays distinguishable from a measured zero.
-            # astropy.bayesian_blocks(fitness='events') rejects non-integer
-            # input; ``pos`` already filters NaN via ``> 0`` so the surviving
-            # counts are integer-valued and safe to cast for this call.
-            pos = np.where(self.cts > 0)[0]
-            edges = time_rescaling_bblock(
-                self.time[pos], cts=self.cts[pos].astype(int), p0=p0, bkg_integral=bkg_integral
-            )
-            mode = 'full'
-
-        lowest = self.time[0] - self.binsize[0] / 2
-        highest = self.time[-1] + self.binsize[-1] / 2
-        edges = np.clip(edges, lowest, highest)
-        edges = np.unique(np.concatenate([[lowest], edges, [highest]]))
-
-        gap_eps = np.unique([e for pair in self._gap_int for e in pair]) if self._gap_int else None
-        self.edges = filter_block_edges(
-            edges, np.min(self.binsize) / 1.8, protected=gap_eps, mode=mode
-        )
-
-        self.nblock = len(self.edges) - 1
-        self.re_binsize = self.edges[1:] - self.edges[:-1]
-
-        self.re_cts, _ = np.histogram(self.ts, bins=self.edges)
-
-        self.block_res = {'edges': self.edges, 'nblock': self.nblock, 're_binsize': self.re_binsize}
-
     @staticmethod
     def _normalize_ignore(ignore):
         """Coerce a user-supplied ``ignore`` argument into the nested form.
@@ -470,6 +410,66 @@ class pgSignal:
         if self.sort_res is None:
             return gap
         return union(list(self.sort_res['ignore']) + gap)
+
+    def bblock(self, p0=0.05):
+        """Run time-rescaling Bayesian blocks under the current background estimate.
+
+        The background cumulative integral is taken from :attr:`poly`
+        when :meth:`polyfit` (or :meth:`from_components`) has run, and
+        from the drpls :attr:`bl` set by :meth:`basefit` otherwise.
+        With neither available the call degenerates to plain
+        ``events``-mode Bayesian blocks. Inputs at most ``1e4`` events
+        long use the unbinned branch; larger event lists fall back to
+        the binned branch over :attr:`bins` (positive bins only).
+        Composite instances always take the polynomial branch since
+        :attr:`poly` is populated at construction.
+
+        Args:
+            p0: False-alarm probability passed to ``bayesian_blocks``.
+        """
+
+        if self.poly_res is not None:
+
+            def bkg_integral(t):
+                return self.poly.integral(t)[0]
+
+        elif self.base_res is not None:
+            bkg_integral = self.bl.integral
+
+        else:
+            bkg_integral = None
+
+        if len(self.ts) <= 1e4:
+            edges = time_rescaling_bblock(self.ts, p0=p0, bkg_integral=bkg_integral)
+            mode = 'edges'
+        else:
+            # frombin keeps cts as float when NaN gap bins are present so the
+            # missing-data semantic stays distinguishable from a measured zero.
+            # astropy.bayesian_blocks(fitness='events') rejects non-integer
+            # input; ``pos`` already filters NaN via ``> 0`` so the surviving
+            # counts are integer-valued and safe to cast for this call.
+            pos = np.where(self.cts > 0)[0]
+            edges = time_rescaling_bblock(
+                self.time[pos], cts=self.cts[pos].astype(int), p0=p0, bkg_integral=bkg_integral
+            )
+            mode = 'full'
+
+        lowest = self.time[0]
+        highest = self.time[-1]
+        edges = np.clip(edges, lowest, highest)
+        edges = np.unique(np.concatenate([[lowest], edges, [highest]]))
+
+        gap_eps = np.unique([e for pair in self._gap_int for e in pair]) if self._gap_int else None
+        self.edges = filter_block_edges(
+            edges, np.min(self.binsize) / 1.8, protected=gap_eps, mode=mode
+        )
+
+        self.nblock = len(self.edges) - 1
+        self.re_binsize = self.edges[1:] - self.edges[:-1]
+
+        self.re_cts, _ = np.histogram(self.ts, bins=self.edges)
+
+        self.block_res = {'edges': self.edges, 'nblock': self.nblock, 're_binsize': self.re_binsize}
 
     def basefit(self, weight=None):
         """Fit a smooth baseline via ``drpls`` to seed the first background.
@@ -539,7 +539,7 @@ class pgSignal:
             for i, (left, right) in enumerate(zip(self.edges[:-1], self.edges[1:], strict=False)):
                 x = np.linspace(left, right, 100)
                 y = self.bl.val(x)
-                self.re_bcts[i] = np.trapz(y, x)
+                self.re_bcts[i] = np.trapezoid(y, x)
 
         bcts_err = getattr(self, 'bcts_err', None)
         self.snr = np.zeros_like(self.binsize)
