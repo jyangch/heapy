@@ -454,8 +454,8 @@ class pgSignal:
             )
             mode = 'full'
 
-        lowest = self.time[0]
-        highest = self.time[-1]
+        lowest = self.time[0] - self.binsize[0] / 2
+        highest = self.time[-1] + self.binsize[-1] / 2
         edges = np.clip(edges, lowest, highest)
         edges = np.unique(np.concatenate([[lowest], edges, [highest]]))
 

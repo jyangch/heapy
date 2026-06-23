@@ -81,8 +81,15 @@ class Polynomial:
 
         self.x = np.array(x).astype(float)
         self.y = np.array(y).astype(float)
+
         self.deg = deg
-        self.dx = dx
+
+        if dx is None:
+            self.dx = self.x[1] - self.x[0]
+        else:
+            self.dx = np.array(dx)
+            if self.dx.ndim != 0 and self.dx.shape != self.x.shape:
+                raise TypeError('if dx is array, expected dx and x to have same length')
 
         self.ls_res = None
 
@@ -110,12 +117,12 @@ class Polynomial:
 
         x = np.array(x)
 
-        if min(x) < min(self.x):
-            msg = f'Extrapolation may be imprecise: {min(x):f} < {min(self.x):f}'
+        if min(x) < min(self.x - self.dx / 1.8):
+            msg = f'Extrapolation may be imprecise: {min(x):f} < {min(self.x - self.dx / 1.8):f}'
             warnings.warn(msg, UserWarning, stacklevel=2)
 
-        if max(x) > max(self.x):
-            msg = f'Extrapolation may be imprecise: {max(x):f} > {max(self.x):f}'
+        if max(x) > max(self.x + self.dx / 1.8):
+            msg = f'Extrapolation may be imprecise: {max(x):f} > {max(self.x + self.dx / 1.8):f}'
             warnings.warn(msg, UserWarning, stacklevel=2)
 
         assert self.ls_res is not None, 'you should first perform fitting'
@@ -145,12 +152,12 @@ class Polynomial:
 
         x = np.array(x)
 
-        if min(x) < min(self.x):
-            msg = f'Extrapolation may be imprecise: {min(x):f} < {min(self.x):f}'
+        if min(x) < min(self.x - self.dx / 1.8):
+            msg = f'Extrapolation may be imprecise: {min(x):f} < {min(self.x - self.dx / 1.8):f}'
             warnings.warn(msg, UserWarning, stacklevel=2)
 
-        if max(x) > max(self.x):
-            msg = f'Extrapolation may be imprecise: {max(x):f} > {max(self.x):f}'
+        if max(x) > max(self.x + self.dx / 1.8):
+            msg = f'Extrapolation may be imprecise: {max(x):f} > {max(self.x + self.dx / 1.8):f}'
             warnings.warn(msg, UserWarning, stacklevel=2)
 
         assert self.ls_res is not None, 'you should first perform fitting'
@@ -228,26 +235,16 @@ class Polynomial:
         variance so poorly-fit bins don't anchor the solution.
         Derivation: rate * livetime = counts; var(counts) = counts (Poisson);
         var(rate) = var(counts) / livetime^2 = rate / livetime.
-
-        Raises:
-            TypeError: If ``self.dx`` is a non-scalar array with a shape
-                that does not match ``self.x``.
         """
 
         time = self.x
         rate = self.y
+        dt = self.dx
 
         if self.deg is None:
             self.deg_list = [0, 1, 2, 3, 4]
         else:
             self.deg_list = [self.deg]
-
-        if self.dx is None:
-            dt = time[1] - time[0]
-        else:
-            dt = np.array(self.dx)
-            if dt.ndim != 0 and dt.shape != time.shape:
-                raise TypeError('if dt is array, expected dt and time to have same length')
 
         # First pass: uniform weight (scale cancels out in WLS coefficients/covariance)
         weight = np.ones_like(rate)
@@ -576,6 +573,6 @@ class CompositePolynomial:
         for p in self.polys:
             F, err = p.block_integral(a, b)
             Fs.append(F)
-            vars_.append(err ** 2)
+            vars_.append(err**2)
 
         return float(np.sum(Fs)), float(np.sqrt(np.sum(vars_)))

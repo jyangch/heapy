@@ -67,7 +67,7 @@ class Baseline:
 
         return cls(method=method)
 
-    def fit(self, x, y, w=None, lam=None, nk=None):
+    def fit(self, x, y, w=None, lam=None, nk=None, dx=None):
         """Estimate the baseline of ``(x, y)`` using the configured method.
 
         Populates :attr:`x`, :attr:`y`, and :attr:`mo`. Defaults for
@@ -79,6 +79,8 @@ class Baseline:
             w: Per-point weights; defaults to ones.
             lam: Smoothing strength for Whittaker-based methods.
             nk: Number of spline knots for the mixture model.
+            dx: Per-point width converting rate variance to count variance;
+                scalar or 1D matching ``x``. Defaults to ``x[1] - x[0]``.
 
         Raises:
             ValueError: If :attr:`method` is not a recognized algorithm.
@@ -89,10 +91,19 @@ class Baseline:
 
         if w is None:
             w = np.ones(len(y))
+
         if lam is None:
             lam = 10 ** (4 * (np.log10(len(x)) - 1))
+
         if nk is None:
             nk = max(2 * len(x) - 200, 4)
+
+        if dx is None:
+            self.dx = self.x[1] - self.x[0]
+        else:
+            self.dx = np.array(dx)
+            if self.dx.ndim != 0 and self.dx.shape != self.x.shape:
+                raise TypeError('if dx is array, expected dx and x to have same length')
 
         if self.method == 'snip':
             mo = self.snip(y, x, w=w)
@@ -132,8 +143,13 @@ class Baseline:
 
         x = np.asarray(x)
 
-        if x.min() < self.x.min() or x.max() > self.x.max():
-            warnings.warn('Extrapolation may be imprecise', UserWarning, stacklevel=2)
+        if min(x) < min(self.x - self.dx / 1.8):
+            msg = f'Extrapolation may be imprecise: {min(x):f} < {min(self.x - self.dx / 1.8):f}'
+            warnings.warn(msg, UserWarning, stacklevel=2)
+
+        if max(x) > max(self.x + self.dx / 1.8):
+            msg = f'Extrapolation may be imprecise: {max(x):f} > {max(self.x + self.dx / 1.8):f}'
+            warnings.warn(msg, UserWarning, stacklevel=2)
 
         interp = CubicSpline(self.x, self.mo, extrapolate=True)
 
@@ -159,8 +175,13 @@ class Baseline:
 
         x = np.asarray(x)
 
-        if x.min() < self.x.min() or x.max() > self.x.max():
-            warnings.warn('Extrapolation may be imprecise', UserWarning, stacklevel=2)
+        if min(x) < min(self.x - self.dx / 1.8):
+            msg = f'Extrapolation may be imprecise: {min(x):f} < {min(self.x - self.dx / 1.8):f}'
+            warnings.warn(msg, UserWarning, stacklevel=2)
+
+        if max(x) > max(self.x + self.dx / 1.8):
+            msg = f'Extrapolation may be imprecise: {max(x):f} > {max(self.x + self.dx / 1.8):f}'
+            warnings.warn(msg, UserWarning, stacklevel=2)
 
         antider = CubicSpline(self.x, self.mo, extrapolate=True).antiderivative()
 
