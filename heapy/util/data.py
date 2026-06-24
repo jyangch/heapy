@@ -495,7 +495,7 @@ def multi_rebin(
     return new_bins, new_cts_list, new_cts_err_list, new_bcts_list, new_bcts_err_list
 
 
-def find_peak_interval(dt, mode='unbinned', ts=None, edges=None, counts=None):
+def find_peak(dt, mode='unbinned', ts=None, edges=None, counts=None):
     """Find the ``dt``-second window with the largest counts in a light curve.
 
     A fixed-width window of duration ``dt`` is slid along the time axis and the
