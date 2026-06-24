@@ -71,7 +71,7 @@ class pgSignal:
             ``None``). When set, it serves as an escape hatch that
             bypasses the auto-detected ``sort_res['ignore']`` in
             :meth:`_effective_ignore`. NaN-gap intervals from
-            :meth:`frombin` live on :attr:`_gap_int` and are always
+            :meth:`frombin` live on :attr:`gap_int` and are always
             folded in regardless of this attribute.
         bl: :class:`~.baseline.Baseline` instance from :meth:`basefit`
             (raw-events path only).
@@ -158,7 +158,7 @@ class pgSignal:
         self.poly_res = None
 
         self.obj_list = None
-        self._gap_int = None
+        self.gap_int = None
 
     @classmethod
     def frombin(cls, cts, bins, exp=None, ignore=None, random_seed=450001):
@@ -172,7 +172,7 @@ class pgSignal:
         carry ``NaN`` at those positions and propagate naturally
         through subtraction, multiplication, and plotting), no events
         are synthesized for them, and the merged gap intervals are
-        recorded on :attr:`_gap_int`. :meth:`_effective_ignore` always
+        recorded on :attr:`gap_int`. :meth:`_effective_ignore` always
         folds the gap intervals into the exclusion set used by
         :meth:`basefit` and :meth:`polyfit` independently of
         user-supplied :attr:`ignore`. Gap-bin SNR comes out as ``NaN``
@@ -192,7 +192,7 @@ class pgSignal:
                 Accepts either ``[low, high]`` or ``[[low, high], ...]``
                 (see :meth:`__init__`). Stored verbatim on
                 :attr:`ignore`; NaN-derived gap intervals live on
-                :attr:`_gap_int` instead and never enter :attr:`ignore`.
+                :attr:`gap_int` instead and never enter :attr:`ignore`.
             random_seed: Seed for the local RNG that draws synthetic
                 photon times within each bin. Default ensures
                 reproducibility across runs; pass ``None`` for OS
@@ -265,7 +265,7 @@ class pgSignal:
         inst.poly_res = None
 
         inst.obj_list = None
-        inst._gap_int = gap_int
+        inst.gap_int = gap_int
 
         return inst
 
@@ -355,8 +355,8 @@ class pgSignal:
             'bak_err': inst.bak_err,
         }
 
-        gap_pool = [pair for obj in obj_list if obj._gap_int for pair in obj._gap_int]
-        inst._gap_int = union(gap_pool) if gap_pool else None
+        gap_pool = [pair for obj in obj_list if obj.gap_int for pair in obj.gap_int]
+        inst.gap_int = union(gap_pool) if gap_pool else None
 
         return inst
 
@@ -389,11 +389,11 @@ class pgSignal:
         Resolution policy:
 
         - User-supplied :attr:`ignore` is an escape hatch: when set,
-          returns ``union(self.ignore + _gap_int)``. The auto-detected
+          returns ``union(self.ignore + gap_int)``. The auto-detected
           ``sort_res['ignore']`` is bypassed so the user retains full
           control over which regions feed the background model.
         - Otherwise, when :attr:`sort_res` is populated, returns
-          ``union(sort_res['ignore'] + _gap_int)`` -- auto-detected
+          ``union(sort_res['ignore'] + gap_int)`` -- auto-detected
           signal/bad blocks unioned with NaN gap intervals.
         - When neither :attr:`ignore` nor :attr:`sort_res` is set yet
           (e.g. inside :meth:`basefit` during pass 1), returns only the
@@ -404,7 +404,7 @@ class pgSignal:
             excluded.
         """
 
-        gap = list(self._gap_int) if self._gap_int else []
+        gap = list(self.gap_int) if self.gap_int else []
         if self.ignore is not None:
             return union(list(self.ignore) + gap)
         if self.sort_res is None:
@@ -459,7 +459,7 @@ class pgSignal:
         edges = np.clip(edges, lowest, highest)
         edges = np.unique(np.concatenate([[lowest], edges, [highest]]))
 
-        gap_eps = np.unique([e for pair in self._gap_int for e in pair]) if self._gap_int else None
+        gap_eps = np.unique([e for pair in self.gap_int for e in pair]) if self.gap_int else None
         self.edges = filter_block_edges(
             edges, np.min(self.binsize) / 1.8, protected=gap_eps, mode=mode
         )
@@ -477,7 +477,7 @@ class pgSignal:
         Runs :meth:`bblock` first when block results are missing. Zero
         weight is applied to bins inside :meth:`_effective_ignore`
         (i.e. user-supplied :attr:`ignore` unioned with
-        :attr:`_gap_int`; :attr:`sort_res` is ``None`` at this stage so
+        :attr:`gap_int`; :attr:`sort_res` is ``None`` at this stage so
         it does not contribute), and bins with zero counts are excluded
         before calling :meth:`~.baseline.Baseline.fit`. Populates
         :attr:`bl`, :attr:`bak`, :attr:`bcts`, and :attr:`base_res`. Not
@@ -616,7 +616,7 @@ class pgSignal:
         user-supplied :attr:`ignore` is honoured as an escape hatch and
         bypasses the auto-derived ``sort_res['ignore']``; otherwise the
         auto-derived intervals are used. NaN-gap intervals
-        (:attr:`_gap_int`) are always unioned in either branch since
+        (:attr:`gap_int`) are always unioned in either branch since
         they mark "no observation", not "no signal". When neither
         :attr:`sort_res` nor :attr:`ignore` is set, :meth:`sorting` is
         triggered first to populate the auto branch; when only
@@ -790,8 +790,8 @@ class pgSignal:
 
         with plt_rc_context():
             fig = SignalPlotter()
-            if self._gap_int:
-                fig.set_gaps(self._gap_int, self.bins)
+            if self.gap_int:
+                fig.set_gaps(self.gap_int, self.bins)
             fig.plot_curve(self.time, self.rate, self.net, bak=self.bak, bak_err=self.bak_err)
             fig.plot_block(self.edges, re_rate, re_net)
             fig.plot_snr(self.edges, self.re_snr, self.sigma)

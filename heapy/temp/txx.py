@@ -133,8 +133,8 @@ class pgTxx(pgSignal):
         # Mark gap bins as NaN across all MC rows so :meth:`calculate`'s
         # ``np.nancumsum`` treats them as no-contribution rather than the
         # spurious ``-bcts`` draw the Gaussian background sample would yield.
-        if self._gap_int:
-            gap_idx = indices_in_intervals(self.lbins, self.rbins, self._gap_int)
+        if self.gap_int:
+            gap_idx = indices_in_intervals(self.lbins, self.rbins, self.gap_int)
             self.mc_ncts[:, gap_idx] = np.nan
 
     def calculate(self, xx=0.9, pstart=None, pstop=None, lbkg=None, rbkg=None, simple_err=False):
@@ -373,8 +373,8 @@ class pgTxx(pgSignal):
 
         with plt_rc_context():
             fig = TxxPlotter()
-            if self._gap_int:
-                fig.set_gaps(self._gap_int, self.lbins, self.rbins)
+            if self.gap_int:
+                fig.set_gaps(self.gap_int, self.lbins, self.rbins)
             fig.plot_curve(self.time, self.rate, bak=self.bak)
             fig.plot_ccts(self.time, self.ccts, self.tindex)
             fig.plot_txx(self.txx1, self.txx2, self.csf, self.csf1, self.csf2)
