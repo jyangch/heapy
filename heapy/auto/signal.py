@@ -159,6 +159,7 @@ class pgSignal:
 
         self.obj_list = None
         self.gap_int = None
+        self._bkg_fixed = False
 
     @classmethod
     def frombin(cls, cts, bins, exp=None, ignore=None, random_seed=450001):
@@ -266,6 +267,7 @@ class pgSignal:
 
         inst.obj_list = None
         inst.gap_int = gap_int
+        inst._bkg_fixed = False
 
         return inst
 
@@ -357,6 +359,7 @@ class pgSignal:
 
         gap_pool = [pair for obj in obj_list if obj.gap_int for pair in obj.gap_int]
         inst.gap_int = union(gap_pool) if gap_pool else None
+        inst._bkg_fixed = True
 
         return inst
 
@@ -491,10 +494,10 @@ class pgSignal:
             RuntimeError: If called on a composite instance.
         """
 
-        if isinstance(getattr(self, 'poly', None), CompositePolynomial):
+        if getattr(self, '_bkg_fixed', False):
             raise RuntimeError(
-                'basefit is not applicable on composite instances; '
-                'the background is already fixed by from_components()'
+                'basefit is not applicable when the background is fixed '
+                '(from_components / rebin)'
             )
 
         weight = np.ones_like(self.time) if weight is None else np.array(weight, dtype=float)
@@ -634,10 +637,10 @@ class pgSignal:
             RuntimeError: If called on a composite instance.
         """
 
-        if isinstance(getattr(self, 'poly', None), CompositePolynomial):
+        if getattr(self, '_bkg_fixed', False):
             raise RuntimeError(
-                'polyfit is not applicable on composite instances; '
-                'rebuild the source components instead'
+                'polyfit is not applicable when the background is fixed '
+                '(from_components / rebin)'
             )
 
         if self.sort_res is None and self.ignore is None:
@@ -700,9 +703,9 @@ class pgSignal:
                 on composite instances.
         """
 
-        is_composite = isinstance(getattr(self, 'poly', None), CompositePolynomial)
+        is_fixed = getattr(self, '_bkg_fixed', False)
 
-        if not is_composite:
+        if not is_fixed:
             # Pass 1: drpls baseline as background seed.
             self.basefit()
             self.bblock(p0)
@@ -715,7 +718,7 @@ class pgSignal:
         self.calsnr()
         self.sorting(sigma)
 
-        if is_composite:
+        if is_fixed:
             return
 
         self.polyfit(deg)
