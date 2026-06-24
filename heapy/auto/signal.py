@@ -127,10 +127,7 @@ class pgSignal:
         self.lbins = self.bins[:-1]
         self.rbins = self.bins[1:]
         self.binsize = self.bins[1:] - self.bins[:-1]
-        if exp is None:
-            self.exp = self.binsize
-        else:
-            self.exp = np.array(exp).astype(float)
+        self.exp = self.binsize if exp is None else np.asarray(exp, dtype=float)
 
         if (self.exp.size + 1) != self.bins.size:
             raise TypeError('expected size(exp) + 1 = size(bins)')
@@ -238,7 +235,7 @@ class pgSignal:
         inst.lbins = bins[:-1]
         inst.rbins = bins[1:]
         inst.binsize = inst.rbins - inst.lbins
-        inst.exp = np.array(exp).astype(float) if exp is not None else inst.binsize
+        inst.exp = inst.binsize if exp is None else np.asarray(exp, dtype=float)
 
         if (inst.exp.size + 1) != inst.bins.size:
             raise TypeError('expected size(exp) + 1 = size(bins)')
@@ -496,8 +493,7 @@ class pgSignal:
 
         if getattr(self, 'bkg_fixed', False):
             raise RuntimeError(
-                'basefit is not applicable when the background is fixed '
-                '(from_components / rebin)'
+                'basefit is not applicable when the background is fixed (from_components / rebin)'
             )
 
         weight = np.ones_like(self.time) if weight is None else np.array(weight, dtype=float)
@@ -639,8 +635,7 @@ class pgSignal:
 
         if getattr(self, 'bkg_fixed', False):
             raise RuntimeError(
-                'polyfit is not applicable when the background is fixed '
-                '(from_components / rebin)'
+                'polyfit is not applicable when the background is fixed (from_components / rebin)'
             )
 
         if self.sort_res is None and self.ignore is None:
@@ -710,16 +705,15 @@ class pgSignal:
         """
 
         if self.poly_res is None:
-            raise RuntimeError(
-                'rebin requires polyfit() (or from_components()) to have run'
-            )
-
-        bins = np.asarray(bins, dtype=float)
+            raise RuntimeError('rebin requires polyfit() (or from_components()) to have run')
 
         inst = type(self).__new__(type(self))
 
         inst.ts = self.ts
+
+        bins = np.asarray(bins, dtype=float)
         inst.bins = bins
+
         inst.lbins = bins[:-1]
         inst.rbins = bins[1:]
         inst.binsize = inst.rbins - inst.lbins
@@ -729,8 +723,6 @@ class pgSignal:
             raise TypeError('expected size(exp) + 1 = size(bins)')
         if not (inst.exp <= inst.binsize).all():
             raise TypeError('expected exp <= binsize')
-
-        inst.time = (inst.lbins + inst.rbins) / 2
 
         cts, _ = np.histogram(inst.ts, bins=bins)
         # frombin marks missing-data bins with NaN and synthesizes no events
@@ -743,6 +735,8 @@ class pgSignal:
             cts = cts.astype(float)
             gap_idx = indices_in_intervals(inst.lbins, inst.rbins, inst.gap_int)
             cts[gap_idx] = np.nan
+
+        inst.time = (inst.lbins + inst.rbins) / 2
         inst.cts = cts
         inst.rate = inst.cts / inst.exp
 
@@ -757,8 +751,6 @@ class pgSignal:
         inst.ncts_err = inst.net_err * inst.exp
 
         inst.ignore = self.ignore
-        inst.obj_list = None
-        inst.bkg_fixed = True
 
         inst.ini_res = {
             'time': inst.time,
@@ -768,6 +760,7 @@ class pgSignal:
             'bins': inst.bins,
             'ignore': inst.ignore,
         }
+
         inst.base_res = None
         inst.block_res = None
         inst.snr_res = None
@@ -782,6 +775,9 @@ class pgSignal:
                 'bak_err': inst.bak_err,
             }
         )
+
+        inst.obj_list = None
+        inst.bkg_fixed = True
 
         return inst
 
