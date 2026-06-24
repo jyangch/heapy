@@ -159,7 +159,7 @@ class pgSignal:
 
         self.obj_list = None
         self.gap_int = None
-        self._bkg_fixed = False
+        self.bkg_fixed = False
 
     @classmethod
     def frombin(cls, cts, bins, exp=None, ignore=None, random_seed=450001):
@@ -267,7 +267,7 @@ class pgSignal:
 
         inst.obj_list = None
         inst.gap_int = gap_int
-        inst._bkg_fixed = False
+        inst.bkg_fixed = False
 
         return inst
 
@@ -359,7 +359,7 @@ class pgSignal:
 
         gap_pool = [pair for obj in obj_list if obj.gap_int for pair in obj.gap_int]
         inst.gap_int = union(gap_pool) if gap_pool else None
-        inst._bkg_fixed = True
+        inst.bkg_fixed = True
 
         return inst
 
@@ -494,7 +494,7 @@ class pgSignal:
             RuntimeError: If called on a composite instance.
         """
 
-        if getattr(self, '_bkg_fixed', False):
+        if getattr(self, 'bkg_fixed', False):
             raise RuntimeError(
                 'basefit is not applicable when the background is fixed '
                 '(from_components / rebin)'
@@ -637,7 +637,7 @@ class pgSignal:
             RuntimeError: If called on a composite instance.
         """
 
-        if getattr(self, '_bkg_fixed', False):
+        if getattr(self, 'bkg_fixed', False):
             raise RuntimeError(
                 'polyfit is not applicable when the background is fixed '
                 '(from_components / rebin)'
@@ -688,7 +688,7 @@ class pgSignal:
         :attr:`poly_res` to be populated.
 
         The returned instance has its background fixed
-        (:attr:`_bkg_fixed` is ``True``), so :meth:`basefit` /
+        (:attr:`bkg_fixed` is ``True``), so :meth:`basefit` /
         :meth:`polyfit` raise on it and :meth:`loop` runs only
         ``bblock -> calsnr -> sorting``. To save a diagnostic or plot,
         run those three on the returned instance first; the bare product
@@ -758,7 +758,7 @@ class pgSignal:
 
         inst.ignore = self.ignore
         inst.obj_list = None
-        inst._bkg_fixed = True
+        inst.bkg_fixed = True
 
         inst.ini_res = {
             'time': inst.time,
@@ -813,9 +813,9 @@ class pgSignal:
                 on composite instances.
         """
 
-        is_fixed = getattr(self, '_bkg_fixed', False)
+        bkg_is_fixed = getattr(self, 'bkg_fixed', False)
 
-        if not is_fixed:
+        if not bkg_is_fixed:
             # Pass 1: drpls baseline as background seed.
             self.basefit()
             self.bblock(p0)
@@ -828,7 +828,7 @@ class pgSignal:
         self.calsnr()
         self.sorting(sigma)
 
-        if is_fixed:
+        if bkg_is_fixed:
             return
 
         self.polyfit(deg)
