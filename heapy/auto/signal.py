@@ -159,6 +159,7 @@ class pgSignal:
 
         self.obj_list = None
         self.gap_int = None
+        self._bkg_fixed = False
 
     @classmethod
     def frombin(cls, cts, bins, exp=None, ignore=None, random_seed=450001):
@@ -266,6 +267,7 @@ class pgSignal:
 
         inst.obj_list = None
         inst.gap_int = gap_int
+        inst._bkg_fixed = False
 
         return inst
 
@@ -357,6 +359,7 @@ class pgSignal:
 
         gap_pool = [pair for obj in obj_list if obj.gap_int for pair in obj.gap_int]
         inst.gap_int = union(gap_pool) if gap_pool else None
+        inst._bkg_fixed = True
 
         return inst
 
@@ -491,10 +494,10 @@ class pgSignal:
             RuntimeError: If called on a composite instance.
         """
 
-        if isinstance(getattr(self, 'poly', None), CompositePolynomial):
+        if getattr(self, '_bkg_fixed', False):
             raise RuntimeError(
-                'basefit is not applicable on composite instances; '
-                'the background is already fixed by from_components()'
+                'basefit is not applicable when the background is fixed '
+                '(from_components / rebin)'
             )
 
         weight = np.ones_like(self.time) if weight is None else np.array(weight, dtype=float)
@@ -634,10 +637,10 @@ class pgSignal:
             RuntimeError: If called on a composite instance.
         """
 
-        if isinstance(getattr(self, 'poly', None), CompositePolynomial):
+        if getattr(self, '_bkg_fixed', False):
             raise RuntimeError(
-                'polyfit is not applicable on composite instances; '
-                'rebuild the source components instead'
+                'polyfit is not applicable when the background is fixed '
+                '(from_components / rebin)'
             )
 
         if self.sort_res is None and self.ignore is None:
@@ -672,6 +675,116 @@ class pgSignal:
             'bak_err': self.bak_err,
         }
 
+    def rebin(self, bins, exp=None):
+        """Project the fixed background model onto a new bin grid.
+
+        Reuses :attr:`ts` (re-histogrammed onto ``bins``) and the
+        already-fitted :attr:`poly` (a :class:`~.polynomial.Polynomial`
+        from :meth:`polyfit`, or a
+        :class:`~.polynomial.CompositePolynomial` from
+        :meth:`from_components`) to produce per-bin counts and background
+        at a different resolution, without rerunning :meth:`bblock`,
+        :meth:`basefit`, :meth:`calsnr`, or :meth:`polyfit`. Requires
+        :attr:`poly_res` to be populated.
+
+        The returned instance has its background fixed
+        (:attr:`_bkg_fixed` is ``True``), so :meth:`basefit` /
+        :meth:`polyfit` raise on it and :meth:`loop` runs only
+        ``bblock -> calsnr -> sorting``. To save a diagnostic or plot,
+        run those three on the returned instance first; the bare product
+        leaves ``block_res`` / ``snr_res`` / ``sort_res`` as ``None``.
+
+        Args:
+            bins: New bin edges (length ``N + 1``).
+            exp: Per-bin exposure for the new grid; defaults to bin widths.
+
+        Returns:
+            A new :class:`pgSignal` at the new binning, sharing
+            :attr:`poly`.
+
+        Raises:
+            RuntimeError: If :meth:`polyfit` / :meth:`from_components`
+                has not run (``poly_res`` is ``None``).
+            TypeError: If ``exp`` and ``bins`` have mismatched sizes or
+                any exposure exceeds its bin width.
+        """
+
+        if self.poly_res is None:
+            raise RuntimeError(
+                'rebin requires polyfit() (or from_components()) to have run'
+            )
+
+        bins = np.asarray(bins, dtype=float)
+
+        inst = type(self).__new__(type(self))
+
+        inst.ts = self.ts
+        inst.bins = bins
+        inst.lbins = bins[:-1]
+        inst.rbins = bins[1:]
+        inst.binsize = inst.rbins - inst.lbins
+        inst.exp = inst.binsize if exp is None else np.asarray(exp, dtype=float)
+
+        if (inst.exp.size + 1) != inst.bins.size:
+            raise TypeError('expected size(exp) + 1 = size(bins)')
+        if not (inst.exp <= inst.binsize).all():
+            raise TypeError('expected exp <= binsize')
+
+        inst.time = (inst.lbins + inst.rbins) / 2
+
+        cts, _ = np.histogram(inst.ts, bins=bins)
+        # frombin marks missing-data bins with NaN and synthesizes no events
+        # there; re-histogramming ts alone would resurrect them as 0. Re-flag
+        # fine bins inside the gap intervals as NaN so the missing-data
+        # semantic survives and rate/net/ncts propagate NaN. Gap-free sources
+        # keep integer counts, matching __init__/frombin.
+        inst.gap_int = self.gap_int
+        if inst.gap_int:
+            cts = cts.astype(float)
+            gap_idx = indices_in_intervals(inst.lbins, inst.rbins, inst.gap_int)
+            cts[gap_idx] = np.nan
+        inst.cts = cts
+        inst.rate = inst.cts / inst.exp
+
+        inst.poly = self.poly
+        inst.bak, inst.bak_err = self.poly.val(inst.time)
+        inst.bcts = inst.bak * inst.exp
+        inst.bcts_err = inst.bak_err * inst.exp
+
+        inst.net = inst.rate - inst.bak
+        inst.net_err = np.sqrt(inst.rate / inst.exp + inst.bak_err**2)
+        inst.ncts = inst.net * inst.exp
+        inst.ncts_err = inst.net_err * inst.exp
+
+        inst.ignore = self.ignore
+        inst.obj_list = None
+        inst._bkg_fixed = True
+
+        inst.ini_res = {
+            'time': inst.time,
+            'cts': inst.cts,
+            'rate': inst.rate,
+            'exp': inst.exp,
+            'bins': inst.bins,
+            'ignore': inst.ignore,
+        }
+        inst.base_res = None
+        inst.block_res = None
+        inst.snr_res = None
+        inst.sort_res = None
+
+        inst.poly_res = dict(self.poly_res)
+        inst.poly_res.update(
+            {
+                'bcts': inst.bcts,
+                'bcts_err': inst.bcts_err,
+                'bak': inst.bak,
+                'bak_err': inst.bak_err,
+            }
+        )
+
+        return inst
+
     def loop(self, p0=0.05, sigma=3, deg=None, iter=False):
         """Run the full two-pass pipeline.
 
@@ -700,9 +813,9 @@ class pgSignal:
                 on composite instances.
         """
 
-        is_composite = isinstance(getattr(self, 'poly', None), CompositePolynomial)
+        is_fixed = getattr(self, '_bkg_fixed', False)
 
-        if not is_composite:
+        if not is_fixed:
             # Pass 1: drpls baseline as background seed.
             self.basefit()
             self.bblock(p0)
@@ -715,7 +828,7 @@ class pgSignal:
         self.calsnr()
         self.sorting(sigma)
 
-        if is_composite:
+        if is_fixed:
             return
 
         self.polyfit(deg)
