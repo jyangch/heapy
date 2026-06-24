@@ -675,6 +675,107 @@ class pgSignal:
             'bak_err': self.bak_err,
         }
 
+    def rebin(self, bins, exp=None):
+        """Project the fixed background model onto a new bin grid.
+
+        Reuses :attr:`ts` (re-histogrammed onto ``bins``) and the
+        already-fitted :attr:`poly` (a :class:`~.polynomial.Polynomial`
+        from :meth:`polyfit`, or a
+        :class:`~.polynomial.CompositePolynomial` from
+        :meth:`from_components`) to produce per-bin counts and background
+        at a different resolution, without rerunning :meth:`bblock`,
+        :meth:`basefit`, :meth:`calsnr`, or :meth:`polyfit`. Requires
+        :attr:`poly_res` to be populated.
+
+        The returned instance has its background fixed
+        (:attr:`_bkg_fixed` is ``True``), so :meth:`basefit` /
+        :meth:`polyfit` raise on it and :meth:`loop` runs only
+        ``bblock -> calsnr -> sorting``. To save a diagnostic or plot,
+        run those three on the returned instance first; the bare product
+        leaves ``block_res`` / ``snr_res`` / ``sort_res`` as ``None``.
+
+        Args:
+            bins: New bin edges (length ``N + 1``).
+            exp: Per-bin exposure for the new grid; defaults to bin widths.
+
+        Returns:
+            A new :class:`pgSignal` at the new binning, sharing
+            :attr:`poly`.
+
+        Raises:
+            RuntimeError: If :meth:`polyfit` / :meth:`from_components`
+                has not run (``poly_res`` is ``None``).
+            TypeError: If ``exp`` and ``bins`` have mismatched sizes or
+                any exposure exceeds its bin width.
+        """
+
+        if self.poly_res is None:
+            raise RuntimeError(
+                'rebin requires polyfit() (or from_components()) to have run'
+            )
+
+        bins = np.asarray(bins, dtype=float)
+
+        inst = type(self).__new__(type(self))
+
+        inst.ts = self.ts
+        inst.bins = bins
+        inst.lbins = bins[:-1]
+        inst.rbins = bins[1:]
+        inst.binsize = inst.rbins - inst.lbins
+        inst.exp = inst.binsize if exp is None else np.asarray(exp, dtype=float)
+
+        if (inst.exp.size + 1) != inst.bins.size:
+            raise TypeError('expected size(exp) + 1 = size(bins)')
+        if not (inst.exp <= inst.binsize).all():
+            raise TypeError('expected exp <= binsize')
+
+        inst.time = (inst.lbins + inst.rbins) / 2
+
+        cts, _ = np.histogram(inst.ts, bins=bins)
+        inst.cts = cts
+        inst.rate = inst.cts / inst.exp
+
+        inst.poly = self.poly
+        inst.bak, inst.bak_err = self.poly.val(inst.time)
+        inst.bcts = inst.bak * inst.exp
+        inst.bcts_err = inst.bak_err * inst.exp
+
+        inst.net = inst.rate - inst.bak
+        inst.net_err = np.sqrt(inst.rate / inst.exp + inst.bak_err**2)
+        inst.ncts = inst.net * inst.exp
+        inst.ncts_err = inst.net_err * inst.exp
+
+        inst.ignore = self.ignore
+        inst.gap_int = self.gap_int
+        inst.obj_list = None
+        inst._bkg_fixed = True
+
+        inst.ini_res = {
+            'time': inst.time,
+            'cts': inst.cts,
+            'rate': inst.rate,
+            'exp': inst.exp,
+            'bins': inst.bins,
+            'ignore': inst.ignore,
+        }
+        inst.base_res = None
+        inst.block_res = None
+        inst.snr_res = None
+        inst.sort_res = None
+
+        inst.poly_res = dict(self.poly_res)
+        inst.poly_res.update(
+            {
+                'bcts': inst.bcts,
+                'bcts_err': inst.bcts_err,
+                'bak': inst.bak,
+                'bak_err': inst.bak_err,
+            }
+        )
+
+        return inst
+
     def loop(self, p0=0.05, sigma=3, deg=None, iter=False):
         """Run the full two-pass pipeline.
 
