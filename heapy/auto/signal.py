@@ -733,6 +733,16 @@ class pgSignal:
         inst.time = (inst.lbins + inst.rbins) / 2
 
         cts, _ = np.histogram(inst.ts, bins=bins)
+        # frombin marks missing-data bins with NaN and synthesizes no events
+        # there; re-histogramming ts alone would resurrect them as 0. Re-flag
+        # fine bins inside the gap intervals as NaN so the missing-data
+        # semantic survives and rate/net/ncts propagate NaN. Gap-free sources
+        # keep integer counts, matching __init__/frombin.
+        inst.gap_int = self.gap_int
+        if inst.gap_int:
+            cts = cts.astype(float)
+            gap_idx = indices_in_intervals(inst.lbins, inst.rbins, inst.gap_int)
+            cts[gap_idx] = np.nan
         inst.cts = cts
         inst.rate = inst.cts / inst.exp
 
@@ -747,7 +757,6 @@ class pgSignal:
         inst.ncts_err = inst.net_err * inst.exp
 
         inst.ignore = self.ignore
-        inst.gap_int = self.gap_int
         inst.obj_list = None
         inst._bkg_fixed = True
 
