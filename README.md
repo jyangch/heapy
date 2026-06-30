@@ -1,45 +1,95 @@
-# *Welcome* *To* *HEAPY* 👋
+<h1 align="center">HEAPY</h1>
 
-### A unified toolkit for timing and spectral analysis of X-ray and gamma-ray transient data.
+<p align="center">
+  <strong>A unified toolkit for timing and spectral analysis of X-ray and gamma-ray transient data.</strong>
+</p>
 
-[![PyPI - Version](https://img.shields.io/pypi/v/heapyx?color=blue&logo=PyPI&logoColor=white&style=for-the-badge)](https://pypi.org/project/heapyx/)
-[![License: GPL v3](https://img.shields.io/github/license/jyangch/heapy?color=blue&logo=open-source-initiative&logoColor=white&style=for-the-badge)](https://www.gnu.org/licenses/gpl-3.0)
+<p align="center">
+  <a href="https://pypi.org/project/heapyx/"><img alt="PyPI" src="https://img.shields.io/pypi/v/heapyx?color=4F46E5&labelColor=1f2937&logo=pypi&logoColor=white"></a>
+  <a href="https://github.com/jyangch/heapy/tree/main/examples"><img alt="Examples" src="https://img.shields.io/badge/docs-examples-06B6D4?labelColor=1f2937"></a>
+  <a href="https://www.gnu.org/licenses/gpl-3.0"><img alt="License GPL-3.0" src="https://img.shields.io/badge/license-GPL--3.0-9CA3AF?labelColor=1f2937"></a>
+</p>
+
+---
+
+`HEAPY` is a Python toolkit for timing and spectral analysis of X-ray and
+gamma-ray transient data. It pulls event and response data from mission
+archives, reduces time-tagged-event (TTE) and image data into light curves
+and OGIP spectra, separates burst signals from fitted backgrounds, and
+measures durations, spectral lags, and source localizations — across
+[`Fermi`](https://gammaray.nsstc.nasa.gov/gbm/)/GBM, GECAM, GRID,
+[`Einstein Probe`](https://ep.bao.ac.cn/) (WXT/FXT), and
+[`Swift`](https://swift.gsfc.nasa.gov/) (XRT/BAT). It bridges to
+[`HEASoft`](https://heasarc.gsfc.nasa.gov/docs/software/heasoft/) and
+[`gbm_drm_gen`](https://github.com/grburgess/gbm_drm_gen) for mission-specific
+reduction and response generation.
 
 
-## Prerequisites
+## Features
 
-### HEASoft
-
-_Heapy_ will invoke certain software and commands from HEASoft, such as `xselect` and `ximage`. Please ensure that [`HEASoft`](https://heasarc.gsfc.nasa.gov/docs/software/heasoft/#install) is correctly installed on your system, and that the [`Calibration Database`](https://heasarc.gsfc.nasa.gov/docs/heasarc/caldb/install.html) (CALDB) for the mission (e.g., `Swift`)  you are processing is also properly installed.
-
-### Fermi GBM Response Generator
-
-_Heapy_ generates the response matrix files for Fermi GBM by invoking [`gbm_drm_gen`](https://github.com/grburgess/gbm_drm_gen). It is recommended to install my forked Python packages, which have been fine-tuned to resolve compatibility issues with newer versions of `numpy` and `astropy`, and to use TTE data instead of CSPEC data. The specific installation procedure is as follows:
-```bash
-$ git clone https://github.com/jyangch/responsum.git
-$ pip3 install ./responsum
-
-$ git clone https://github.com/jyangch/gbmgeometry.git
-$ pip3 install ./gbmgeometry
-
-$ git clone https://github.com/jyangch/gbm_drm_gen.git
-$ pip3 install ./gbm_drm_gen
-```
+- **Data retrieval.** Pull event, position, and response files straight
+  from mission archives by burst ID, UTC window, or observation ID
+  (`gbmRetrieve`, `gecamRetrieve`, `gridRetrieve`, `epRetrieve`,
+  `swiftRetrieve`).
+- **Multi-mission event reduction.** One `Event` interface across
+  Fermi/GBM TTE, GECAM, GRID, Einstein Probe (WXT/FXT), and Swift
+  (XRT/BAT).
+- **Light curves.** Extract and rebin light curves with automatic
+  background fitting.
+- **Signal detection.** Bayesian-block signal/background separation with
+  three noise regimes — Poisson + polynomial background (`pgSignal`),
+  Poisson + supplied background (`ppSignal`), and Gaussian (`ggSignal`).
+- **OGIP spectra.** Generate source and background `PHA`/`PHA2` spectra,
+  and — for Fermi/GBM — response matrices via `gbm_drm_gen`.
+- **Timing analysis.** Duration measurements (`T90`/`Txx`) and
+  spectral-lag estimation.
+- **Localization & geometry.** Detector geometry, sky maps, and source
+  localization.
 
 
 ## Installation
 
-_Heapy_ is available via `pip`:
+`HEAPY` is available on PyPI:
+
 ```bash
-$ pip3 install heapyx
+pip install heapyx
+```
+
+### Optional: `HEASoft`
+
+For some missions (e.g., `Swift`), `HEAPY` invokes `HEASoft` tools such as
+`xselect` and `ximage`. Ensure
+[`HEASoft`](https://heasarc.gsfc.nasa.gov/docs/software/heasoft/#install) is
+installed, along with the
+[`Calibration Database`](https://heasarc.gsfc.nasa.gov/docs/heasarc/caldb/install.html)
+(CALDB) for the mission you are processing.
+
+### Optional: Fermi GBM response generator
+
+To build response matrices for Fermi/GBM, `HEAPY` calls
+[`gbm_drm_gen`](https://github.com/grburgess/gbm_drm_gen). The forked
+packages below are fine-tuned for newer `numpy`/`astropy` and use TTE
+instead of CSPEC data:
+
+```bash
+git clone https://github.com/jyangch/responsum.git
+pip3 install ./responsum
+
+git clone https://github.com/jyangch/gbmgeometry.git
+pip3 install ./gbmgeometry
+
+git clone https://github.com/jyangch/gbm_drm_gen.git
+pip3 install ./gbm_drm_gen
 ```
 
 
 ## Documentation
 
-If you wish to learn about the usage, you may check the [`examples`](https://github.com/jyangch/heapy/tree/main/examples).
+Browse the [examples](https://github.com/jyangch/heapy/tree/main/examples)
+for typical workflows end to end.
 
 
 ## License
 
-_Heapy_ is distributed under the terms of the [`GPL-3.0`](https://www.gnu.org/licenses/gpl-3.0-standalone.html) license.
+`HEAPY` is distributed under the
+[GPL-3.0](https://www.gnu.org/licenses/gpl-3.0-standalone.html) license.
