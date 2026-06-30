@@ -12,7 +12,7 @@
 
 ---
 
-`HEAPY` is a Python toolkit for timing and spectral analysis of X-ray and
+`Heapy` is a Python toolkit for timing and spectral analysis of X-ray and
 gamma-ray transient data. It pulls event and response data from mission
 archives, reduces time-tagged-event (TTE) and image data into light curves
 and OGIP spectra, separates burst signals from fitted backgrounds, and
@@ -49,7 +49,7 @@ reduction and response generation.
 
 ## Installation
 
-`HEAPY` is available on PyPI:
+`Heapy` is available on PyPI:
 
 ```bash
 pip install heapyx
@@ -57,7 +57,7 @@ pip install heapyx
 
 ### Optional: `HEASoft`
 
-For some missions (e.g., `Swift`), `HEAPY` invokes `HEASoft` tools such as
+For some missions (e.g., `Swift`), `heapy` invokes `HEASoft` tools such as
 `xselect` and `ximage`. Ensure
 [`HEASoft`](https://heasarc.gsfc.nasa.gov/docs/software/heasoft/#install) is
 installed, along with the
@@ -66,7 +66,7 @@ installed, along with the
 
 ### Optional: Fermi GBM response generator
 
-To build response matrices for Fermi/GBM, `HEAPY` calls
+To build response matrices for Fermi/GBM, `heapy` calls
 [`gbm_drm_gen`](https://github.com/grburgess/gbm_drm_gen). The forked
 packages below are fine-tuned for newer `numpy`/`astropy` and use TTE
 instead of CSPEC data:
@@ -91,5 +91,5 @@ for typical workflows end to end.
 
 ## License
 
-`HEAPY` is distributed under the
+`Heapy` is distributed under the
 [GPL-3.0](https://www.gnu.org/licenses/gpl-3.0-standalone.html) license.
