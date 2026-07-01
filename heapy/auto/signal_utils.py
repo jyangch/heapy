@@ -520,7 +520,7 @@ class SignalPlotter:
 
         self.ax_bot.plot(time, net, lw=1.0, c='b', label='Net light curve')
         self.ax_bot.set_xlim([min(time), max(time)])
-        self.ax_bot.set_xlabel('Time')
+        self.ax_bot.set_xlabel('Time (s)')
         self.ax_bot.set_ylabel('Rate (cts/s)')
         self.ax_bot.legend(frameon=False)
 
@@ -705,7 +705,7 @@ def plot_tau_diagnostic(poly, ts, bins, edges, time, rate, savepath):
         for e in edges[1:-1]:
             ax_t.axvline(e, ls='--', c='k', lw=0.6, alpha=0.6)
         ax_t.set_xlim([bins[0], bins[-1]])
-        ax_t.set_xlabel('Time')
+        ax_t.set_xlabel('Time (s)')
         ax_t.set_ylabel('Rate (cts/s)')
         ax_t.set_title('time axis')
         ax_t.legend(frameon=False)
