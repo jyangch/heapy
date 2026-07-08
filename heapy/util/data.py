@@ -480,6 +480,7 @@ def multi_rebin(
                         new_bcts_err_list[n][k - 1] ** 2 + cb_err_list[n] ** 2
                     )
             else:
+                new_bins.append([bins[j][0], bins[i][1]])
                 for n in range(multi):
                     new_cts_list[n].append(cc_list[n])
                     new_bcts_list[n].append(cb_list[n])
