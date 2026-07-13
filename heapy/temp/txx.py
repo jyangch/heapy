@@ -320,6 +320,8 @@ class pgTxx(pgSignal):
                 'csf': self.csf,
                 'csf1': self.csf1,
                 'csf2': self.csf2,
+                'time': self.time,
+                'ccts': self.ccts,
             }
 
         XX = int(self.xx * 100)
@@ -596,6 +598,8 @@ class ppTxx(ppSignal):
             'csf': self.csf,
             'csf1': self.csf1,
             'csf2': self.csf2,
+            'time': self.time,
+            'ccts': self.ccts,
         }
 
         XX = int(self.xx * 100)
@@ -862,6 +866,8 @@ class ggTxx(ggSignal):
             'csf': self.csf,
             'csf1': self.csf1,
             'csf2': self.csf2,
+            'time': self.time,
+            'ccts': self.ccts,
         }
 
         XX = int(self.xx * 100)
