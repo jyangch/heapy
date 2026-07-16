@@ -1092,7 +1092,8 @@ class Image:
 
         txx = ppTxx(self.src_ts, self.bkg_ts, self.lc_bins, self.backscale)
         txx.find_pulse(p0=self.ps_p0, sigma=self.ps_sigma, mp=mp)
-        txx.calculate(xx=xx, pstart=pstart, pstop=pstop, lbkg=lbkg, rbkg=rbkg)
+        pulse = [pstart, pstop] if pstart is not None and pstop is not None else None
+        txx.calculate(xx=xx, pulse=pulse, lbkg=lbkg, rbkg=rbkg)
         txx.save(savepath=savepath)
 
     def extract_rebin_curve(

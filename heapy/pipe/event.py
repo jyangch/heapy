@@ -1010,7 +1010,8 @@ class Event:
 
         txx = pgTxx(self.lc_ts, self.lc_bins, self.lc_exps, self.bs_ignore)
         txx.find_pulse(p0=self.bs_p0, sigma=self.bs_sigma, deg=self.bs_deg, mp=mp)
-        txx.calculate(xx=xx, pstart=pstart, pstop=pstop, lbkg=lbkg, rbkg=rbkg)
+        pulse = [pstart, pstop] if pstart is not None and pstop is not None else None
+        txx.calculate(xx=xx, pulse=pulse, lbkg=lbkg, rbkg=rbkg)
         txx.save(savepath=savepath)
 
     def extract_rebin_curve(

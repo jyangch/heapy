@@ -33,6 +33,7 @@ from .polynomial import CompositePolynomial, Polynomial
 from .signal_utils import (
     SignalPlotter,
     classify_bins,
+    detect_pulses_by_snr,
     filter_block_edges,
     gauss_snr,
     indices_in_intervals,
@@ -218,8 +219,8 @@ class pgSignal:
             gap_int = union(raw_nan)
 
         rng = np.random.default_rng(random_seed)
-        chunks = []
         # No synthetic events for NaN bins; for everything else fall back to int(n).
+        chunks = []
         for t1, t2, n, is_gap in zip(bins[:-1], bins[1:], cts, nan_mask, strict=False):
             if is_gap:
                 continue
@@ -561,16 +562,23 @@ class pgSignal:
             're_bcts': self.re_bcts,
         }
 
-    def sorting(self, sigma=3):
+    def sorting(self, sigma=3, mp=True):
         """Classify raw bins and blocks into signal/background/bad by SNR.
 
         Runs :meth:`calsnr` first when SNR results are missing. Unions the
         signal and bad block intervals into :attr:`ignore_int` so
         :meth:`polyfit` can exclude them from the background fit.
         Populates ``*_idx``/``*_int`` attributes plus :attr:`sort_res`.
+        Also walks the per-block SNR to detect contiguous pulse intervals
+        (see :func:`~.signal_utils.detect_pulses_by_snr`), populating
+        :attr:`pstart`, :attr:`pstop`, :attr:`pulse`, and
+        ``sort_res['pulse']``.
 
         Args:
             sigma: Detection threshold in units of SNR.
+            mp: When ``True``, keep multiple separate pulse intervals.
+                When ``False``, merge all intervals into one and emit a
+                warning if more than one interval is found.
         """
 
         if self.snr_res is None:
@@ -598,12 +606,16 @@ class pgSignal:
 
         self.ignore_int = union(self.re_bad_int + self.re_sig_int)
 
+        self.pstart, self.pstop = detect_pulses_by_snr(self.re_snr, self.edges, sigma, mp=mp)
+        self.pulse = [[p1, p2] for p1, p2 in zip(self.pstart, self.pstop, strict=False)]
+
         self.sort_res = {
             'sigma': self.sigma,
             'ignore': self.ignore_int,
             're_bkg': (self.re_bkg_int, self.re_bkg_idx),
             're_sig': (self.re_sig_int, self.re_sig_idx, self.re_sig_index),
             're_bad': (self.re_bad_int, self.re_bad_idx, self.re_bad_index),
+            'pulse': self.pulse,
         }
 
     def polyfit(self, deg=None):
@@ -781,7 +793,7 @@ class pgSignal:
 
         return inst
 
-    def loop(self, p0=0.05, sigma=3, deg=None, iter=False):
+    def loop(self, p0=0.05, sigma=3, deg=None, iter=False, mp=True):
         """Run the full two-pass pipeline.
 
         Raw-events instances run two passes of ``bblock → calsnr →
@@ -807,6 +819,8 @@ class pgSignal:
                 :meth:`bblock` with the latest polynomial so the edges
                 stay consistent with the background estimate. Ignored
                 on composite instances.
+            mp: Forwarded to :meth:`sorting`'s pulse-interval detection;
+                see there for details.
         """
 
         bkg_is_fixed = getattr(self, 'bkg_fixed', False)
@@ -816,13 +830,13 @@ class pgSignal:
             self.basefit()
             self.bblock(p0)
             self.calsnr()
-            self.sorting(sigma)
+            self.sorting(sigma, mp=mp)
             self.polyfit(deg)
 
         # Pass 2: polynomial as background. Composite instances enter here directly.
         self.bblock(p0)
         self.calsnr()
-        self.sorting(sigma)
+        self.sorting(sigma, mp=mp)
 
         if bkg_is_fixed:
             return
@@ -834,7 +848,7 @@ class pgSignal:
                 prev_ignore = list(self.sort_res['ignore'])
                 self.bblock(p0)
                 self.calsnr()
-                self.sorting(sigma)
+                self.sorting(sigma, mp=mp)
                 self.polyfit(deg)
                 if intervals_equal(prev_ignore, self.sort_res['ignore']):
                     break
@@ -1004,17 +1018,26 @@ class ppSignal:
         self.snr_res = None
         self.sort_res = None
 
+        self.gap_int = None
+
     @classmethod
     def frombin(cls, cts, bcts, bins, backscale=1, exp=None, random_seed=450001):
-        """Build a :class:`ppSignal` from pre-binned histograms.
+        """Build a :class:`ppSignal` from pre-binned source/background histograms.
 
-        Synthesizes fake time-stamps uniformly within each bin to satisfy
-        the histogram-based ``__init__`` path. The resulting timing is
-        approximate; a ``UserWarning`` is emitted on every call.
+        Synthesizes uniformly-distributed event time-stamps within each
+        bin to satisfy the histogram-based ``__init__`` path; the
+        resulting timing is approximate. ``NaN`` entries in ``cts`` or
+        ``bcts`` mark missing-data bins -- they are preserved verbatim on
+        :attr:`cts` / :attr:`bcts` (so :attr:`rate`, :attr:`bak`,
+        :attr:`net`, and :attr:`ncts` carry ``NaN`` at those positions
+        and propagate naturally), no events are synthesized for them,
+        and the merged gap intervals are recorded on :attr:`gap_int`.
 
         Args:
-            cts: Source counts per bin (length ``N``).
-            bcts: Background counts per bin (length ``N``).
+            cts: Source counts per bin (length ``N``). ``NaN`` entries
+                mark bins with no valid observation.
+            bcts: Background counts per bin (length ``N``). ``NaN``
+                entries mark bins with no valid observation.
             bins: Bin edges (length ``N + 1``).
             backscale: Ratio scaling background counts into the source
                 region.
@@ -1028,36 +1051,105 @@ class ppSignal:
             A fully initialised :class:`ppSignal`.
 
         Raises:
-            TypeError: If ``bins`` is not one element longer than ``cts``.
+            TypeError: If ``bins`` is not one element longer than ``cts``,
+                or if ``exp`` and ``bins`` have mismatched sizes, or any
+                exposure exceeds its bin width.
         """
 
-        cts = np.array(cts)
-        bcts = np.array(bcts)
-        bins = np.array(bins)
+        cts = np.asarray(cts, dtype=float)
+        bcts = np.asarray(bcts, dtype=float)
+        bins = np.asarray(bins, dtype=float)
 
         if bins.size != (cts.size + 1):
             raise TypeError('expected size(bins) = size(cts)+1')
 
+        nan_mask = np.isnan(cts) | np.isnan(bcts)
+        gap_int = None
+        if nan_mask.any():
+            raw_nan = [[float(bins[i]), float(bins[i + 1])] for i in np.where(nan_mask)[0]]
+            gap_int = union(raw_nan)
+
         rng = np.random.default_rng(random_seed)
+        # No synthetic events for gap bins; for everything else fall back to int(n).
         ts_chunks = []
-        for t1, t2, n in zip(bins[:-1], bins[1:], cts, strict=False):
+        for t1, t2, n, is_gap in zip(bins[:-1], bins[1:], cts, nan_mask, strict=False):
+            if is_gap:
+                continue
             ts_chunks.append(rng.random(size=int(n)) * (t2 - t1) + t1)
         ts = np.concatenate(ts_chunks) if ts_chunks else np.array([])
 
         bts_chunks = []
-        for t1, t2, n in zip(bins[:-1], bins[1:], bcts, strict=False):
+        for t1, t2, n, is_gap in zip(bins[:-1], bins[1:], bcts, nan_mask, strict=False):
+            if is_gap:
+                continue
             bts_chunks.append(rng.random(size=int(n)) * (t2 - t1) + t1)
         bts = np.concatenate(bts_chunks) if bts_chunks else np.array([])
 
-        cls_ = cls(ts, bts, bins, backscale=backscale, exp=exp)
-        return cls_
+        # Build the instance directly so the NaN placeholders survive; the raw
+        # __init__ path would re-derive cts/bcts from ts/bts via np.histogram
+        # and lose them (histogram outputs int and zeros gap bins by construction).
+        inst = cls.__new__(cls)
+        inst.ts = ts.astype(float)
+        inst.bts = bts.astype(float)
+        inst.bins = bins
+        inst.backscale = backscale
+
+        inst.cts = cts if nan_mask.any() else cts.astype(int)
+        inst.cts_err = np.sqrt(inst.cts)
+
+        inst.bcts = bcts if nan_mask.any() else bcts.astype(int)
+        inst.bcts_err = np.sqrt(inst.bcts)
+
+        inst.lbins = bins[:-1]
+        inst.rbins = bins[1:]
+        inst.binsize = inst.rbins - inst.lbins
+        inst.exp = inst.binsize if exp is None else np.asarray(exp, dtype=float)
+
+        if (inst.exp.size + 1) != inst.bins.size:
+            raise TypeError('expected size(exp) + 1 = size(bins)')
+        if not (inst.exp <= inst.binsize).all():
+            raise TypeError('expected exp <= binsize')
+
+        inst.time = (inst.lbins + inst.rbins) / 2
+        inst.rate = inst.cts / inst.exp  # NaN at gap bins propagates from here
+        inst.rate_err = inst.cts_err / inst.exp
+
+        inst.bak = inst.bcts * inst.backscale / inst.exp
+        inst.bak_err = inst.bcts_err * inst.backscale / inst.exp
+
+        inst.net = inst.rate - inst.bak
+        inst.net_err = np.sqrt(inst.rate_err**2 + inst.bak_err**2)
+
+        inst.ncts = inst.net * inst.exp
+        inst.ncts_err = inst.net_err * inst.exp
+
+        inst.ini_res = {
+            'cts': inst.cts,
+            'bcts': inst.bcts,
+            'time': inst.time,
+            'rate': inst.rate,
+            'bak': inst.bak,
+            'exp': inst.exp,
+            'backscale': inst.backscale,
+            'bins': inst.bins,
+        }
+
+        inst.block_res = None
+        inst.snr_res = None
+        inst.sort_res = None
+
+        inst.gap_int = gap_int
+
+        return inst
 
     def bblock(self, p0=0.05):
         """Run ``astropy.stats.bayesian_blocks`` and filter undersized gaps.
 
         Uses the event-time list directly when it has at most ``1e4``
         entries; otherwise falls back to the counts-per-bin array to keep
-        the ``events`` fitness function tractable.
+        the ``events`` fitness function tractable. Gap boundaries from
+        :attr:`gap_int` (set by :meth:`frombin`) are fed in as protected
+        edges so a single block never straddles a missing-data region.
 
         Args:
             p0: False-alarm probability passed to ``bayesian_blocks``.
@@ -1067,8 +1159,15 @@ class ppSignal:
             edges = bayesian_blocks(self.ts, fitness='events', p0=p0)
             mode = 'edges'
         else:
+            # frombin keeps cts as float when NaN gap bins are present so the
+            # missing-data semantic stays distinguishable from a measured zero.
+            # astropy.bayesian_blocks(fitness='events') rejects non-integer
+            # input; ``pos`` already filters NaN via ``> 0`` so the surviving
+            # counts are integer-valued and safe to cast for this call.
             pos = np.where(self.cts > 0)[0]
-            edges = bayesian_blocks(self.time[pos], self.cts[pos], fitness='events', p0=p0)
+            edges = bayesian_blocks(
+                self.time[pos], self.cts[pos].astype(int), fitness='events', p0=p0
+            )
             mode = 'full'
 
         lowest = self.time[0] - self.binsize[0] / 2
@@ -1076,7 +1175,10 @@ class ppSignal:
         edges = np.clip(edges, lowest, highest)
         edges = np.unique(np.concatenate([[lowest], edges, [highest]]))
 
-        self.edges = filter_block_edges(edges, np.min(self.binsize) / 1.8, mode=mode)
+        gap_eps = np.unique([e for pair in self.gap_int for e in pair]) if self.gap_int else None
+        self.edges = filter_block_edges(
+            edges, np.min(self.binsize) / 1.8, protected=gap_eps, mode=mode
+        )
         self.nblock = len(self.edges) - 1
         self.re_binsize = self.edges[1:] - self.edges[:-1]
 
@@ -1113,14 +1215,21 @@ class ppSignal:
             're_bcts': self.re_bcts,
         }
 
-    def sorting(self, sigma=3):
+    def sorting(self, sigma=3, mp=True):
         """Classify raw bins and blocks into signal/background/bad by SNR.
 
         Runs :meth:`calsnr` first when SNR results are missing. Populates
-        ``*_idx``/``*_int`` attributes plus :attr:`sort_res`.
+        ``*_idx``/``*_int`` attributes plus :attr:`sort_res`. Also walks
+        the per-block SNR to detect contiguous pulse intervals (see
+        :func:`~.signal_utils.detect_pulses_by_snr`), populating
+        :attr:`pstart`, :attr:`pstop`, :attr:`pulse`, and
+        ``sort_res['pulse']``.
 
         Args:
             sigma: Detection threshold in units of SNR.
+            mp: When ``True``, keep multiple separate pulse intervals.
+                When ``False``, merge all intervals into one and emit a
+                warning if more than one interval is found.
         """
 
         if self.snr_res is None:
@@ -1146,24 +1255,30 @@ class ppSignal:
         self.re_bad_index = indices_in_intervals(self.lbins, self.rbins, self.re_bad_int)
         self.re_sig_index = indices_in_intervals(self.lbins, self.rbins, self.re_sig_int)
 
+        self.pstart, self.pstop = detect_pulses_by_snr(self.re_snr, self.edges, sigma, mp=mp)
+        self.pulse = [[p1, p2] for p1, p2 in zip(self.pstart, self.pstop, strict=False)]
+
         self.sort_res = {
             'sigma': self.sigma,
             're_bkg': (self.re_bkg_int, self.re_bkg_idx),
             're_sig': (self.re_sig_int, self.re_sig_idx, self.re_sig_index),
             're_bad': (self.re_bad_int, self.re_bad_idx, self.re_bad_index),
+            'pulse': self.pulse,
         }
 
-    def loop(self, p0=0.05, sigma=3):
+    def loop(self, p0=0.05, sigma=3, mp=True):
         """Run :meth:`bblock`, :meth:`calsnr`, and :meth:`sorting` in order.
 
         Args:
             p0: False-alarm probability for Bayesian blocks.
             sigma: Detection threshold for bin classification.
+            mp: Forwarded to :meth:`sorting`'s pulse-interval detection;
+                see there for details.
         """
 
         self.bblock(p0)
         self.calsnr()
-        self.sorting(sigma)
+        self.sorting(sigma, mp=mp)
 
     def save(self, savepath):
         """Dump stage results as JSON and write a two-panel diagnostic PDF.
@@ -1191,6 +1306,8 @@ class ppSignal:
         re_net = (self.re_cts - self.re_bcts) / self.re_binsize
         with plt_rc_context():
             fig = SignalPlotter()
+            if self.gap_int:
+                fig.set_gaps(self.gap_int, self.bins)
             fig.plot_curve(self.time, self.rate, self.net, bak=self.bak)
             fig.plot_block(self.edges, re_rate, re_net)
             fig.plot_snr(self.edges, self.re_snr, self.sigma)
@@ -1230,9 +1347,18 @@ class ggSignal:
     def __init__(self, ncts, ncts_err, bins, exp=None):
         """Store arrays and derive net rates, errors, and bin geometry.
 
+        ``NaN`` entries in ``ncts`` or ``ncts_err`` mark missing-data
+        bins -- they are preserved verbatim (so :attr:`net` and
+        :attr:`net_err` carry ``NaN`` at those positions and propagate
+        naturally), and the merged gap intervals are recorded on
+        :attr:`gap_int`.
+
         Args:
-            ncts: Per-bin net counts matching bin count ``N``.
-            ncts_err: 1-sigma uncertainty on ``ncts``; same length as ``ncts``.
+            ncts: Per-bin net counts matching bin count ``N``. ``NaN``
+                entries mark bins with no valid observation.
+            ncts_err: 1-sigma uncertainty on ``ncts``; same length as
+                ``ncts``. ``NaN`` entries mark bins with no valid
+                observation.
             bins: Bin edges (length ``N + 1``).
             exp: Per-bin exposure times; defaults to bin widths when
                 ``None``.
@@ -1242,8 +1368,8 @@ class ggSignal:
                 exposure exceeds its bin width.
         """
 
-        self.ncts = np.array(ncts)
-        self.ncts_err = np.array(ncts_err)
+        self.ncts = np.asarray(ncts, dtype=float)
+        self.ncts_err = np.asarray(ncts_err, dtype=float)
         self.bins = np.array(bins).astype(float)
 
         self.lbins = self.bins[:-1]
@@ -1260,8 +1386,16 @@ class ggSignal:
             raise TypeError('expected exp <= binsize')
 
         self.time = (self.lbins + self.rbins) / 2
-        self.net = self.ncts / self.exp
+        self.net = self.ncts / self.exp  # NaN at gap bins propagates from here
         self.net_err = self.ncts_err / self.exp
+
+        nan_mask = np.isnan(self.ncts) | np.isnan(self.ncts_err)
+        self.gap_int = None
+        if nan_mask.any():
+            raw_nan = [
+                [float(self.bins[i]), float(self.bins[i + 1])] for i in np.where(nan_mask)[0]
+            ]
+            self.gap_int = union(raw_nan)
 
         self.ini_res = {
             'ncts': self.ncts,
@@ -1280,20 +1414,27 @@ class ggSignal:
         """Run ``astropy.stats.bayesian_blocks`` and filter undersized gaps.
 
         Populates :attr:`edges`, :attr:`nblock`, :attr:`re_binsize`, and
-        :attr:`block_res`.
+        :attr:`block_res`. Gap bins (``NaN`` in :attr:`net`/:attr:`net_err`)
+        are excluded before calling ``bayesian_blocks``, and their
+        boundaries from :attr:`gap_int` are fed in as protected edges so
+        a single block never straddles a missing-data region.
 
         Args:
             p0: False-alarm probability passed to ``bayesian_blocks``.
         """
 
-        edges = bayesian_blocks(self.time, self.net, self.net_err, fitness='measures', p0=p0)
+        pos = np.where(~(np.isnan(self.net) | np.isnan(self.net_err)))[0]
+        edges = bayesian_blocks(
+            self.time[pos], self.net[pos], self.net_err[pos], fitness='measures', p0=p0
+        )
 
         lowest = self.time[0] - self.binsize[0] / 2
         highest = self.time[-1] + self.binsize[-1] / 2
         edges = np.clip(edges, lowest, highest)
         edges = np.unique(np.concatenate([[lowest], edges, [highest]]))
 
-        self.edges = filter_block_edges(edges, np.min(self.binsize) / 1.8)
+        gap_eps = np.unique([e for pair in self.gap_int for e in pair]) if self.gap_int else None
+        self.edges = filter_block_edges(edges, np.min(self.binsize) / 1.8, protected=gap_eps)
         self.nblock = len(self.edges) - 1
         self.re_binsize = self.edges[1:] - self.edges[:-1]
 
@@ -1334,14 +1475,21 @@ class ggSignal:
             're_ncts_err': self.re_ncts_err,
         }
 
-    def sorting(self, sigma=3):
+    def sorting(self, sigma=3, mp=True):
         """Classify raw bins and blocks into signal/background/bad by SNR.
 
         Runs :meth:`calsnr` first when SNR results are missing. Populates
-        ``*_idx``/``*_int`` attributes plus :attr:`sort_res`.
+        ``*_idx``/``*_int`` attributes plus :attr:`sort_res`. Also walks
+        the per-block SNR to detect contiguous pulse intervals (see
+        :func:`~.signal_utils.detect_pulses_by_snr`), populating
+        :attr:`pstart`, :attr:`pstop`, :attr:`pulse`, and
+        ``sort_res['pulse']``.
 
         Args:
             sigma: Detection threshold in units of SNR.
+            mp: When ``True``, keep multiple separate pulse intervals.
+                When ``False``, merge all intervals into one and emit a
+                warning if more than one interval is found.
         """
 
         if self.snr_res is None:
@@ -1367,24 +1515,30 @@ class ggSignal:
         self.re_bad_index = indices_in_intervals(self.lbins, self.rbins, self.re_bad_int)
         self.re_sig_index = indices_in_intervals(self.lbins, self.rbins, self.re_sig_int)
 
+        self.pstart, self.pstop = detect_pulses_by_snr(self.re_snr, self.edges, sigma, mp=mp)
+        self.pulse = [[p1, p2] for p1, p2 in zip(self.pstart, self.pstop, strict=False)]
+
         self.sort_res = {
             'sigma': self.sigma,
             're_bkg': (self.re_bkg_int, self.re_bkg_idx),
             're_sig': (self.re_sig_int, self.re_sig_idx, self.re_sig_index),
             're_bad': (self.re_bad_int, self.re_bad_idx, self.re_bad_index),
+            'pulse': self.pulse,
         }
 
-    def loop(self, p0=0.05, sigma=3):
+    def loop(self, p0=0.05, sigma=3, mp=True):
         """Run :meth:`bblock`, :meth:`calsnr`, and :meth:`sorting` in order.
 
         Args:
             p0: False-alarm probability for Bayesian blocks.
             sigma: Detection threshold for bin classification.
+            mp: Forwarded to :meth:`sorting`'s pulse-interval detection;
+                see there for details.
         """
 
         self.bblock(p0)
         self.calsnr()
-        self.sorting(sigma)
+        self.sorting(sigma, mp=mp)
 
     def save(self, savepath):
         """Dump stage results as JSON and write a two-panel diagnostic PDF.
@@ -1412,6 +1566,8 @@ class ggSignal:
         re_net = self.re_ncts / self.re_binsize
         with plt_rc_context():
             fig = SignalPlotter()
+            if self.gap_int:
+                fig.set_gaps(self.gap_int, self.bins)
             fig.plot_curve(self.time, self.net, self.net)
             fig.plot_block(self.edges, re_net, re_net)
             fig.plot_snr(self.edges, self.re_snr, self.sigma)

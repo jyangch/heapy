@@ -19,7 +19,6 @@ import os
 from matplotlib import rcParams
 import matplotlib.pyplot as plt
 import numpy as np
-from scipy.fft import irfft, next_fast_len, rfft
 from scipy.interpolate import UnivariateSpline
 from scipy.linalg import cho_solve
 from scipy.optimize import curve_fit, minimize_scalar
@@ -27,6 +26,13 @@ from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import RBF, WhiteKernel
 
 from ..util.tools import format_message, json_dump
+from .temp_utils import (
+    box_smooth,
+    box_smooth_batch,
+    calculate_ccf_batch,
+    generate_mc_sample,
+    validate_input,
+)
 
 
 class Lag:
@@ -58,9 +64,7 @@ class Lag:
         ybcts_err=None,
         xtype='pg',
         ytype='pg',
-        nmc=1000,
         M=1,
-        random_seed=450001,
     ):
         """Initialize the Lag estimator with two light curves.
 
@@ -89,14 +93,9 @@ class Lag:
                 Gaussian background).
             ytype: Noise model for the ``y`` channel; same options as
                 ``xtype``.
-            nmc: Number of Monte Carlo realisations used for uncertainty
-                estimation; must be at least 1.
             M: Box-smoothing factor; the effective analysis bin width is
                 :math:`M \\times dt`.  ``M = 1`` gives the classic CCF;
                 ``M > 1`` enables MCCF.
-            random_seed: Seed for the per-instance RNG used by
-                :meth:`_mc_sample`. Default ensures reproducibility
-                across runs; pass ``None`` for OS entropy.
 
         Raises:
             ValueError: If ``xcts`` or ``ycts`` is not one-dimensional,
@@ -124,21 +123,19 @@ class Lag:
         if self.M < 1:
             raise ValueError('M must be a positive integer')
 
-        self.nmc = int(nmc)
-        if self.nmc < 1:
-            raise ValueError('nmc must be at least 1')
-
-        self._rng = np.random.default_rng(random_seed)
-
         self.xtype = xtype
         self.ytype = ytype
 
-        self.xcts_err, self.xbcts, self.xbcts_err = self._validate(
+        self.xcts_err, self.xbcts, self.xbcts_err = validate_input(
             xtype, xcts, xcts_err, xbcts, xbcts_err, 'x'
         )
-        self.ycts_err, self.ybcts, self.ybcts_err = self._validate(
+        self.ycts_err, self.ybcts, self.ybcts_err = validate_input(
             ytype, ycts, ycts_err, ybcts, ybcts_err, 'y'
         )
+
+        self.xncts = self.xcts - self.xbcts
+        self.yncts = self.ycts - self.ybcts
+        self.nsample = len(self.xcts)
 
         self.model_funcs = {
             'gaussian': Lag.gaussian,
@@ -157,55 +154,6 @@ class Lag:
         """
 
         return self.M * self.dt
-
-    @staticmethod
-    def _validate(dtype, cts, cts_err, bcts, bcts_err, label):
-
-        if dtype == 'pg':
-            cts_err = np.sqrt(cts) if cts_err is None else cts_err
-            if bcts is None:
-                raise ValueError(f'unknown {label}bcts')
-            if bcts_err is None:
-                raise ValueError(f'unknown {label}bcts_err')
-
-        elif dtype == 'pp':
-            cts_err = np.sqrt(cts) if cts_err is None else cts_err
-            if bcts is None:
-                raise ValueError(f'unknown {label}bcts')
-            bcts_err = np.sqrt(bcts) if bcts_err is None else bcts_err
-
-        elif dtype == 'gg':
-            if cts_err is None:
-                raise ValueError(f'unknown {label}cts_err')
-            bcts = np.zeros_like(cts, dtype=float) if bcts is None else bcts
-            bcts_err = np.zeros_like(cts, dtype=float) if bcts_err is None else bcts_err
-
-        else:
-            raise ValueError(f'unknown {label}type')
-
-        return cts_err, bcts, bcts_err
-
-    @staticmethod
-    def _box_smooth(arr, M):
-
-        if M == 1:
-            return np.asarray(arr, dtype=float).copy()
-
-        return np.convolve(arr, np.ones(M), mode='valid')
-
-    @staticmethod
-    def _box_smooth_batch(arr2d, M):
-
-        if M == 1:
-            return np.asarray(arr2d, dtype=float).copy()
-
-        arr2d = np.asarray(arr2d, dtype=float)
-
-        cumsum = np.concatenate(
-            [np.zeros((arr2d.shape[0], 1), dtype=arr2d.dtype), np.cumsum(arr2d, axis=1)], axis=1
-        )
-
-        return cumsum[:, M:] - cumsum[:, :-M]
 
     @staticmethod
     def gaussian(x, cons, amp, mu, sigma):
@@ -315,55 +263,51 @@ class Lag:
 
         return cons + amp * (eta * lorentzian_part + (1 - eta) * gaussian_part)
 
-    def _mc_sample(self, dtype, cts, cts_err, bcts, bcts_err):
+    def _mc_simulation(self, nmc, random_seed=450001):
+        """Generate Monte Carlo realisations of the net count light curve.
 
-        size = (self.nmc, self.nsample)
+        The sampling model is selected by ``self.xtype`` and ``self.ytype``:
 
-        if dtype == 'pg':
-            src = self._rng.poisson(lam=cts, size=size)
-            bkg = self._rng.normal(loc=bcts, scale=bcts_err, size=size)
+        - ``'pg'``: Poisson source counts (``xcts``) + Gaussian background
+          (``xbcts``, ``xbcts_err``).
+        - ``'pp'``: independent Poisson source (``xcts``) and background
+          (``xbcts``) counts.
+        - ``'gg'``: Gaussian source and background counts.
 
-        elif dtype == 'pp':
-            src = self._rng.poisson(lam=cts, size=size)
-            bkg = self._rng.poisson(lam=bcts, size=size)
+        Populates ``self.mc_xncts`` and ``self.mc_yncts`` with the observed
+        net-count data in row 0.
 
-        elif dtype == 'gg':
-            src = self._rng.normal(loc=cts, scale=cts_err, size=size)
-            bkg = self._rng.normal(loc=bcts, scale=bcts_err, size=size)
+        Args:
+            nmc: Number of Monte Carlo realisations to generate.
+            random_seed: Seed for the local RNG used to draw samples.
+                Default ensures reproducibility across runs; pass
+                ``None`` for OS entropy.
+        """
 
-        else:
-            raise TypeError(f'invalid dtype: {dtype}')
+        self.nmc = int(nmc)
+        rng = np.random.default_rng(random_seed)
 
-        return src - bkg
-
-    def _mc_simulation(self):
-
-        xncts_sample = self._mc_sample(
-            self.xtype, self.xcts, self.xcts_err, self.xbcts, self.xbcts_err
+        xncts_sample = generate_mc_sample(
+            self.xtype,
+            self.xcts,
+            self.xcts_err,
+            self.xbcts,
+            self.xbcts_err,
+            self.nmc,
+            rng,
         )
         self.mc_xncts = np.vstack([self.xncts, xncts_sample])
 
-        yncts_sample = self._mc_sample(
-            self.ytype, self.ycts, self.ycts_err, self.ybcts, self.ybcts_err
+        yncts_sample = generate_mc_sample(
+            self.ytype,
+            self.ycts,
+            self.ycts_err,
+            self.ybcts,
+            self.ybcts_err,
+            self.nmc,
+            rng,
         )
         self.mc_yncts = np.vstack([self.yncts, yncts_sample])
-
-    def _ccfs_batch(self):
-
-        n = self.nsample
-        nfft = next_fast_len(2 * n - 1)
-
-        X_rev = rfft(self.mc_xncts[:, ::-1].copy(), n=nfft, axis=1)
-        Y = rfft(self.mc_yncts, n=nfft, axis=1)
-        all_ccfs = irfft(Y * X_rev, n=nfft, axis=1)[:, : 2 * n - 1]
-
-        norms = np.sqrt(np.sum(self.mc_xncts**2, axis=1) * np.sum(self.mc_yncts**2, axis=1))
-        zero_mask = norms == 0
-        norms[zero_mask] = 1.0
-        all_ccfs /= norms[:, np.newaxis]
-        all_ccfs[zero_mask] = 0.0
-
-        return all_ccfs
 
     def calculate(
         self,
@@ -417,18 +361,19 @@ class Lag:
         self.xncts = self.xcts - self.xbcts
         self.yncts = self.ycts - self.ybcts
         self.nsample = len(self.xcts)
-        self._mc_simulation()
+
+        self._mc_simulation(1000)
 
         if self.M > 1:
-            self.xncts = self._box_smooth(self.xncts, self.M)
-            self.yncts = self._box_smooth(self.yncts, self.M)
-            self.mc_xncts = self._box_smooth_batch(self.mc_xncts, self.M)
-            self.mc_yncts = self._box_smooth_batch(self.mc_yncts, self.M)
+            self.xncts = box_smooth(self.xncts, self.M)
+            self.yncts = box_smooth(self.yncts, self.M)
+            self.mc_xncts = box_smooth_batch(self.mc_xncts, self.M)
+            self.mc_yncts = box_smooth_batch(self.mc_yncts, self.M)
             self.nsample = len(self.xncts)
 
         self.taus = self.dt * np.arange(-self.nsample + 1, self.nsample, 1)
 
-        self.mc_ccfs = self._ccfs_batch()
+        self.mc_ccfs = calculate_ccf_batch(self.mc_xncts, self.mc_yncts)
         self.ccfs = self.mc_ccfs[0]
 
         pidx = np.argmax(self.ccfs)

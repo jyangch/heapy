@@ -892,7 +892,8 @@ class batPipe:
 
         txx = ggTxx(self.lc_net_cts, self.lc_net_cts_err, self.lc_bins)
         txx.find_pulse(p0=self.gs_p0, sigma=self.gs_sigma, mp=mp)
-        txx.calculate(xx=xx, pstart=pstart, pstop=pstop, lbkg=lbkg, rbkg=rbkg)
+        pulse = [pstart, pstop] if pstart is not None and pstop is not None else None
+        txx.calculate(xx=xx, pulse=pulse, lbkg=lbkg, rbkg=rbkg)
         txx.save(savepath=savepath)
 
     def extract_rebin_curve(

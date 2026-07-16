@@ -1,26 +1,128 @@
 """Shared helpers and plotter for the ``txx`` module's pipeline classes.
 
-Bundles two groups of utilities consumed by :mod:`heapy.temp.txx`:
+Bundles shared utilities consumed by :mod:`heapy.temp.txx` and
+:mod:`heapy.temp.lag`:
 
-- Cumulative-count-fraction math (:func:`accumcts`, :func:`find_txx`)
+- Cumulative-count-fraction math (:func:`calculate_txx`, :func:`find_txx`)
   that derives Txx start/stop times from a pulse's cumulative net
   count curve. Both functions are stateless and reusable outside the
   Txx classes.
+- Monte Carlo sampling, box smoothing, and CCF batch calculation helpers
+  shared by the temporal analysis classes.
 - :class:`TxxPlotter`, a composable two-panel diagnostic figure that
   every ``save()`` method in :mod:`heapy.temp.txx` shares (mirrors the
   :class:`~heapy.auto.signal_utils.SignalPlotter` design).
 """
 
+import operator
+
+from astropy.stats import mad_std, sigma_clip
 import matplotlib.pyplot as plt
 import numpy as np
+from scipy.fft import irfft, next_fast_len, rfft
 from scipy.interpolate import interp1d
 
 from ..auto.signal_utils import indices_in_intervals
 from ..util.data import generate_asymmetric_gaussian
 
 
-def accumcts(time, ccts, pstart, pstop, xx, simple_err=False, random_seed=450001):
-    """Compute cumulative-count-fraction levels and Txx start/stop times.
+def validate_input(dtype, cts, cts_err, bcts, bcts_err, label=''):
+    """Validate input arrays for temporal analysis.
+
+    Args:
+        dtype: Noise model: ``'pg'`` (Poisson source + Gaussian
+            background), ``'pp'`` (Poisson source + Poisson
+            background), or ``'gg'`` (Gaussian net counts, no separate
+            background).
+        cts: Primary count array.
+        cts_err: Primary count error array.
+        bcts: Background count array.
+        bcts_err: Background count error array.
+        label: Label for error messages. Defaults to empty string.
+    Returns:
+        Tuple of (cts_err, bcts, bcts_err) after validation.
+    """
+
+    cts = np.asarray(cts, dtype=float)
+
+    if dtype == 'pg':
+        cts_err = np.sqrt(cts) if cts_err is None else cts_err
+        if bcts is None:
+            raise ValueError(f'unknown {label}bcts')
+        if bcts_err is None:
+            raise ValueError(f'unknown {label}bcts_err')
+
+    elif dtype == 'pp':
+        cts_err = np.sqrt(cts) if cts_err is None else cts_err
+        if bcts is None:
+            raise ValueError(f'unknown {label}bcts')
+        bcts_err = np.sqrt(bcts) if bcts_err is None else bcts_err
+
+    elif dtype == 'gg':
+        if cts_err is None:
+            raise ValueError(f'unknown {label}cts_err')
+        bcts = np.zeros_like(cts, dtype=float) if bcts is None else bcts
+        bcts_err = np.zeros_like(cts, dtype=float) if bcts_err is None else bcts_err
+
+    else:
+        raise ValueError(f'unknown {label}type')
+
+    return (
+        np.asarray(cts_err, dtype=float),
+        np.asarray(bcts, dtype=float),
+        np.asarray(bcts_err, dtype=float),
+    )
+
+
+def generate_mc_sample(dtype, cts, cts_err, bcts, bcts_err, nmc, rng, backscale=1):
+    """Generate Monte Carlo realisations of background-subtracted counts.
+
+    Args:
+        dtype: Noise model: ``'pg'`` (Poisson source + Gaussian
+            background), ``'pp'`` (Poisson source + Poisson background),
+            or ``'gg'`` (Gaussian source + Gaussian background).
+        cts: Source or net-count expectation per bin.
+        cts_err: Source/net-count errors for Gaussian sampling.
+        bcts: Background expectation per bin.
+        bcts_err: Background errors for Gaussian sampling.
+        nmc: Number of Monte Carlo realisations to generate.
+        rng: ``numpy.random.Generator`` used for all random draws.
+        backscale: Multiplicative scale applied to sampled background.
+            Defaults to 1.
+
+    Returns:
+        A ``(nmc, nsample)`` array of net-count realisations.
+
+    Raises:
+        ValueError: If ``dtype`` is not supported.
+    """
+
+    cts = np.asarray(cts, dtype=float)
+    cts_err = np.asarray(cts_err, dtype=float)
+    bcts = np.asarray(bcts, dtype=float)
+    bcts_err = np.asarray(bcts_err, dtype=float)
+    size = (int(nmc), cts.size)
+
+    if dtype == 'pg':
+        src = rng.poisson(lam=np.nan_to_num(cts, nan=0.0), size=size)
+        bkg = rng.normal(loc=bcts, scale=bcts_err, size=size)
+
+    elif dtype == 'pp':
+        src = rng.poisson(lam=np.nan_to_num(cts, nan=0.0), size=size)
+        bkg = rng.poisson(lam=np.nan_to_num(bcts, nan=0.0), size=size)
+
+    elif dtype == 'gg':
+        src = rng.normal(loc=cts, scale=cts_err, size=size)
+        bkg = rng.normal(loc=bcts, scale=bcts_err, size=size)
+
+    else:
+        raise ValueError(f'unknown dtype {dtype!r}, expected pg, pp, or gg')
+
+    return src - bkg * backscale
+
+
+def calculate_txx(time, ccts, pstart, pstop, xx, simple_err=False, random_seed=450001):
+    """Calculate Txx and its uncertainties from a cumulative count curve.
 
     Interpolates the cumulative count curve to 1000-point resolution when
     the native sampling is too coarse, calculates the background CSF levels
@@ -190,6 +292,92 @@ def find_txx(time, ccts, csf1, csf2):
 
     txx = txx2 - txx1
     return txx, txx1, txx2
+
+
+def get_mc_errors(mc_values):
+    """Get per-pulse 1-sigma error bars from Monte Carlo realisations.
+
+    Args:
+        mc_values: Monte Carlo realisations.
+    Returns:
+        List of [lower error, upper error] for each pulse.
+    """
+
+    errors = []
+    for pi in range(mc_values.shape[1]):
+        mask = sigma_clip(mc_values[1:, pi], sigma=5, maxiters=5, stdfunc=mad_std).mask
+        not_mask = list(map(operator.not_, mask))
+        filtered = mc_values[1:, pi][not_mask]
+
+        lo, hi = np.percentile(filtered, [16, 84])
+        err = np.diff([lo, mc_values[0, pi], hi])
+        errors.append([err[0], err[1]])
+
+    return errors
+
+
+def box_smooth(arr, M):
+    """Box-smooth an array.
+
+    Args:
+        arr: Array to smooth.
+        M: Box width.
+    Returns:
+        Smoothed array.
+    """
+
+    if M == 1:
+        return np.asarray(arr, dtype=float).copy()
+
+    return np.convolve(arr, np.ones(M), mode='valid')
+
+
+def box_smooth_batch(arr2d, M):
+    """Box-smooth a 2D array.
+
+    Args:
+        arr2d: 2D array to smooth.
+        M: Box width.
+    Returns:
+        Smoothed 2D array.
+    """
+
+    if M == 1:
+        return np.asarray(arr2d, dtype=float).copy()
+
+    arr2d = np.asarray(arr2d, dtype=float)
+
+    cumsum = np.concatenate(
+        [np.zeros((arr2d.shape[0], 1), dtype=arr2d.dtype), np.cumsum(arr2d, axis=1)], axis=1
+    )
+
+    return cumsum[:, M:] - cumsum[:, :-M]
+
+
+def calculate_ccf_batch(mc_xncts, mc_yncts):
+    """Calculate the cross-correlation function for a batch of Monte Carlo realisations.
+
+    Args:
+        mc_xncts: Monte Carlo realisations of the x-axis data.
+        mc_yncts: Monte Carlo realisations of the y-axis data.
+    Returns:
+        Cross-correlation function for the batch.
+    """
+
+    n = mc_xncts.shape[1]
+    nfft = next_fast_len(2 * n - 1)
+
+    X_rev = rfft(mc_xncts[:, ::-1].copy(), n=nfft, axis=1)
+    Y = rfft(mc_yncts, n=nfft, axis=1)
+    all_ccfs = irfft(Y * X_rev, n=nfft, axis=1)[:, : 2 * n - 1]
+
+    norms = np.sqrt(np.sum(mc_xncts**2, axis=1) * np.sum(mc_yncts**2, axis=1))
+    zero_mask = norms == 0
+    norms[zero_mask] = 1.0
+    all_ccfs /= norms[:, np.newaxis]
+    all_ccfs[zero_mask] = 0.0
+
+    return all_ccfs
 
 
 class TxxPlotter:
