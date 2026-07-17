@@ -1,12 +1,21 @@
-"""Shared helpers and plotter for the ``txx`` module's pipeline classes.
+"""Shared helpers and plotter for the temporal analysis pipeline classes.
 
-Bundles shared utilities consumed by :mod:`heapy.temp.txx` and
-:mod:`heapy.temp.lag`:
+Bundles shared utilities consumed by :mod:`heapy.temp.txx`,
+:mod:`heapy.temp.lag`, and :mod:`heapy.temp.mvt`:
 
 - Cumulative-count-fraction math (:func:`calculate_txx`, :func:`find_txx`)
   that derives Txx start/stop times from a pulse's cumulative net
   count curve. Both functions are stateless and reusable outside the
   Txx classes.
+- The Haar minimum-variability-timescale core (:func:`haar_denoise`,
+  :func:`calculate_haar_power_spectrum`, :func:`calculate_haar_mvt`),
+  consumed by :mod:`heapy.temp.mvt`. This is a faithful Python-3 port of
+  the public code at https://github.com/nrbutler/mvt, shared by Nat
+  Butler for reproducing Golkhou & Butler (2014) and Golkhou, Butler &
+  Littlejohns (2015); do not edit these three functions' numerics
+  without re-diffing against the upstream source.
+- :func:`uniform_dt_from_bins`, a bin-edge validation helper shared by
+  every Signal-to-MVT bridging path.
 - Monte Carlo sampling, box smoothing, and CCF batch calculation helpers
   shared by the temporal analysis classes.
 - :class:`TxxPlotter`, a composable two-panel diagnostic figure that
@@ -21,6 +30,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from scipy.fft import irfft, next_fast_len, rfft
 from scipy.interpolate import interp1d
+from scipy.optimize import minimize_scalar
 
 from ..auto.signal_utils import indices_in_intervals
 from ..util.data import generate_asymmetric_gaussian
@@ -378,6 +388,571 @@ def calculate_ccf_batch(mc_xncts, mc_yncts):
     all_ccfs[zero_mask] = 0.0
 
     return all_ccfs
+
+
+def uniform_dt_from_bins(bins):
+    """Derive a scalar bin width from bin edges, requiring uniform spacing.
+
+    Args:
+        bins: 1-D array of bin edges (length >= 2).
+
+    Returns:
+        The median bin width as a float.
+
+    Raises:
+        ValueError: If ``bins`` is not a one-dimensional array of at
+            least two edges, or if the bin widths are not uniform to
+            within a relative tolerance of ``1e-7``.
+    """
+
+    bins = np.asarray(bins, dtype=float)
+    if bins.ndim != 1 or bins.size < 2:
+        raise ValueError('bins must be a one-dimensional edge array')
+
+    widths = np.diff(bins)
+    dt = float(np.median(widths))
+    if not np.allclose(widths, dt, rtol=1e-7, atol=max(1e-12, abs(dt) * 1e-9)):
+        raise ValueError('the Haar MVT core requires uniform bins')
+
+    return dt
+
+
+def haar_denoise(data, err=None, thresh_fac=1.0, estimate_noise=False, soft=False):
+    """Denoise a 1-D series via non-decimated Haar wavelet hard-thresholding.
+
+    Port of ``nrbutler/mvt`` ``haar_denoise.py``: extends the series by
+    mirror reflection to the next power-of-two length, computes the
+    non-decimated (a-trous style) Haar wavelet coefficients at every
+    dyadic scale via cumulative sums, hard-thresholds each coefficient
+    against a noise level ``thresh_fac * noise`` (scaled per-coefficient
+    by the propagated variance when ``err`` is given), and reconstructs
+    by inverting the transform. :func:`calculate_haar_mvt` calls this
+    twice to build a smoothed, non-negative weight curve that downweights
+    low-signal bins in :func:`calculate_haar_power_spectrum`.
+
+    Args:
+        data: 1-D series to denoise.
+        err: Optional 1-sigma error per point. When given, thresholding
+            uses the propagated coefficient variance instead of a flat
+            noise level, and ``estimate_noise`` normalizes by it too.
+        thresh_fac: Threshold multiplier; larger values denoise more
+            aggressively.
+        estimate_noise: When ``True``, estimate the noise level from the
+            median absolute first difference of ``data`` (Donoho-Johnstone
+            style) instead of treating ``thresh_fac`` as an absolute
+            level.
+        soft: When ``True``, soft-threshold (shrink toward zero) surviving
+            coefficients instead of leaving them untouched.
+
+    Returns:
+        Denoised series, same length as ``data``.
+
+    Raises:
+        ValueError: If ``data`` is not one-dimensional, or ``err`` does
+            not match ``data``'s shape.
+    """
+
+    data = np.asarray(data, dtype='float64')
+    if data.ndim != 1:
+        raise ValueError('data must be one-dimensional')
+
+    cx = 1.0 * data
+    ln0 = len(data)
+    if ln0 == 0:
+        return cx
+
+    use_err = err is not None and len(err) != 0
+    if use_err:
+        err = np.asarray(err, dtype='float64')
+        if err.shape != data.shape:
+            raise ValueError('err must match data shape')
+        vx = err**2
+
+    n = int(np.ceil(np.log2(ln0)))
+    ln = 2**n
+
+    l1 = 0
+    if ln > ln0:
+        l1 = int(0.5 * (ln - ln0))
+        l2 = ln - ln0 - l1
+        cx = np.hstack((cx[:l1][::-1], cx, cx[-l2:][::-1]))
+        if use_err:
+            vx = np.hstack((vx[:l1][::-1], vx, vx[-l2:][::-1]))
+
+    noise = 1.0
+    if estimate_noise:
+        if use_err:
+            err2 = (1.0 / np.sqrt(2.0)) * np.sqrt(err[1:] ** 2 + err[:-1] ** 2)
+            noise = 1.05 * np.median(np.abs(data[1:] - data[:-1]) / err2)
+        else:
+            noise = 1.05 * np.median(np.abs(data[1:] - data[:-1]))
+
+    x0 = cx.mean()
+    cx -= x0
+    xm = np.empty(ln, dtype='float64')
+    x_recon = np.zeros(ln, dtype='float64') + x0
+    cx[:] = cx.cumsum()
+    if use_err:
+        vx[:] = vx.cumsum()
+        vxm = np.empty(ln, dtype='float64')
+
+    tlt = 1.386 * (thresh_fac * noise) ** 2
+    for m in range(n):
+        scl = 2 ** (n - m - 1)
+
+        xm[: -2 * scl] = 2 * cx[scl:-scl] - cx[: -2 * scl] - cx[2 * scl :]
+        xm[-2 * scl : -scl] = 2 * cx[-scl:] - cx[-2 * scl : -scl] - cx[:scl] - cx[-1]
+        xm[-scl:] = 2 * cx[:scl] - cx[-scl:] - cx[scl : 2 * scl] + cx[-1]
+
+        if use_err:
+            vxm[: -2 * scl] = vx[2 * scl :] - vx[: -2 * scl]
+            vxm[-2 * scl :] = vx[: 2 * scl] + vx[-1] - vx[-2 * scl :]
+        else:
+            vxm = 2 * scl
+
+        h = xm * xm <= tlt * m * vxm
+        xm[h] = 0
+        if soft:
+            mh = ~h
+            if use_err:
+                xm[mh] *= np.sqrt(1.0 - tlt * m * vxm[mh] / xm[mh] ** 2)
+            else:
+                xm[mh] *= np.sqrt(1.0 - tlt * m * vxm / xm[mh] ** 2)
+
+        xm[:] = xm[::-1].cumsum()
+        x_recon[2 * scl :] += (2 * xm[scl:-scl] - xm[: -2 * scl] - xm[2 * scl :])[::-1] / (
+            2 * scl
+        ) ** 2
+        x_recon[scl : 2 * scl] += (2 * xm[-scl:] - xm[-2 * scl : -scl] - xm[:scl] - xm[-1])[
+            ::-1
+        ] / (2 * scl) ** 2
+        x_recon[:scl] += (2 * xm[:scl] - xm[-scl:] - xm[scl : 2 * scl] + xm[-1])[::-1] / (
+            2 * scl
+        ) ** 2
+
+    return x_recon[l1 : l1 + ln0]
+
+
+def calculate_haar_power_spectrum(data, error, weight, dt=1.0, osamp=32.0, nrepl=1, bfac=4.0):
+    """Compute the weighted, noise-corrected Haar wavelet power spectrum.
+
+    Port of ``nrbutler/mvt`` ``haar_nondec_regular_err_wt.py``. For a
+    regularly-sampled series, evaluates the non-decimated (sliding)
+    Haar wavelet coefficient at each of a set of dyadic-plus-oversampled
+    timescales via cumulative sums, weights each coefficient by
+    ``weight``, and separately propagates the coefficient's noise
+    variance from ``error``. Adjacent scales are then averaged down onto
+    a coarser, ``bfac``-controlled output grid. This per-scale structure
+    function is what :func:`calculate_haar_mvt` searches for the
+    signal-to-noise-power crossing that defines the MVT.
+
+    Args:
+        data: 1-D regularly-sampled series (e.g. background-subtracted
+            count rate).
+        error: 1-sigma error per point; same shape as ``data``.
+        weight: Non-negative per-point weight (typically a denoised copy
+            of ``data`` from :func:`haar_denoise`) used to downweight
+            low-signal bins in the per-scale average.
+        dt: Bin width in seconds; scales the returned timescale bounds.
+        osamp: Oversampling factor for the internal (pre-averaging) scale
+            grid; must be ``>= bfac``.
+        nrepl: Number of times to replicate the series end-to-end before
+            transforming (variance-reduction trick for short series).
+        bfac: Bin factor controlling the density of the output timescale
+            grid relative to the dyadic scales.
+
+    Returns:
+        A 5-tuple ``(dt_lo, dt_hi, power, noise_power, power_err)``, each
+        a 1-D array over output timescale bins: the bin's lower and
+        upper edge in seconds, the weighted wavelet power, its
+        noise-only counterpart (the zero-signal expectation from
+        ``error``), and the propagated 1-sigma error on ``power``.
+
+    Raises:
+        ValueError: If ``data``, ``error``, and ``weight`` do not share
+            a matching one-dimensional shape.
+    """
+
+    data = np.asarray(data, dtype='float64')
+    error = np.asarray(error, dtype='float64')
+    weight = np.asarray(weight, dtype='float64')
+    if data.shape != error.shape or data.shape != weight.shape:
+        raise ValueError('data, error, and weight must have matching shapes')
+    if data.ndim != 1:
+        raise ValueError('data must be one-dimensional')
+
+    cx = np.hstack((0, np.cumsum(data)))
+    wt = np.hstack((0, np.cumsum(weight)))
+    vx = np.hstack((0, np.cumsum(error**2)))
+
+    for _ in range(nrepl - 1):
+        cx = np.hstack((cx, cx[1:-1] + cx[-1]))
+        wt = np.hstack((wt, wt[1:-1] + wt[-1]))
+        vx = np.hstack((vx, vx[1:-1] + vx[-1]))
+
+    nmax = len(cx) - 1
+    lscl_max = int(np.ceil(np.log2(nmax)))
+
+    if bfac <= 0:
+        bfac = 1.0
+    if osamp < bfac:
+        osamp = bfac
+
+    if bfac < osamp:
+        scl_out = 2 ** (np.arange(lscl_max, dtype='int32'))
+        scl2 = 2.0 * np.round(2 ** (np.arange(lscl_max * bfac, dtype='float64') / bfac) / 2.0)
+        scl_out = np.hstack((scl_out, scl2)).astype('int32')
+        scl_out.sort()
+        scl_out = np.unique(scl_out)
+        scl_out = scl_out[(scl_out > 0) * (2 * scl_out <= nmax)]
+
+    scales = 2 ** (np.arange(lscl_max, dtype='int32'))
+    scl2 = 2.0 * np.round(2 ** (np.arange(lscl_max * osamp, dtype='float64') / osamp) / 2.0)
+    scales = np.hstack((scales, scl2)).astype('int32')
+    scales.sort()
+    scales = np.unique(scales)
+    scales = scales[(scales > 0) * (2 * scales <= nmax)]
+    if bfac >= osamp:
+        scl_out = 1 * scales
+
+    nscales = len(scales)
+    pspec = np.zeros(nscales, dtype='float64')
+    pspec0 = np.zeros(nscales, dtype='float64')
+    vpspec = np.zeros(nscales, dtype='float64')
+
+    with np.errstate(divide='ignore', invalid='ignore'):
+        for k in range(nscales):
+            scl = scales[k]
+            scl2 = scl**2
+            cfac = nmax / (nmax - 2.0 * scl + 1)
+
+            wav2 = (
+                cx[2 * scl : nmax + 1] - 2 * cx[scl : nmax - scl + 1] + cx[: nmax - 2 * scl + 1]
+            ) ** 2
+            vwav = vx[2 * scl : nmax + 1] - vx[: nmax - 2 * scl + 1]
+
+            wt0 = (wt[2 * scl : nmax + 1] - wt[: nmax - 2 * scl + 1]) / (2.0 * scl)
+            wts = wt0.mean()
+
+            pspec[k] = (wav2 * wt0).sum() * cfac / scl2 / wts
+            pspec0[k] = (vwav * wt0).sum() * cfac / scl2 / wts
+            vpspec[k] = (
+                (((vwav * wt0) ** 2).sum() / scl2 / wts**2 + 0.5 * pspec0[k]) * cfac**2 / scl
+            )
+
+    scl1, scl2 = scl_out[:-1], scl_out[1:]
+    nscales1 = len(scl1)
+    psp = np.zeros(nscales1, dtype='float64')
+    psp0 = np.zeros(nscales1, dtype='float64')
+    dpsp = np.zeros(nscales1, dtype='float64')
+
+    with np.errstate(invalid='ignore'):
+        for i in range(nscales1):
+            h = (scales >= scl1[i]) * (scales < scl2[i])
+            nh = h.sum()
+            if nh > 0:
+                scl1[i], scl2[i] = scales[h].min(), scales[h].max()
+                psp[i] = pspec[h].sum() / nh
+                psp0[i] = pspec0[h].sum() / nh
+                dpsp[i] = np.sqrt(vpspec[h].sum() * (nrepl + 1.0) / nh)
+
+    return dt * scl1, dt * scl2, psp, psp0, dpsp
+
+
+def calculate_haar_mvt(
+    rate,
+    rate_err,
+    dt,
+    *,
+    tau_bg_max=0.01,
+    nrepl=2,
+    bin_fac=4,
+    afactor=1.0,
+    snr=3.0,
+    verbose=False,
+    weight=True,
+    drop_nonfinite=False,
+    file='mvt',
+):
+    """Compute the Haar minimum variability timescale (MVT) of a light curve.
+
+    Port of ``nrbutler/mvt`` ``haar_power_mod.py``: builds the
+    signal-weighted Haar power spectrum via
+    :func:`calculate_haar_power_spectrum`, estimates and subtracts the
+    Poisson/Gaussian noise floor (``pspec0``, rescaled by ``afactor`` or,
+    when ``afactor < 0``, by a data-driven factor measured below
+    ``tau_bg_max``), locates the shortest significant timescale (``snr``
+    sigma above the noise floor), then fits a broken power law (flat
+    noise branch + rising signal branch, slope free) to the log-log
+    structure function to locate the break timescale ``tmin`` -- the
+    MVT. When too few scales are significant, returns a ``snr``-sigma
+    upper limit instead of a measurement.
+
+    Args:
+        rate, rate_err: Uniformly sampled, background-subtracted light
+            curve and its 1-sigma errors.
+        dt: Bin width in seconds.
+        tau_bg_max: Largest timescale used to estimate the zero level
+            when ``afactor < 0``.
+        nrepl, bin_fac, afactor, snr, weight: Parameters preserved from
+            ``nrbutler/mvt``; see the upstream ``haar_power_mod``
+            docstring for their exact roles.
+        verbose: Print a one-line summary (``a factor``, or
+            ``T_snr``/``T_beta``/``T_min``) as the original code does.
+        drop_nonfinite: When ``True``, also drop scales where
+            ``power``/``noise_power``/``power_err`` are non-finite before
+            searching for the break (off by default, matching upstream).
+        file: Label used in the ``verbose`` print statements.
+
+    Returns:
+        A 5-tuple ``(mvt, mvt_err_lo, mvt_err_hi, is_upper_limit, diag)``:
+        the MVT in seconds, its lower/upper 1-sigma errors (both ``0``
+        when ``is_upper_limit`` is ``True``), whether the result is a
+        ``snr``-sigma upper limit rather than a measurement, and a dict
+        of diagnostic arrays/scalars (the full scaleogram, the fitted
+        break parameters, and the input settings) suitable for plotting
+        or JSON serialisation.
+
+    Raises:
+        ValueError: If ``rate``/``rate_err`` are not one-dimensional,
+            differ in shape, have fewer than four bins, or if ``dt`` is
+            not a positive finite scalar.
+    """
+
+    rate = np.asarray(rate, dtype='float64')
+    rate_err = np.asarray(rate_err, dtype='float64')
+    if rate.ndim != 1 or rate_err.ndim != 1:
+        raise ValueError('rate and rate_err must be one-dimensional')
+    if rate.shape != rate_err.shape:
+        raise ValueError('rate and rate_err must have matching shapes')
+    if rate.size < 4:
+        raise ValueError('at least four bins are required')
+    dt = float(dt)
+    if not np.isfinite(dt) or dt <= 0:
+        raise ValueError('dt must be a positive finite scalar')
+
+    if weight:
+        wt = haar_denoise(rate, rate_err)
+        wt = haar_denoise(wt, rate_err).clip(0.0)
+    else:
+        wt = np.ones(len(rate), dtype='float64')
+
+    dta, dta1, pspec, pspec0, dpspec = calculate_haar_power_spectrum(
+        rate,
+        rate_err,
+        wt,
+        dt=dt,
+        nrepl=nrepl,
+        bfac=bin_fac,
+        osamp=bin_fac * 8,
+    )
+
+    g = pspec0 > 0
+    if drop_nonfinite:
+        g &= np.isfinite(pspec) & np.isfinite(pspec0) & np.isfinite(dpspec)
+    dta = dta[g]
+    dta1 = dta1[g]
+    pspec = pspec[g]
+    pspec0 = pspec0[g]
+    dpspec = dpspec[g]
+    tau = 0.5 * (dta + dta1)
+    if tau.size == 0:
+        return (
+            dt,
+            0.0,
+            0.0,
+            True,
+            {'mode': 'nrbutler2025', 'reason': 'no-positive-noise-power'},
+        )
+
+    with np.errstate(divide='ignore', invalid='ignore'):
+        tmax = tau[(pspec / pspec0).argmax()]
+
+    tsnr, tbeta, tmin, dtmin, slope, sigma_tsnr, sigma_tmin = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+    otype = 'limit'
+
+    g = tau < tau_bg_max
+    if g.sum() < 2 or afactor > 0:
+        afactor = abs(afactor)
+        pspec0 *= afactor
+        dpspec *= afactor
+    else:
+        a = np.median(pspec[g] / pspec0[g])
+        pspec0 *= a
+        dpspec *= a
+        if verbose:
+            print(f' {file} a factor: {a:f}')
+
+    pspec_raw = pspec.copy()
+    pspec0_raw = pspec0.copy()
+    dpspec_raw = dpspec.copy()
+    with np.errstate(invalid='ignore'):
+        pspec = pspec - pspec0
+
+    g = pspec < snr * dpspec
+    g2 = ~g
+    g *= tau < tmax
+    wi1 = np.where(g)[0]
+    i1 = wi1[-1] if len(wi1) > 0 else 0
+    g[:i1] = True
+    g2[:i1] = False
+    k = 0
+    while i1 > 0 and pspec[i1] > dpspec[i1] and k < bin_fac:
+        g[i1] = False
+        g2[i1] = True
+        i1 -= 1
+        k += 1
+
+    reason = None
+    if g2.sum() < 2:
+        reason = 'not-enough-significant-data'
+        if verbose:
+            print(f'{file} Not enough significant data!')
+    else:
+        pspm = pspec[g2].max()
+        pspec /= pspm
+        pspec0 /= pspm
+        dpspec /= pspm
+
+        tsnr = tau[i1 + 1].max()
+
+        y = pspec[g2] - pspec0[g2]
+        h = np.where(y > 0)[0]
+        fix_beta = False
+        if len(h) > 2:
+            ib1 = h[0]
+            ib0 = ib1 - 1
+            if ib0 >= 0:
+                tbeta = tau[g2][ib0]
+                if y[ib1] != y[ib0]:
+                    tbeta -= y[ib0] * (tau[g2][ib1] - tau[g2][ib0]) / (y[ib1] - y[ib0])
+            else:
+                fix_beta = True
+        else:
+            tbeta = tau.max()
+
+        xx = np.log(tau[g2])
+        yy = np.log(pspec[g2]) - 2.0 * xx
+        dyy = dpspec[g2] / pspec[g2]
+        vmu = 1.0 / (1.0 / dyy**2).cumsum()
+        mu = (yy / dyy**2).cumsum() * vmu
+
+        thresh = (0.5 * np.sqrt(dyy[1:] ** 2 + bin_fac * vmu[:-1])).clip(0.1 * np.log(2.0))
+        wib1 = np.where(mu[:-1] - yy[1:] > thresh)[0]
+        ib1 = len(mu) - 2
+        if len(wib1) > 0:
+            ib1 = wib1[0]
+        ib0 = ib1 - 1
+        if ib0 < 0:
+            ib0 = 0
+        mu0 = (mu[ib0] + mu[ib1]) / 2.0
+
+        x = xx[: ib1 + bin_fac + 1]
+        y = yy[: ib1 + bin_fac + 1]
+        dy = dyy[: ib1 + bin_fac + 1]
+        dy2 = dy * dy
+
+        b1 = (y / dy2).sum()
+        m11 = (1.0 / dy2).sum()
+        par = np.array([mu0, 0.5, 0.0])
+
+        def break_fun(xb):
+            if np.isnan(xb):
+                xb = x.min()
+            xl = x < xb
+            xu = ~xl
+            m12 = ((x[xu] - xb) / dy2[xu]).sum()
+            m22 = (((x[xu] - xb) ** 2) / dy2[xu]).sum()
+            det2 = m11 * m22 - m12**2
+            b2 = (y[xu] * (x[xu] - xb) / dy2[xu]).sum()
+
+            if det2 > 0:
+                par[0] = (m22 * b1 - m12 * b2) / det2
+                par[1] = (m11 * b2 - m12 * b1) / det2
+
+            if xl.sum() > 0:
+                chi0 = ((y[xl] - par[0]) ** 2 / dy2[xl]).sum()
+                m01 = -par[1] * (1.0 / dy2[xu]).sum()
+                m00 = -par[1] * m01
+                m02 = ((y[xu] - par[0]) / dy2[xu]).sum() - 2.0 * par[1] * m12
+                par[2] = 1.0 / np.sqrt(
+                    m00 + (m01 * (m02 * m12 - m01 * m22) + m02 * (m01 * m12 - m02 * m11)) / det2
+                )
+            else:
+                chi0 = 0.0
+
+            return chi0 + ((y[xu] - par[1] * (x[xu] - xb) - par[0]) ** 2 / dy2[xu]).sum()
+
+        res = minimize_scalar(break_fun, bounds=(x.min(), x.max() - 1.0e-5), method='bounded')
+        c0, xmin = res['fun'], res['x']
+        dxmin = 1.0 * par[2]
+        if np.isnan(dxmin):
+            dxmin = xmin
+
+        mu0, slope = par[0], 1.0 + 0.5 * par[1]
+        sigma_tsnr, sigma_tmin = np.exp(0.5 * mu0 + x[0]), np.exp(0.5 * mu0 + xmin)
+
+        if xmin >= x[1] and xmin - dxmin > x[0]:
+            otype = 'measurement'
+        else:
+            for _ in range(3):
+                c1 = break_fun(xmin + np.log(1.0 + dxmin))
+                dxmin = max(0.5 * dxmin, min(dxmin / (1.0e-5 + abs(c1 - c0)), 1.5 * dxmin))
+            sigma_tmin *= np.exp(slope * np.log(1.0 + snr * dxmin * np.sqrt(bin_fac)))
+
+        tmin = np.exp(xmin)
+        dtmin = tmin * dxmin * np.sqrt(bin_fac)
+
+        if fix_beta:
+            y = 2 * np.log(tau) + mu0 - np.log(pspec0)
+            h = np.where(y > 0)[0]
+            if len(h) > 2:
+                ib1a = h[0]
+                ib0a = ib1a - 1
+                tbeta = tau[ib0a]
+                if y[ib1a] != y[ib0a]:
+                    tbeta -= y[ib0a] * (tau[ib1a] - tau[ib0a]) / (y[ib1a] - y[ib0a])
+
+        if verbose:
+            print(f' {file} T_snr={tsnr:f} T_beta={tbeta:f} T_min={tmin:f} +/- {dtmin:f}')
+
+        if otype == 'limit':
+            tmin += snr * dtmin
+            dtmin = 0.0
+
+    diag = {
+        'mode': 'nrbutler2025',
+        'tau': tau.tolist(),
+        'dta': dta.tolist(),
+        'dta1': dta1.tolist(),
+        'pspec_raw': pspec_raw.tolist(),
+        'pspec0_raw': pspec0_raw.tolist(),
+        'dpspec_raw': dpspec_raw.tolist(),
+        'pspec': pspec.tolist(),
+        'pspec0': pspec0.tolist(),
+        'dpspec': dpspec.tolist(),
+        'noise_mask': g.tolist(),
+        'signal_mask': g2.tolist(),
+        'tsnr': float(tsnr),
+        'tbeta': float(tbeta),
+        'tmin': float(tmin),
+        'dtmin': float(dtmin),
+        'slope': float(slope),
+        'sigma_tsnr': float(sigma_tsnr),
+        'sigma_tmin': float(sigma_tmin),
+        'otype': otype,
+        'tau_bg_max': float(tau_bg_max),
+        'nrepl': int(nrepl),
+        'bin_fac': int(bin_fac),
+        'afactor': float(afactor),
+        'snr': float(snr),
+        'weight': bool(weight),
+        'drop_nonfinite': bool(drop_nonfinite),
+    }
+    if reason is not None:
+        diag['reason'] = reason
+
+    return float(tmin), float(dtmin), float(dtmin), (otype == 'limit'), diag
 
 
 class TxxPlotter:

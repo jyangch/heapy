@@ -12,6 +12,11 @@ Example:
               xbcts_err=xbkg_err, ybcts_err=ybkg_err)
     lag.calculate(method='gp')
     lag.save('/output/dir')
+
+    # Or built from two already-processed Signal instances (xtype/ytype,
+    # backscale, and the count arrays are inferred from each signal):
+    lag = Lag.from_signals(x_signal, y_signal)
+    lag.calculate(method='gp')
 """
 
 import os
@@ -25,6 +30,7 @@ from scipy.optimize import curve_fit, minimize_scalar
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import RBF, WhiteKernel
 
+from ..auto.signal import ggSignal, pgSignal, ppSignal
 from ..util.tools import format_message, json_dump
 from .temp_utils import (
     box_smooth,
@@ -62,6 +68,8 @@ class Lag:
         ybcts=None,
         xbcts_err=None,
         ybcts_err=None,
+        xbackscale=1,
+        ybackscale=1,
         xtype='pg',
         ytype='pg',
         M=1,
@@ -87,6 +95,10 @@ class Lag:
                 ``xtype`` is ``'pg'``.
             ybcts_err: Background count errors for ``ycts``; required when
                 ``ytype`` is ``'pg'``.
+            xbackscale: Ratio scaling ``xbcts`` into the source region;
+                only meaningful when ``xtype`` is ``'pp'``. Defaults to 1.
+            ybackscale: Ratio scaling ``ybcts`` into the source region;
+                only meaningful when ``ytype`` is ``'pp'``. Defaults to 1.
             xtype: Noise model for the ``x`` channel: ``'pg'`` (Poisson
                 source + Gaussian background), ``'pp'`` (Poisson source +
                 Poisson background), or ``'gg'`` (Gaussian source +
@@ -125,6 +137,8 @@ class Lag:
 
         self.xtype = xtype
         self.ytype = ytype
+        self.xbackscale = xbackscale
+        self.ybackscale = ybackscale
 
         self.xcts_err, self.xbcts, self.xbcts_err = validate_input(
             xtype, xcts, xcts_err, xbcts, xbcts_err, 'x'
@@ -133,8 +147,8 @@ class Lag:
             ytype, ycts, ycts_err, ybcts, ybcts_err, 'y'
         )
 
-        self.xncts = self.xcts - self.xbcts
-        self.yncts = self.ycts - self.ybcts
+        self.xncts = self.xcts - self.xbcts * self.xbackscale
+        self.yncts = self.ycts - self.ybcts * self.ybackscale
         self.nsample = len(self.xcts)
 
         self.model_funcs = {
@@ -144,6 +158,117 @@ class Lag:
             'lorentzian': Lag.lorentzian,
             'pseudo_voigt': Lag.pseudo_voigt,
         }
+
+    @staticmethod
+    def _from_signal(signal):
+        """Extract ``(type, cts, cts_err, bcts, bcts_err, backscale, dt)`` from a Signal instance.
+
+        Args:
+            signal: A ``pgSignal``, ``ppSignal``, or ``ggSignal`` instance.
+                For ``pgSignal``, its polynomial background fit must have
+                already run (``bcts``/``bcts_err`` populated).
+
+        Returns:
+            A 7-tuple ``(type, cts, cts_err, bcts, bcts_err, backscale, dt)``
+            ready to feed into ``Lag.__init__`` (prefixed with ``x``/``y``).
+
+        Raises:
+            TypeError: If ``signal`` is not a recognised Signal instance.
+            RuntimeError: If ``signal`` is a ``pgSignal`` whose background
+                fit has not run yet.
+            ValueError: If ``signal``'s bins are not uniform in width.
+        """
+
+        if isinstance(signal, pgSignal):
+            if signal.poly_res is None:
+                raise RuntimeError('pgSignal has no background fit yet; run polyfit()/loop() first')
+            dtype, cts, cts_err, bcts, bcts_err, backscale = (
+                'pg',
+                signal.cts,
+                None,
+                signal.bcts,
+                signal.bcts_err,
+                1,
+            )
+        elif isinstance(signal, ppSignal):
+            dtype, cts, cts_err, bcts, bcts_err, backscale = (
+                'pp',
+                signal.cts,
+                None,
+                signal.bcts,
+                None,
+                signal.backscale,
+            )
+        elif isinstance(signal, ggSignal):
+            dtype, cts, cts_err, bcts, bcts_err, backscale = (
+                'gg',
+                signal.ncts,
+                signal.ncts_err,
+                None,
+                None,
+                1,
+            )
+        else:
+            raise TypeError('expected signal to be a pgSignal, ppSignal, or ggSignal instance')
+
+        binsize = signal.binsize
+        if not np.allclose(binsize, binsize[0]):
+            raise ValueError('signal bins must be uniform (constant width) for Lag')
+
+        return dtype, cts, cts_err, bcts, bcts_err, backscale, float(binsize[0])
+
+    @classmethod
+    def from_signals(cls, x_signal, y_signal, M=1):
+        """Build a Lag from two already-built Signal instances.
+
+        Infers ``xtype``/``ytype`` from the concrete class of ``x_signal``/
+        ``y_signal`` (``pgSignal`` -> ``'pg'``, ``ppSignal`` -> ``'pp'``,
+        ``ggSignal`` -> ``'gg'``) and extracts the plain arrays
+        ``Lag.__init__`` needs -- including ``backscale`` for a ``ppSignal``
+        channel, which a manually-constructed ``Lag`` is easy to forget.
+        Avoids a per-(xtype, ytype)-combination subclass hierarchy (9
+        combinations) by resolving each channel independently.
+
+        Args:
+            x_signal: A pgSignal/ppSignal/ggSignal instance for the
+                reference (high-energy) channel.
+            y_signal: A pgSignal/ppSignal/ggSignal instance for the
+                comparison (low-energy) channel.
+            M: Box-smoothing factor forwarded to ``__init__``.
+
+        Returns:
+            A new instance of ``cls``.
+
+        Raises:
+            TypeError: If either signal is not a recognised Signal instance.
+            RuntimeError: If a ``pgSignal`` channel's background fit has
+                not run yet.
+            ValueError: If either signal's bins are non-uniform, or the two
+                signals don't share the same bin width.
+        """
+
+        xtype, xcts, xcts_err, xbcts, xbcts_err, xbackscale, x_dt = cls._from_signal(x_signal)
+        ytype, ycts, ycts_err, ybcts, ybcts_err, ybackscale, y_dt = cls._from_signal(y_signal)
+
+        if not np.isclose(x_dt, y_dt):
+            raise ValueError('x_signal and y_signal must share the same bin width (dt)')
+
+        return cls(
+            xcts,
+            ycts,
+            x_dt,
+            xcts_err=xcts_err,
+            ycts_err=ycts_err,
+            xbcts=xbcts,
+            ybcts=ybcts,
+            xbcts_err=xbcts_err,
+            ybcts_err=ybcts_err,
+            xbackscale=xbackscale,
+            ybackscale=ybackscale,
+            xtype=xtype,
+            ytype=ytype,
+            M=M,
+        )
 
     @property
     def dt_analysis(self):
@@ -295,6 +420,7 @@ class Lag:
             self.xbcts_err,
             self.nmc,
             rng,
+            backscale=self.xbackscale,
         )
         self.mc_xncts = np.vstack([self.xncts, xncts_sample])
 
@@ -306,6 +432,7 @@ class Lag:
             self.ybcts_err,
             self.nmc,
             rng,
+            backscale=self.ybackscale,
         )
         self.mc_yncts = np.vstack([self.yncts, yncts_sample])
 
@@ -358,8 +485,8 @@ class Lag:
         if method is None:
             method = 'argmax' if self.M > 1 else 'gp'
 
-        self.xncts = self.xcts - self.xbcts
-        self.yncts = self.ycts - self.ybcts
+        self.xncts = self.xcts - self.xbcts * self.xbackscale
+        self.yncts = self.ycts - self.ybcts * self.ybackscale
         self.nsample = len(self.xcts)
 
         self._mc_simulation(1000)
@@ -515,13 +642,6 @@ class Lag:
         lag_err = np.diff([lag_lo, lag_bv, lag_hi])
         self.lag = [lag_bv, lag_err[0], lag_err[1]]
 
-        msg = [
-            f'{"lag (s)":<15}{"lag_le (s)":<15}{"lag_he (s)":<15}',
-            f'{self.lag[0]:<15.6g}{self.lag[1]:<15.6g}{self.lag[2]:<15.6g}',
-            f'method={method}, M={self.M:d}, dt={self.dt:.3g} s, point_estimate={point_estimate}',
-        ]
-        print(format_message(msg))
-
         self.lag_res = {
             'lag': self.lag,
             'mc_fit_lags': self.mc_fit_lags,
@@ -536,6 +656,13 @@ class Lag:
             'itp_taus': self.itp_taus,
             'itp_ccfs': self.itp_ccfs,
         }
+
+        msg = [
+            f'{"lag (s)":<15}{"lag_le (s)":<15}{"lag_he (s)":<15}',
+            f'{self.lag[0]:<15.6g}{self.lag[1]:<15.6g}{self.lag[2]:<15.6g}',
+            f'method={method}, M={self.M:d}, dt={self.dt:.3g} s, point_estimate={point_estimate}',
+        ]
+        print(format_message(msg))
 
     def save(self, savepath):
         """Save lag results and diagnostic plots to disk.
