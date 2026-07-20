@@ -51,12 +51,54 @@ Example:
 
 import os
 
-import matplotlib.pyplot as plt
 import numpy as np
 
 from ..auto.signal import ggSignal, pgSignal, ppSignal
 from ..util.tools import format_message, json_dump, plt_rc_context
-from .temp_utils import calculate_haar_mvt, uniform_dt_from_bins
+from .temp_utils import MvtPlotter, calculate_haar_mvt, uniform_dt_from_bins
+
+
+def _run_haar(ncts, ncts_err, bins, **kw):
+    """Compatibility wrapper for older validation scripts.
+
+    The Haar core expects rate/error/dt.  Older heapy diagnostics pass
+    per-bin net counts and count errors with bin edges; for uniform bins
+    this conversion is lossless up to the common scale factor.
+
+    Args:
+        ncts: Per-bin net (background-subtracted) counts.
+        ncts_err: 1-sigma error on ``ncts``.
+        bins: Bin edges (length ``len(ncts) + 1``); must be uniform.
+        **kw: Forwarded to
+            :func:`~heapy.temp.temp_utils.calculate_haar_mvt`.
+
+    Returns:
+        A result dict; see :meth:`MVT.calculate`.
+
+    Raises:
+        ValueError: If ``bins`` are not uniform, or ``ncts``/``ncts_err``
+            don't match the bin count.
+    """
+
+    bins = np.asarray(bins, dtype=float)
+    dt = uniform_dt_from_bins(bins)
+    widths = np.diff(bins)
+    ncts = np.asarray(ncts, dtype='float64')
+    ncts_err = np.asarray(ncts_err, dtype='float64')
+    if ncts.shape != widths.shape or ncts_err.shape != widths.shape:
+        raise ValueError('ncts and ncts_err must match the bin count')
+    rate = ncts / widths
+    rate_err = ncts_err / widths
+
+    mvt, mvt_err_lo, mvt_err_hi, is_upper_limit, diag = calculate_haar_mvt(rate, rate_err, dt, **kw)
+    return {
+        'method': 'haar',
+        'mvt': mvt,
+        'mvt_err_lo': mvt_err_lo,
+        'mvt_err_hi': mvt_err_hi,
+        'is_upper_limit': is_upper_limit,
+        'diag': diag,
+    }
 
 
 class MVT:
@@ -230,12 +272,16 @@ class MVT:
         ]
         print(format_message(msg))
 
+        return self.mvt_res
+
     def save(self, savepath):
         """Save the MVT result and a diagnostic plot to disk.
 
         Serialises ``self.mvt_res`` as a JSON file and writes a two-panel
-        PDF: the light curve with the MVT marked, and the Haar scaleogram
-        with the noise-floor overlay.
+        PDF via :class:`~heapy.temp.temp_utils.MvtPlotter`: the light
+        curve with the MVT marked, and the Haar scaleogram reproducing
+        ``nrbutler/mvt``'s ``haar_power_mod`` ``doplot`` figure (see the
+        upstream ``test_haar_mod.png``).
 
         Args:
             savepath: Directory path where output files are written;
@@ -253,43 +299,11 @@ class MVT:
 
         json_dump(self.mvt_res, os.path.join(savepath, 'mvt_res.json'))
 
-        mvt_val = self.mvt_res['mvt']
-        diag = self.mvt_res['diag']
-
         with plt_rc_context():
-            fig, (ax_lc, ax_sf) = plt.subplots(2, 1, figsize=(7, 6), sharex=False)
-            ax_lc.plot(self.time, self.rate, color='black', lw=0.8)
-            ax_lc.axvline(mvt_val, color='tab:red', ls='--', lw=1.0)
-            ax_lc.set_ylabel('Rate')
-            title = (
-                f'MVT < {mvt_val:.6g} s'
-                if self.mvt_res['is_upper_limit']
-                else f'MVT = {mvt_val:.6g} s'
-            )
-            ax_lc.set_title(title)
-
-            tau = np.asarray(diag.get('tau', []), dtype=float)
-            pspec = np.asarray(diag.get('pspec', []), dtype=float)
-            dpspec = np.asarray(diag.get('dpspec', []), dtype=float)
-            pspec0 = np.asarray(diag.get('pspec0', []), dtype=float)
-            if tau.size and pspec.size:
-                y = np.sqrt(np.clip(pspec, 0, None))
-                yerr = np.zeros_like(y)
-                ok = y > 0
-                yerr[ok] = 0.5 * dpspec[ok] / y[ok]
-                ax_sf.errorbar(tau, y, yerr=yerr, fmt='o', ms=3, lw=0.8, color='tab:blue')
-                if pspec0.size == tau.size:
-                    ax_sf.plot(
-                        tau, np.sqrt(np.clip(pspec0, 0, None)), color='black', ls='--', lw=0.8
-                    )
-                ax_sf.axvline(mvt_val, color='tab:red', ls='--', lw=1.0)
-                ax_sf.set_xscale('log')
-                ax_sf.set_yscale('log')
-            ax_sf.set_xlabel('Delta t [s]')
-            ax_sf.set_ylabel('Flux variation')
-            fig.tight_layout()
-            fig.savefig(os.path.join(savepath, 'mvt.pdf'))
-            plt.close(fig)
+            fig = MvtPlotter()
+            fig.plot_curve(self.time, self.rate, mvt=self.mvt_res['mvt'])
+            fig.plot_scaleogram(self.dt, self.time, self.mvt_res)
+            fig.save(os.path.join(savepath, 'mvt.pdf'))
 
 
 class pgMVT(MVT):

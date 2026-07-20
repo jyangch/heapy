@@ -902,6 +902,7 @@ def calculate_haar_mvt(
 
         tmin = np.exp(xmin)
         dtmin = tmin * dxmin * np.sqrt(bin_fac)
+        tmin_fit = float(tmin)
 
         if fix_beta:
             y = 2 * np.log(tau) + mu0 - np.log(pspec0)
@@ -937,6 +938,9 @@ def calculate_haar_mvt(
         'tbeta': float(tbeta),
         'tmin': float(tmin),
         'dtmin': float(dtmin),
+        'tmin_fit': tmin_fit,
+        'mu0': float(mu0),
+        'ib1': int(ib1),
         'slope': float(slope),
         'sigma_tsnr': float(sigma_tsnr),
         'sigma_tmin': float(sigma_tmin),
@@ -953,6 +957,147 @@ def calculate_haar_mvt(
         diag['reason'] = reason
 
     return float(tmin), float(dtmin), float(dtmin), (otype == 'limit'), diag
+
+
+def set_diagnostic_axis(ax):
+    """Apply the shared tick/spine styling used by the temp-module plotter classes.
+
+    Args:
+        ax: Matplotlib Axes to style in place.
+    """
+
+    ax.minorticks_on()
+    ax.xaxis.set_ticks_position('both')
+    ax.yaxis.set_ticks_position('both')
+    ax.tick_params(axis='x', which='both', direction='in', labelcolor='k', colors='k')
+    ax.tick_params(axis='y', which='both', direction='in', labelcolor='k', colors='k')
+    ax.tick_params(which='major', width=1.0, length=5)
+    ax.tick_params(which='minor', width=1.0, length=3)
+
+
+def plot_haar_scaleogram(ax, dt, time, mvt_res):
+    """Reproduce ``nrbutler/mvt``'s ``haar_power_mod`` scaleogram plot on ``ax``.
+
+    Ports the ``doplot`` block of the upstream ``haar_power_mod`` function
+    (see the reference ``test_haar_mod.png``) onto a caller-supplied Axes:
+    the sqrt-transformed flux-variation points with error bars, the fitted
+    noise-floor branch (flat) and signal branch (broken power law), the
+    break-point marker, a family of dotted power-law guide lines through
+    the peak point, and the below-threshold points drawn as their
+    ``snr``-sigma upper limits. Operates on copies of the diagnostic
+    arrays, so ``mvt_res`` is left untouched (safe to call more than
+    once, e.g. before JSON serialisation).
+
+    Args:
+        ax: Matplotlib Axes to draw on.
+        dt: Bin width in seconds (upstream's ``min_dt``).
+        time: Bin-center times of the analysed light curve; only the
+            span ``time[-1] - time[0]`` is used (upstream's ``max_dt``).
+        mvt_res: A result dict as returned by
+            :meth:`~heapy.temp.mvt.MVT.calculate`.
+    """
+
+    diag = mvt_res['diag']
+    is_upper_limit = mvt_res['is_upper_limit']
+    mvt_val = mvt_res['mvt']
+    dtmin_val = mvt_res['mvt_err_lo']
+
+    tau = np.asarray(diag['tau'], dtype=float)
+    dta = np.asarray(diag['dta'], dtype=float)
+    dta1 = np.asarray(diag['dta1'], dtype=float)
+    pspec = np.asarray(diag['pspec'], dtype=float).copy()
+    pspec0 = np.asarray(diag['pspec0'], dtype=float).copy()
+    dpspec = np.asarray(diag['dpspec'], dtype=float).copy()
+    g = np.asarray(diag['noise_mask'], dtype=bool)
+    g2 = np.asarray(diag['signal_mask'], dtype=bool)
+    snr = diag['snr']
+
+    ax.set_xlabel(r'$\Delta t$ [s]', fontsize=14)
+    ax.set_ylabel(r'Flux Variation $\sigma_{X,\Delta t}$', fontsize=14)
+
+    if 'ib1' in diag and g2.sum() >= 2:
+        min_dt = dt
+        max_dt = float(time[-1] - time[0]) if len(time) > 1 else dt
+
+        ib1 = diag['ib1']
+        mu0 = diag['mu0']
+        slope = diag['slope']
+        tmin_fit = diag['tmin_fit']
+
+        # Square-root transformation, mirroring upstream's in-place step.
+        # Upstream doesn't clip before the sqrt; on noisy real data a
+        # handful of zero-subtracted g2 points can still dip slightly
+        # negative, which produces NaN here and later crashes modern
+        # Matplotlib's axis-limit validation (older Matplotlib silently
+        # tolerated it). Clip at 0 so those points plot as a floor
+        # instead of raising.
+        pspec[g2] = np.sqrt(np.clip(pspec[g2], 0, None))
+        dpspec[g2] /= 2.0 * np.where(pspec[g2] > 0, pspec[g2], np.nan)
+        pspec0 = np.sqrt(np.clip(pspec0, 0, None))
+
+        ax.plot(tau[g2][ib1 + 1], pspec[g2][ib1 + 1], 'mo', ms=10, mew=0)
+
+        xx1 = np.array([min_dt / 2, tmin_fit])
+        xx2 = np.array([tmin_fit, max_dt * 2])
+        ax.plot(xx1, xx1 * np.exp(mu0 / 2.0), 'r-', alpha=0.5)
+        ax.plot(
+            xx2,
+            np.exp(0.5 * mu0 - (slope - 1) * np.log(tmin_fit) + slope * np.log(xx2)),
+            'r-',
+            alpha=0.5,
+        )
+        ax.errorbar(
+            tau[g2],
+            pspec[g2],
+            yerr=dpspec[g2],
+            xerr=0.5 * (dta1 - dta)[g2],
+            fmt='bo',
+            capsize=0,
+            linestyle='None',
+            markersize=3,
+        )
+
+        # Family of dotted power-law guide lines through the peak point.
+        i0 = pspec[g2].argmax()
+        x1, y1 = tau[g2][i0], pspec[g2][i0]
+        xx = np.array([min_dt / 2, max_dt * 2])
+        for i in range(-20, 20):
+            ax.plot(xx, y1 * xx / x1 * 2.0**i, 'k:', alpha=0.5)
+
+        ax.set_xlim(tau[g2].min() / 4.0, tau[g2].max() * 1.5)
+        ax.set_ylim(pspec[g2].min() / 2.0, pspec[g2].max() * 1.5)
+
+        if is_upper_limit:
+            title = r'$\Delta t_{\rm min}<$' + f'{mvt_val:.4f}'
+        else:
+            title = r'$\Delta t_{\rm min}=$' + f'{mvt_val:.4f} +/- {dtmin_val:.4f}'
+        ax.set_title(title)
+
+        if g.sum() > 0:
+            ax.plot(tau[g], np.sqrt(np.clip(pspec[g], 0, None) + snr * dpspec[g]), 'bv')
+    else:
+        # No break was fit (too few significant scales, or no positive
+        # noise power at all): still show the raw scaleogram points.
+        ok = pspec > 0
+        if ok.any():
+            ax.errorbar(
+                tau[ok],
+                np.sqrt(pspec[ok]),
+                yerr=0.5 * dpspec[ok] / np.sqrt(pspec[ok]),
+                fmt='bo',
+                capsize=0,
+                linestyle='None',
+                markersize=3,
+            )
+        title = (
+            f'MVT < {mvt_val:.4f} s'
+            if is_upper_limit
+            else f'MVT = {mvt_val:.4f} +/- {dtmin_val:.4f} s'
+        )
+        ax.set_title(title)
+
+    ax.set_xscale('log')
+    ax.set_yscale('log')
 
 
 class TxxPlotter:
@@ -984,27 +1129,16 @@ class TxxPlotter:
         gs = self.fig.add_gridspec(2, 1, wspace=0, hspace=0)
         self.ax_top = self.fig.add_subplot(gs[:1, 0])
         self.ax_bot = self.fig.add_subplot(gs[1:, 0], sharex=self.ax_top)
-        self._style_axis(self.ax_top)
-        self._style_axis(self.ax_bot)
+        set_diagnostic_axis(self.ax_top)
+        set_diagnostic_axis(self.ax_bot)
         plt.setp(self.ax_top.get_xticklabels(), visible=False)
-        self.ax_top.set_ylabel('Rate')
-        self.ax_bot.set_xlabel('Time')
+        self.ax_top.set_ylabel('Rate (cts/s)')
+        self.ax_bot.set_xlabel('Time (s)')
         self.ax_bot.set_ylabel('Accumulated counts')
 
         self._gaps = None
         self._bin_lbins = None
         self._bin_rbins = None
-
-    @staticmethod
-    def _style_axis(ax):
-
-        ax.minorticks_on()
-        ax.xaxis.set_ticks_position('both')
-        ax.yaxis.set_ticks_position('both')
-        ax.tick_params(axis='x', which='both', direction='in', labelcolor='k', colors='k')
-        ax.tick_params(axis='y', which='both', direction='in', labelcolor='k', colors='k')
-        ax.tick_params(which='major', width=1.0, length=5)
-        ax.tick_params(which='minor', width=1.0, length=3)
 
     def set_gaps(self, gap_int, lbins, rbins):
         """Register missing-data intervals to mask in :meth:`plot_ccts`.
@@ -1091,6 +1225,168 @@ class TxxPlotter:
         for c1, c2 in zip(csf1, csf2, strict=False):
             self.ax_bot.axhline(c1, color='orange', lw=1.0, ls='--')
             self.ax_bot.axhline(c2, color='orange', lw=1.0, ls='--')
+
+    def show(self):
+        """Display the figure interactively."""
+
+        plt.tight_layout()
+        plt.show()
+
+    def save(self, filename, dpi=300):
+        """Save the figure to ``filename`` and close it.
+
+        Args:
+            filename: Output file path; format inferred from extension.
+            dpi: Resolution in dots per inch.
+        """
+
+        self.fig.savefig(filename, bbox_inches='tight', pad_inches=0.1, dpi=dpi)
+        plt.close(self.fig)
+
+
+class LagPlotter:
+    """Composable two-panel diagnostic figure for Lag cross-correlation analysis.
+
+    Top panel (:attr:`ax_top`): the ``x`` and ``y`` net-count light
+    curves overlaid. Bottom panel (:attr:`ax_bot`): the CCF as a
+    function of time delay, restricted to the fit/search window, with
+    the fitted (interpolated) peak profile overlaid when available.
+    Compose by calling :meth:`plot_curves` and :meth:`plot_ccf` in any
+    order, then :meth:`save` or :meth:`show`. Mirrors the
+    :class:`TxxPlotter` API style.
+
+    Attributes:
+        fig: Underlying matplotlib Figure.
+        ax_top: Top-panel Axes (x/y light curves).
+        ax_bot: Bottom-panel Axes (CCF vs. time delay).
+    """
+
+    def __init__(self, figsize=(7, 8)):
+        """Create an empty two-panel figure.
+
+        Args:
+            figsize: Width and height of the figure in inches.
+        """
+
+        self.fig = plt.figure(figsize=figsize)
+        gs = self.fig.add_gridspec(2, 1, hspace=0.35)
+        self.ax_top = self.fig.add_subplot(gs[0, 0])
+        self.ax_bot = self.fig.add_subplot(gs[1, 0])
+        set_diagnostic_axis(self.ax_top)
+        set_diagnostic_axis(self.ax_bot)
+        self.ax_top.set_xlabel('Time (s)')
+        self.ax_top.set_ylabel('Counts')
+        self.ax_bot.set_xlabel('Time delay (s)')
+        self.ax_bot.set_ylabel('CCF value')
+
+    def plot_curves(self, time, xncts, yncts):
+        """Draw the ``x`` and ``y`` light curves on the top panel.
+
+        Args:
+            time: Per-bin time grid, shared by ``xncts`` and ``yncts``.
+            xncts: Reference (high-energy) channel net counts.
+            yncts: Comparison (low-energy) channel net counts.
+        """
+
+        self.ax_top.plot(time, xncts, color='k', lw=1.0, label='x')
+        self.ax_top.plot(time, yncts, color='r', lw=1.0, label='y')
+        self.ax_top.set_xlim([time[0], time[-1]])
+        self.ax_top.legend(frameon=False)
+
+    def plot_ccf(self, taus, ccf, nidx, itp_taus=None, itp_ccfs=None):
+        """Draw the CCF and its fitted peak profile on the bottom panel.
+
+        Args:
+            taus: Full time-delay grid.
+            ccf: CCF values aligned with ``taus`` (the observed, i.e.
+                unperturbed, realisation).
+            nidx: Integer index array selecting the fit/search window
+                plotted as ``+`` markers.
+            itp_taus: Interpolated time-delay grid for the fitted peak
+                profile overlay, or ``None`` to skip it (e.g. the
+                ``'argmax'`` method has no continuous fit).
+            itp_ccfs: Fitted CCF values aligned with ``itp_taus``.
+        """
+
+        self.ax_bot.scatter(
+            taus[nidx], ccf[nidx], marker='+', color='k', s=10, linewidths=0.5, alpha=1.0
+        )
+        if itp_taus is not None:
+            self.ax_bot.plot(itp_taus, itp_ccfs, c='r', lw=0.5, alpha=1.0)
+
+    def show(self):
+        """Display the figure interactively."""
+
+        plt.tight_layout()
+        plt.show()
+
+    def save(self, filename, dpi=300):
+        """Save the figure to ``filename`` and close it.
+
+        Args:
+            filename: Output file path; format inferred from extension.
+            dpi: Resolution in dots per inch.
+        """
+
+        self.fig.savefig(filename, bbox_inches='tight', pad_inches=0.1, dpi=dpi)
+        plt.close(self.fig)
+
+
+class MvtPlotter:
+    """Composable two-panel diagnostic figure for Haar MVT analysis.
+
+    Top panel (:attr:`ax_top`): the light curve with the fitted MVT
+    marked. Bottom panel (:attr:`ax_bot`): the Haar scaleogram,
+    reproducing ``nrbutler/mvt``'s ``haar_power_mod`` ``doplot`` figure
+    (see :func:`_plot_haar_scaleogram`). Compose by calling
+    :meth:`plot_curve` and :meth:`plot_scaleogram` in any order, then
+    :meth:`save` or :meth:`show`. Mirrors the :class:`TxxPlotter` API
+    style.
+
+    Attributes:
+        fig: Underlying matplotlib Figure.
+        ax_top: Top-panel Axes (light curve).
+        ax_bot: Bottom-panel Axes (Haar scaleogram).
+    """
+
+    def __init__(self, figsize=(7, 8)):
+        """Create an empty two-panel figure.
+
+        Args:
+            figsize: Width and height of the figure in inches.
+        """
+
+        self.fig = plt.figure(figsize=figsize)
+        gs = self.fig.add_gridspec(2, 1, hspace=0.35)
+        self.ax_top = self.fig.add_subplot(gs[0, 0])
+        self.ax_bot = self.fig.add_subplot(gs[1, 0])
+        set_diagnostic_axis(self.ax_top)
+        set_diagnostic_axis(self.ax_bot)
+        self.ax_top.set_xlabel('Time (s)')
+        self.ax_top.set_ylabel('Rate (cts/s)')
+
+    def plot_curve(self, time, rate):
+        """Draw the light curve on the top panel.
+
+        Args:
+            time: Per-bin time grid.
+            rate: Background-subtracted count rate aligned with ``time``.
+        """
+
+        self.ax_top.plot(time, rate, color='k', lw=1.0)
+        self.ax_top.set_xlim([time[0], time[-1]])
+
+    def plot_scaleogram(self, dt, time, mvt_res):
+        """Draw the Haar scaleogram on the bottom panel; see :func:`plot_haar_scaleogram`.
+
+        Args:
+            dt: Bin width in seconds.
+            time: Bin-center times of the analysed light curve.
+            mvt_res: A result dict as returned by
+                :meth:`~heapy.temp.mvt.MVT.calculate`.
+        """
+
+        plot_haar_scaleogram(self.ax_bot, dt, time, mvt_res)
 
     def show(self):
         """Display the figure interactively."""

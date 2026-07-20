@@ -21,7 +21,6 @@ Example:
 
 import os
 
-from matplotlib import rcParams
 import matplotlib.pyplot as plt
 import numpy as np
 from scipy.interpolate import UnivariateSpline
@@ -31,8 +30,9 @@ from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import RBF, WhiteKernel
 
 from ..auto.signal import ggSignal, pgSignal, ppSignal
-from ..util.tools import format_message, json_dump
+from ..util.tools import format_message, json_dump, plt_rc_context
 from .temp_utils import (
+    LagPlotter,
     box_smooth,
     box_smooth_batch,
     calculate_ccf_batch,
@@ -668,9 +668,11 @@ class Lag:
         """Save lag results and diagnostic plots to disk.
 
         Serialises ``lag_res`` as a JSON file and writes two PDF figures:
-        one showing the CCF with the fitted profile overlay, and one
-        histogram of the MC lag distribution with the central value and
-        1-sigma interval marked.
+        a two-panel figure via
+        :class:`~heapy.temp.temp_utils.LagPlotter` (the ``x``/``y`` light
+        curves on top, the CCF with the fitted profile overlay on the
+        bottom), and a histogram of the MC lag distribution with the
+        central value and 1-sigma interval marked.
 
         Args:
             savepath: Directory path where output files are written; created
@@ -682,55 +684,37 @@ class Lag:
 
         json_dump(self.lag_res, savepath + '/lag_res.json')
 
-        rcParams['font.family'] = 'serif'
-        rcParams['font.serif'] = ['STIX Two Text']
-        rcParams['mathtext.fontset'] = 'stix'
-        rcParams['font.size'] = 12
-        rcParams['pdf.fonttype'] = 42
-        rcParams['ps.fonttype'] = 42
+        with plt_rc_context():
+            time = self.dt_analysis * np.arange(self.nsample)
+            fig = LagPlotter()
+            fig.plot_curves(time, self.xncts, self.yncts)
+            fig.plot_ccf(
+                self.taus,
+                self.mc_ccfs[0],
+                self.nidx,
+                itp_taus=self.itp_taus,
+                itp_ccfs=self.itp_ccfs,
+            )
+            fig.save(savepath + '/tau_ccf.pdf')
 
-        fig, ax = plt.subplots(1, 1, figsize=(7, 6))
-        ax.scatter(
-            self.taus[self.nidx],
-            self.mc_ccfs[0][self.nidx],
-            marker='+',
-            color='r',
-            s=10,
-            linewidths=0.5,
-            alpha=1.0,
-        )
-        if self.itp_taus is not None:
-            ax.plot(self.itp_taus, self.itp_ccfs, c='b', lw=0.5, alpha=1.0)
-        ax.set_xlabel('Time delay (s)')
-        ax.set_ylabel('CCF value')
-        ax.minorticks_on()
-        ax.tick_params(axis='x', which='both', direction='in')
-        ax.tick_params(axis='y', which='both', direction='in')
-        ax.tick_params(which='major', width=1.0, length=5)
-        ax.tick_params(which='minor', width=1.0, length=3)
-        ax.xaxis.set_ticks_position('both')
-        ax.yaxis.set_ticks_position('both')
-        fig.savefig(savepath + '/tau_ccf.pdf', bbox_inches='tight', pad_inches=0.1, dpi=300)
-        plt.close(fig)
-
-        fig, ax = plt.subplots(1, 1, figsize=(7, 6))
-        mc_only = self.mc_fit_lags[1:]
-        lag_bins = np.linspace(min(mc_only), max(mc_only), 30)
-        ax.hist(mc_only, lag_bins, density=False, histtype='step', color='b', lw=1.0)
-        ax.axvline(self.lag[0], c='grey', lw=1.0)
-        ax.axvline(self.lag[0] - self.lag[1], c='grey', ls='--', lw=1.0)
-        ax.axvline(self.lag[0] + self.lag[2], c='grey', ls='--', lw=1.0)
-        ax.set_xlabel('Lags (sec)')
-        ax.set_ylabel('Counts')
-        ax.set_title(
-            rf'$\tau={self.lag[0]:.4g}_{{-{self.lag[1]:.4g}}}^{{+{self.lag[2]:.4g}}}~{{\rm s}}$'
-        )
-        ax.minorticks_on()
-        ax.tick_params(axis='x', which='both', direction='in')
-        ax.tick_params(axis='y', which='both', direction='in')
-        ax.tick_params(which='major', width=1.0, length=5)
-        ax.tick_params(which='minor', width=1.0, length=3)
-        ax.xaxis.set_ticks_position('both')
-        ax.yaxis.set_ticks_position('both')
-        fig.savefig(savepath + '/lag_pdf.pdf', bbox_inches='tight', pad_inches=0.1, dpi=300)
-        plt.close(fig)
+            fig, ax = plt.subplots(1, 1, figsize=(7, 6))
+            mc_only = self.mc_fit_lags[1:]
+            lag_bins = np.linspace(min(mc_only), max(mc_only), 30)
+            ax.hist(mc_only, lag_bins, density=False, histtype='step', color='b', lw=1.0)
+            ax.axvline(self.lag[0], c='grey', lw=1.0)
+            ax.axvline(self.lag[0] - self.lag[1], c='grey', ls='--', lw=1.0)
+            ax.axvline(self.lag[0] + self.lag[2], c='grey', ls='--', lw=1.0)
+            ax.set_xlabel('Lags (sec)')
+            ax.set_ylabel('Counts')
+            ax.set_title(
+                rf'$\tau={self.lag[0]:.4g}_{{-{self.lag[1]:.4g}}}^{{+{self.lag[2]:.4g}}}~{{\rm s}}$'
+            )
+            ax.minorticks_on()
+            ax.tick_params(axis='x', which='both', direction='in')
+            ax.tick_params(axis='y', which='both', direction='in')
+            ax.tick_params(which='major', width=1.0, length=5)
+            ax.tick_params(which='minor', width=1.0, length=3)
+            ax.xaxis.set_ticks_position('both')
+            ax.yaxis.set_ticks_position('both')
+            fig.savefig(savepath + '/lag_pdf.pdf', bbox_inches='tight', pad_inches=0.1, dpi=300)
+            plt.close(fig)
