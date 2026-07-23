@@ -1137,7 +1137,7 @@ def plot_haar_scaleogram(ax, dt, time, mvt_res, max_dt='auto'):
                 tau[g_plot],
                 np.sqrt(np.clip(pspec[g_plot], 0, None) + snr * dpspec[g_plot]),
                 'bv',
-                markersize=2.0,
+                markersize=4.0,
             )
     else:
         ok = (pspec > 0) & in_window
