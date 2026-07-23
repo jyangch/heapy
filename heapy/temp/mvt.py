@@ -277,7 +277,7 @@ class MVT:
 
         return self.mvt_res
 
-    def save(self, savepath, max_dt=100.0):
+    def save(self, savepath, max_dt='auto'):
         """Save the MVT result and a diagnostic plot to disk.
 
         Serialises ``self.mvt_res`` as a JSON file and writes a two-panel
@@ -289,10 +289,11 @@ class MVT:
         Args:
             savepath: Directory path where output files are written;
                 created if it does not exist.
-            max_dt: Optional upstream ``haar_power_mod`` plotting
-                parameter for the scaleogram; defaults to upstream's
-                ``100.0``. Pass ``None`` to infer from the analysed time
-                span.
+            max_dt: Optional scaleogram plotting limit; defaults to
+                ``'auto'``, which uses the first robustly dropped
+                non-finite/noise-spike scale when available. Pass
+                ``100.0`` for upstream's fixed demonstration extent, or
+                ``None`` to infer from the analysed time span.
 
         Raises:
             RuntimeError: If :meth:`calculate` has not been called yet.
