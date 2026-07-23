@@ -1085,10 +1085,10 @@ def plot_haar_scaleogram(ax, dt, time, mvt_res, max_dt=100.0):
                 tmin_fit,
                 tmin_fit * np.exp(mu0 / 2.0),
                 marker='o',
-                ms=10,
+                ms=6,
                 mfc='none',
                 mec='m',
-                mew=2.5,
+                mew=1.0,
                 linestyle='None',
             )
 
@@ -1099,7 +1099,7 @@ def plot_haar_scaleogram(ax, dt, time, mvt_res, max_dt=100.0):
             x1, y1 = tau[g2][i0], pspec_g2[i0]
             xx = np.array([min_dt / 2, max_dt * 2])
             for i in range(-20, 20):
-                ax.plot(xx, y1 * xx / x1 * 2.0**i, 'k--', alpha=0.5, lw=0.8)
+                ax.plot(xx, y1 * xx / x1 * 2.0**i, 'k--', alpha=0.4, lw=0.8)
 
             ax.set_xlim(tau[g2][finite_g2].min() / 4.0, tau[g2][finite_g2].max() * 1.5)
             ax.set_ylim(pspec_g2[finite_g2].min() / 2.0, pspec_g2[finite_g2].max() * 1.5)
