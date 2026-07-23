@@ -1104,17 +1104,18 @@ def plot_haar_scaleogram(ax, dt, time, mvt_res, max_dt='auto'):
             fmt='bo',
             capsize=0,
             linestyle='None',
-            markersize=3,
+            markersize=2.0,
+            elinewidth=0.8,
         )
         if not is_upper_limit and tmin_fit <= max_dt:
             ax.plot(
                 tmin_fit,
                 tmin_fit * np.exp(mu0 / 2.0),
                 marker='o',
-                ms=7,
+                ms=6,
                 mfc='none',
                 mec='m',
-                mew=2.5,
+                mew=2.0,
                 linestyle='None',
             )
 
@@ -1132,7 +1133,10 @@ def plot_haar_scaleogram(ax, dt, time, mvt_res, max_dt='auto'):
 
         if g_plot.sum() > 0:
             ax.plot(
-                tau[g_plot], np.sqrt(np.clip(pspec[g_plot], 0, None) + snr * dpspec[g_plot]), 'bv'
+                tau[g_plot],
+                np.sqrt(np.clip(pspec[g_plot], 0, None) + snr * dpspec[g_plot]),
+                'bo',
+                markersize=2.0,
             )
     else:
         ok = (pspec > 0) & in_window
