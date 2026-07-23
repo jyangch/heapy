@@ -1089,12 +1089,13 @@ def plot_haar_scaleogram(ax, dt, time, mvt_res, max_dt='auto'):
 
         xx1 = np.array([min_dt / 2, tmin_fit])
         xx2 = np.array([tmin_fit, max_dt * 2])
-        ax.plot(xx1, xx1 * np.exp(mu0 / 2.0), 'r-', alpha=0.5)
+        ax.plot(xx1, xx1 * np.exp(mu0 / 2.0), 'r-', alpha=0.5, lw=1.0)
         ax.plot(
             xx2,
             np.exp(0.5 * mu0 - (slope - 1) * np.log(tmin_fit) + slope * np.log(xx2)),
             'r-',
             alpha=0.5,
+            lw=1.0,
         )
         ax.errorbar(
             tau[g2_plot],
@@ -1105,14 +1106,14 @@ def plot_haar_scaleogram(ax, dt, time, mvt_res, max_dt='auto'):
             capsize=0,
             linestyle='None',
             markersize=2.0,
-            elinewidth=0.8,
+            elinewidth=1.0,
         )
         if not is_upper_limit and tmin_fit <= max_dt:
             ax.plot(
                 tmin_fit,
                 tmin_fit * np.exp(mu0 / 2.0),
                 marker='o',
-                ms=6,
+                ms=5,
                 mfc='none',
                 mec='m',
                 mew=2.0,
@@ -1135,7 +1136,7 @@ def plot_haar_scaleogram(ax, dt, time, mvt_res, max_dt='auto'):
             ax.plot(
                 tau[g_plot],
                 np.sqrt(np.clip(pspec[g_plot], 0, None) + snr * dpspec[g_plot]),
-                'bo',
+                'bv',
                 markersize=2.0,
             )
     else:
