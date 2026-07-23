@@ -26,6 +26,7 @@ Bundles shared utilities consumed by :mod:`heapy.temp.txx`,
 import operator
 
 from astropy.stats import mad_std, sigma_clip
+from matplotlib.lines import Line2D
 import matplotlib.pyplot as plt
 import numpy as np
 from scipy.fft import irfft, next_fast_len, rfft
@@ -659,6 +660,27 @@ def calculate_haar_power_spectrum(data, error, weight, dt=1.0, osamp=32.0, nrepl
     return dt * scl1, dt * scl2, psp, psp0, dpsp
 
 
+def drop_local_noise_floor_spikes(tau, noise_power, factor=100.0, half_window=2):
+    """Mask finite scaleogram bins whose noise floor is a sharp local spike."""
+
+    tau = np.asarray(tau, dtype=float)
+    noise_power = np.asarray(noise_power, dtype=float)
+    keep = np.isfinite(tau) & np.isfinite(noise_power) & (noise_power > 0)
+    idx = np.where(keep)[0]
+    if idx.size < 2 * half_window + 1:
+        return keep
+
+    log_noise = np.log(noise_power[idx])
+    for pos, src_idx in enumerate(idx):
+        lo = max(0, pos - half_window)
+        hi = min(idx.size, pos + half_window + 1)
+        neigh = np.r_[log_noise[lo:pos], log_noise[pos + 1 : hi]]
+        if neigh.size >= half_window and log_noise[pos] - np.median(neigh) > np.log(factor):
+            keep[src_idx] = False
+
+    return keep
+
+
 def calculate_haar_mvt(
     rate,
     rate_err,
@@ -671,7 +693,7 @@ def calculate_haar_mvt(
     snr=3.0,
     verbose=False,
     weight=True,
-    drop_nonfinite=False,
+    drop_nonfinite=True,
     file='mvt',
 ):
     """Compute the Haar minimum variability timescale (MVT) of a light curve.
@@ -699,9 +721,12 @@ def calculate_haar_mvt(
             docstring for their exact roles.
         verbose: Print a one-line summary (``a factor``, or
             ``T_snr``/``T_beta``/``T_min``) as the original code does.
-        drop_nonfinite: When ``True``, also drop scales where
+        drop_nonfinite: When ``True``, drop scales where
             ``power``/``noise_power``/``power_err`` are non-finite before
-            searching for the break (off by default, matching upstream).
+            searching for the break, and also drop finite bins whose
+            noise floor is a sharp local numerical spike (on by default
+            for robust real-data analysis). Pass ``False`` to reproduce
+            upstream's unfiltered default behavior exactly.
         file: Label used in the ``verbose`` print statements.
 
     Returns:
@@ -747,9 +772,11 @@ def calculate_haar_mvt(
         osamp=bin_fac * 8,
     )
 
+    tau_all = 0.5 * (dta + dta1)
     g = pspec0 > 0
     if drop_nonfinite:
         g &= np.isfinite(pspec) & np.isfinite(pspec0) & np.isfinite(dpspec)
+        g &= drop_local_noise_floor_spikes(tau_all, pspec0)
     dta = dta[g]
     dta1 = dta1[g]
     pspec = pspec[g]
@@ -769,6 +796,7 @@ def calculate_haar_mvt(
         tmax = tau[(pspec / pspec0).argmax()]
 
     tsnr, tbeta, tmin, dtmin, slope, sigma_tsnr, sigma_tmin = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+    tmin_fit, mu0, ib1 = 0.0, 0.0, 0
     otype = 'limit'
 
     g = tau < tau_bg_max
@@ -975,7 +1003,7 @@ def set_diagnostic_axis(ax):
     ax.tick_params(which='minor', width=1.0, length=3)
 
 
-def plot_haar_scaleogram(ax, dt, time, mvt_res):
+def plot_haar_scaleogram(ax, dt, time, mvt_res, max_dt=100.0):
     """Reproduce ``nrbutler/mvt``'s ``haar_power_mod`` scaleogram plot on ``ax``.
 
     Ports the ``doplot`` block of the upstream ``haar_power_mod`` function
@@ -991,10 +1019,13 @@ def plot_haar_scaleogram(ax, dt, time, mvt_res):
     Args:
         ax: Matplotlib Axes to draw on.
         dt: Bin width in seconds (upstream's ``min_dt``).
-        time: Bin-center times of the analysed light curve; only the
-            span ``time[-1] - time[0]`` is used (upstream's ``max_dt``).
+        time: Bin-center times of the analysed light curve; used only
+            when ``max_dt`` is explicitly ``None``.
         mvt_res: A result dict as returned by
             :meth:`~heapy.temp.mvt.MVT.calculate`.
+        max_dt: Optional upstream ``haar_power_mod`` plotting parameter;
+            controls the long-timescale extent of fitted guide lines.
+            Defaults to upstream's ``100.0``.
     """
 
     diag = mvt_res['diag']
@@ -1012,30 +1043,23 @@ def plot_haar_scaleogram(ax, dt, time, mvt_res):
     g2 = np.asarray(diag['signal_mask'], dtype=bool)
     snr = diag['snr']
 
-    ax.set_xlabel(r'$\Delta t$ [s]', fontsize=14)
-    ax.set_ylabel(r'Flux Variation $\sigma_{X,\Delta t}$', fontsize=14)
+    ax.set_xlabel(r'$\Delta t$ [s]')
+    ax.set_ylabel(r'Flux Variation $\sigma_{X,\Delta t}$')
 
     if 'ib1' in diag and g2.sum() >= 2:
         min_dt = dt
-        max_dt = float(time[-1] - time[0]) if len(time) > 1 else dt
+        if max_dt is None:
+            max_dt = float(time[-1] - time[0]) if len(time) > 1 else dt
+        else:
+            max_dt = float(max_dt)
 
-        ib1 = diag['ib1']
         mu0 = diag['mu0']
         slope = diag['slope']
         tmin_fit = diag['tmin_fit']
 
-        # Square-root transformation, mirroring upstream's in-place step.
-        # Upstream doesn't clip before the sqrt; on noisy real data a
-        # handful of zero-subtracted g2 points can still dip slightly
-        # negative, which produces NaN here and later crashes modern
-        # Matplotlib's axis-limit validation (older Matplotlib silently
-        # tolerated it). Clip at 0 so those points plot as a floor
-        # instead of raising.
         pspec[g2] = np.sqrt(np.clip(pspec[g2], 0, None))
         dpspec[g2] /= 2.0 * np.where(pspec[g2] > 0, pspec[g2], np.nan)
         pspec0 = np.sqrt(np.clip(pspec0, 0, None))
-
-        ax.plot(tau[g2][ib1 + 1], pspec[g2][ib1 + 1], 'mo', ms=10, mew=0)
 
         xx1 = np.array([min_dt / 2, tmin_fit])
         xx2 = np.array([tmin_fit, max_dt * 2])
@@ -1056,28 +1080,33 @@ def plot_haar_scaleogram(ax, dt, time, mvt_res):
             linestyle='None',
             markersize=3,
         )
+        if not is_upper_limit:
+            ax.plot(
+                tmin_fit,
+                tmin_fit * np.exp(mu0 / 2.0),
+                marker='o',
+                ms=10,
+                mfc='none',
+                mec='m',
+                mew=2.5,
+                linestyle='None',
+            )
 
-        # Family of dotted power-law guide lines through the peak point.
-        i0 = pspec[g2].argmax()
-        x1, y1 = tau[g2][i0], pspec[g2][i0]
-        xx = np.array([min_dt / 2, max_dt * 2])
-        for i in range(-20, 20):
-            ax.plot(xx, y1 * xx / x1 * 2.0**i, 'k:', alpha=0.5)
+        pspec_g2 = pspec[g2]
+        finite_g2 = np.isfinite(pspec_g2) & (pspec_g2 > 0)
+        if finite_g2.any():
+            i0 = np.flatnonzero(finite_g2)[np.argmax(pspec_g2[finite_g2])]
+            x1, y1 = tau[g2][i0], pspec_g2[i0]
+            xx = np.array([min_dt / 2, max_dt * 2])
+            for i in range(-20, 20):
+                ax.plot(xx, y1 * xx / x1 * 2.0**i, 'k--', alpha=0.5, lw=0.8)
 
-        ax.set_xlim(tau[g2].min() / 4.0, tau[g2].max() * 1.5)
-        ax.set_ylim(pspec[g2].min() / 2.0, pspec[g2].max() * 1.5)
-
-        if is_upper_limit:
-            title = r'$\Delta t_{\rm min}<$' + f'{mvt_val:.4f}'
-        else:
-            title = r'$\Delta t_{\rm min}=$' + f'{mvt_val:.4f} +/- {dtmin_val:.4f}'
-        ax.set_title(title)
+            ax.set_xlim(tau[g2][finite_g2].min() / 4.0, tau[g2][finite_g2].max() * 1.5)
+            ax.set_ylim(pspec_g2[finite_g2].min() / 2.0, pspec_g2[finite_g2].max() * 1.5)
 
         if g.sum() > 0:
             ax.plot(tau[g], np.sqrt(np.clip(pspec[g], 0, None) + snr * dpspec[g]), 'bv')
     else:
-        # No break was fit (too few significant scales, or no positive
-        # noise power at all): still show the raw scaleogram points.
         ok = pspec > 0
         if ok.any():
             ax.errorbar(
@@ -1089,15 +1118,22 @@ def plot_haar_scaleogram(ax, dt, time, mvt_res):
                 linestyle='None',
                 markersize=3,
             )
-        title = (
-            f'MVT < {mvt_val:.4f} s'
-            if is_upper_limit
-            else f'MVT = {mvt_val:.4f} +/- {dtmin_val:.4f} s'
-        )
-        ax.set_title(title)
 
     ax.set_xscale('log')
     ax.set_yscale('log')
+    legend_label = (
+        r'$\Delta t_{\rm min}<$' + rf'{mvt_val:.4f} s'
+        if is_upper_limit
+        else r'$\Delta t_{\rm min}=$' + rf'{mvt_val:.4f} $\pm$ {dtmin_val:.4f} s'
+    )
+    ax.legend(
+        [Line2D([], [], linestyle='None')],
+        [legend_label],
+        loc='upper left',
+        frameon=True,
+        handlelength=0,
+        handletextpad=0,
+    )
 
 
 class TxxPlotter:
@@ -1261,7 +1297,7 @@ class LagPlotter:
         ax_bot: Bottom-panel Axes (CCF vs. time delay).
     """
 
-    def __init__(self, figsize=(7, 8)):
+    def __init__(self, figsize=(6, 8)):
         """Create an empty two-panel figure.
 
         Args:
@@ -1269,9 +1305,9 @@ class LagPlotter:
         """
 
         self.fig = plt.figure(figsize=figsize)
-        gs = self.fig.add_gridspec(2, 1, hspace=0.35)
-        self.ax_top = self.fig.add_subplot(gs[0, 0])
-        self.ax_bot = self.fig.add_subplot(gs[1, 0])
+        gs = self.fig.add_gridspec(5, 1, hspace=0.5)
+        self.ax_top = self.fig.add_subplot(gs[0:2, 0])
+        self.ax_bot = self.fig.add_subplot(gs[2:5, 0])
         set_diagnostic_axis(self.ax_top)
         set_diagnostic_axis(self.ax_bot)
         self.ax_top.set_xlabel('Time (s)')
@@ -1349,7 +1385,7 @@ class MvtPlotter:
         ax_bot: Bottom-panel Axes (Haar scaleogram).
     """
 
-    def __init__(self, figsize=(7, 8)):
+    def __init__(self, figsize=(6, 8)):
         """Create an empty two-panel figure.
 
         Args:
@@ -1357,9 +1393,9 @@ class MvtPlotter:
         """
 
         self.fig = plt.figure(figsize=figsize)
-        gs = self.fig.add_gridspec(2, 1, hspace=0.35)
-        self.ax_top = self.fig.add_subplot(gs[0, 0])
-        self.ax_bot = self.fig.add_subplot(gs[1, 0])
+        gs = self.fig.add_gridspec(5, 1, hspace=0.5)
+        self.ax_top = self.fig.add_subplot(gs[0:2, 0])
+        self.ax_bot = self.fig.add_subplot(gs[2:5, 0])
         set_diagnostic_axis(self.ax_top)
         set_diagnostic_axis(self.ax_bot)
         self.ax_top.set_xlabel('Time (s)')
@@ -1376,7 +1412,7 @@ class MvtPlotter:
         self.ax_top.plot(time, rate, color='k', lw=1.0)
         self.ax_top.set_xlim([time[0], time[-1]])
 
-    def plot_scaleogram(self, dt, time, mvt_res):
+    def plot_scaleogram(self, dt, time, mvt_res, max_dt=100.0):
         """Draw the Haar scaleogram on the bottom panel; see :func:`plot_haar_scaleogram`.
 
         Args:
@@ -1384,9 +1420,11 @@ class MvtPlotter:
             time: Bin-center times of the analysed light curve.
             mvt_res: A result dict as returned by
                 :meth:`~heapy.temp.mvt.MVT.calculate`.
+            max_dt: Optional upstream ``haar_power_mod`` plotting
+                parameter; defaults to upstream's ``100.0``.
         """
 
-        plot_haar_scaleogram(self.ax_bot, dt, time, mvt_res)
+        plot_haar_scaleogram(self.ax_bot, dt, time, mvt_res, max_dt=max_dt)
 
     def show(self):
         """Display the figure interactively."""

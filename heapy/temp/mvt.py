@@ -246,7 +246,9 @@ class MVT:
                 :func:`~heapy.temp.temp_utils.calculate_haar_mvt`
                 (``tau_bg_max``, ``nrepl``, ``bin_fac``, ``afactor``,
                 ``snr``, ``verbose``, ``weight``, ``drop_nonfinite``,
-                ``file``).
+                ``file``). ``drop_nonfinite`` defaults to ``True`` for
+                robust real-data analysis; pass ``False`` for exact
+                upstream-unfiltered behavior.
 
         Returns:
             The result dict (also stored on ``self.mvt_res``).
@@ -268,13 +270,14 @@ class MVT:
         msg = [
             f'{"mvt (s)":<15}{"mvt_le (s)":<15}{"mvt_he (s)":<15}',
             f'{mvt:<15.6g}{mvt_err_lo:<15.6g}{mvt_err_hi:<15.6g}',
-            f'dt={self.dt:.3g} s, is_upper_limit={is_upper_limit}',
+            f'T_snr={diag["tsnr"]:.6g} s, T_beta={diag["tbeta"]:.6g} s, '
+            f'is_upper_limit={is_upper_limit}',
         ]
         print(format_message(msg))
 
         return self.mvt_res
 
-    def save(self, savepath):
+    def save(self, savepath, max_dt=100.0):
         """Save the MVT result and a diagnostic plot to disk.
 
         Serialises ``self.mvt_res`` as a JSON file and writes a two-panel
@@ -286,6 +289,10 @@ class MVT:
         Args:
             savepath: Directory path where output files are written;
                 created if it does not exist.
+            max_dt: Optional upstream ``haar_power_mod`` plotting
+                parameter for the scaleogram; defaults to upstream's
+                ``100.0``. Pass ``None`` to infer from the analysed time
+                span.
 
         Raises:
             RuntimeError: If :meth:`calculate` has not been called yet.
@@ -301,8 +308,8 @@ class MVT:
 
         with plt_rc_context():
             fig = MvtPlotter()
-            fig.plot_curve(self.time, self.rate, mvt=self.mvt_res['mvt'])
-            fig.plot_scaleogram(self.dt, self.time, self.mvt_res)
+            fig.plot_curve(self.time, self.rate)
+            fig.plot_scaleogram(self.dt, self.time, self.mvt_res, max_dt=max_dt)
             fig.save(os.path.join(savepath, 'mvt.pdf'))
 
 
