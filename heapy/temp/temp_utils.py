@@ -1059,7 +1059,7 @@ def plot_haar_scaleogram(ax, dt, time, mvt_res, max_dt='auto'):
     g2 = np.asarray(diag['signal_mask'], dtype=bool)
     snr = diag['snr']
 
-    ax.set_xlabel(r'$\Delta t$ [s]')
+    ax.set_xlabel(r'$\Delta t$ (s)')
     ax.set_ylabel(r'Flux Variation $\sigma_{X,\Delta t}$')
 
     min_dt = dt
@@ -1126,7 +1126,7 @@ def plot_haar_scaleogram(ax, dt, time, mvt_res, max_dt='auto'):
             i0 = np.flatnonzero(finite_g2)[np.argmax(pspec_g2[finite_g2])]
             x1, y1 = tau[g2_plot][i0], pspec_g2[i0]
             xx = np.array([min_dt / 2, max_dt * 2])
-            for i in range(-12, 13, 2):
+            for i in range(-10, 11):
                 ax.plot(xx, y1 * xx / x1 * 2.0**i, 'k--', alpha=0.4, lw=0.8)
 
             ax.set_xlim(tau[g2_plot][finite_g2].min() / 4.0, tau[g2_plot][finite_g2].max() * 1.5)
@@ -1330,7 +1330,7 @@ class LagPlotter:
         ax_bot: Bottom-panel Axes (CCF vs. time delay).
     """
 
-    def __init__(self, figsize=(6, 8)):
+    def __init__(self, figsize=(6, 7)):
         """Create an empty two-panel figure.
 
         Args:
@@ -1338,7 +1338,7 @@ class LagPlotter:
         """
 
         self.fig = plt.figure(figsize=figsize)
-        gs = self.fig.add_gridspec(5, 1, hspace=0.5)
+        gs = self.fig.add_gridspec(5, 1, hspace=0.6)
         self.ax_top = self.fig.add_subplot(gs[0:2, 0])
         self.ax_bot = self.fig.add_subplot(gs[2:5, 0])
         set_diagnostic_axis(self.ax_top)
@@ -1362,7 +1362,7 @@ class LagPlotter:
         self.ax_top.set_xlim([time[0], time[-1]])
         self.ax_top.legend(frameon=False)
 
-    def plot_ccf(self, taus, ccf, nidx, itp_taus=None, itp_ccfs=None):
+    def plot_ccf(self, taus, ccf, nidx, itp_taus=None, itp_ccfs=None, lag=None):
         """Draw the CCF and its fitted peak profile on the bottom panel.
 
         Args:
@@ -1375,7 +1375,20 @@ class LagPlotter:
                 profile overlay, or ``None`` to skip it (e.g. the
                 ``'argmax'`` method has no continuous fit).
             itp_ccfs: Fitted CCF values aligned with ``itp_taus``.
+            lag: Optional ``[lag_value, lag_lower_error, lag_upper_error]``
+                used to mark the measured lag and shade its 1-sigma interval.
         """
+
+        if lag is not None:
+            lag_value, lag_le, lag_he = lag
+            self.ax_bot.axvspan(
+                lag_value - lag_le,
+                lag_value + lag_he,
+                color='tab:blue',
+                alpha=0.2,
+                lw=0,
+            )
+            self.ax_bot.axvline(lag_value, c='tab:blue', lw=1.0)
 
         self.ax_bot.scatter(
             taus[nidx], ccf[nidx], marker='+', color='k', s=10, linewidths=0.5, alpha=1.0
@@ -1418,7 +1431,7 @@ class MvtPlotter:
         ax_bot: Bottom-panel Axes (Haar scaleogram).
     """
 
-    def __init__(self, figsize=(6, 8)):
+    def __init__(self, figsize=(6, 7)):
         """Create an empty two-panel figure.
 
         Args:
@@ -1426,7 +1439,7 @@ class MvtPlotter:
         """
 
         self.fig = plt.figure(figsize=figsize)
-        gs = self.fig.add_gridspec(5, 1, hspace=0.5)
+        gs = self.fig.add_gridspec(5, 1, hspace=0.6)
         self.ax_top = self.fig.add_subplot(gs[0:2, 0])
         self.ax_bot = self.fig.add_subplot(gs[2:5, 0])
         set_diagnostic_axis(self.ax_top)

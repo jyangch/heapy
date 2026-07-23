@@ -694,8 +694,9 @@ class Lag:
                 self.nidx,
                 itp_taus=self.itp_taus,
                 itp_ccfs=self.itp_ccfs,
+                lag=self.lag,
             )
-            fig.save(savepath + '/tau_ccf.pdf')
+            fig.save(savepath + '/lag.pdf')
 
             fig, ax = plt.subplots(1, 1, figsize=(7, 6))
             mc_only = self.mc_fit_lags[1:]
