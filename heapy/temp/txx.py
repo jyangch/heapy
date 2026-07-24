@@ -339,16 +339,18 @@ class Txx:
             ``False`` if no pulse is detected; ``None`` on success (results
             are stored as instance attributes).
         """
+        self.xx = xx
 
         if getattr(self, 'pulse', None) is None:
             self.find_pulse()
+        detected_pulse = [list(p) for p in self.pulse]
 
-        self.xx = xx
-
+        user_pulse = None
         if pulse is not None:
             if len(pulse) > 0 and not isinstance(pulse[0], (list, tuple, np.ndarray)):
                 pulse = [pulse]
-            self.pulse = [list(p) for p in pulse]
+            user_pulse = [list(p) for p in pulse]
+            self.pulse = user_pulse
 
         self.pstart = np.sort([p[0] for p in self.pulse])
         self.pstop = np.sort([p[1] for p in self.pulse])
@@ -403,7 +405,6 @@ class Txx:
 
         self.txx_res = {
             'xx': self.xx,
-            'pulse': self.pulse,
             'txx': self.txx,
             'txx1': self.txx1,
             'txx2': self.txx2,
@@ -415,6 +416,10 @@ class Txx:
             'csf2': self.csf2,
             'time': self.time,
             'ccts': self.ccts,
+            'detected_pulse': detected_pulse,
+            'user_pulse': user_pulse,
+            'lbkg': lbkg,
+            'rbkg': rbkg,
         }
 
         XX = int(self.xx * 100)
