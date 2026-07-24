@@ -977,8 +977,7 @@ class Event:
         self,
         mp=True,
         xx=0.9,
-        pstart=None,
-        pstop=None,
+        pulse=None,
         lbkg=None,
         rbkg=None,
         savepath='./curve/duration',
@@ -992,10 +991,10 @@ class Event:
         Args:
             mp: If ``True``, use multi-peak pulse-finding mode.
             xx: Fraction of total counts to enclose; e.g. 0.9 for T90.
-            pstart: Forced pulse start time in seconds relative to
-                ``timezero``, or ``None`` for automatic detection.
-            pstop: Forced pulse stop time in seconds relative to
-                ``timezero``, or ``None`` for automatic detection.
+            pulse: Manual override for the pulse interval(s). Either a single
+                ``[pstart, pstop]`` pair or a list of such pairs (``[]`` clears
+                the pulse to "none detected"); ``None`` keeps the existing
+                ``self.pulse``.
             lbkg: Left background window ``[t1, t2]``, or ``None`` to use
                 the automatically determined window.
             rbkg: Right background window ``[t1, t2]``, or ``None`` to use
@@ -1010,7 +1009,6 @@ class Event:
 
         txx = pgTxx(self.lc_ts, self.lc_bins, self.lc_exps, self.bs_ignore)
         txx.find_pulse(p0=self.bs_p0, sigma=self.bs_sigma, deg=self.bs_deg, mp=mp)
-        pulse = [pstart, pstop] if pstart is not None and pstop is not None else None
         txx.calculate(xx=xx, pulse=pulse, lbkg=lbkg, rbkg=rbkg)
         txx.save(savepath=savepath)
 

@@ -852,8 +852,7 @@ class batPipe:
         self,
         mp=True,
         xx=0.9,
-        pstart=None,
-        pstop=None,
+        pulse=None,
         lbkg=None,
         rbkg=None,
         savepath='./curve/duration',
@@ -869,10 +868,10 @@ class batPipe:
             mp: When ``True``, use multi-pulse mode in ``ggTxx.find_pulse``.
             xx: Fraction of total burst counts to integrate for the duration
                 estimate (e.g. ``0.9`` gives T90).
-            pstart: Manual override for the pulse start time relative to
-                ``timezero`` in seconds.  Uses the detected start when ``None``.
-            pstop: Manual override for the pulse stop time relative to
-                ``timezero`` in seconds.  Uses the detected stop when ``None``.
+            pulse: Manual override for the pulse interval(s). Either a single
+                ``[pstart, pstop]`` pair or a list of such pairs (``[]`` clears
+                the pulse to "none detected"); ``None`` keeps the existing
+                ``self.pulse``.
             lbkg: Left background interval as ``[t1, t2]`` in seconds relative
                 to ``timezero``.  Auto-selected when ``None``.
             rbkg: Right background interval as ``[t1, t2]`` in seconds relative
@@ -892,7 +891,6 @@ class batPipe:
 
         txx = ggTxx(self.lc_net_cts, self.lc_net_cts_err, self.lc_bins)
         txx.find_pulse(p0=self.gs_p0, sigma=self.gs_sigma, mp=mp)
-        pulse = [pstart, pstop] if pstart is not None and pstop is not None else None
         txx.calculate(xx=xx, pulse=pulse, lbkg=lbkg, rbkg=rbkg)
         txx.save(savepath=savepath)
 
