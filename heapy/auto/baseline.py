@@ -130,12 +130,25 @@ class Baseline:
 
         self.mo = mo
 
+    def _warn_if_extrapolated(self, x):
+        lower = min(self.x - self.dx)
+        upper = max(self.x + self.dx)
+
+        if min(x) < lower:
+            msg = f'Extrapolation may be imprecise: {min(x):f} < {lower:f}'
+            warnings.warn(msg, UserWarning, stacklevel=3)
+
+        if max(x) > upper:
+            msg = f'Extrapolation may be imprecise: {max(x):f} > {upper:f}'
+            warnings.warn(msg, UserWarning, stacklevel=3)
+
     def val(self, x):
         """Evaluate the fitted baseline at ``x`` via cubic spline interpolation.
 
         Args:
-            x: Query abscissae; values outside the fitting range are
-                extrapolated and trigger a ``UserWarning``.
+            x: Query abscissae; values more than one fitted-bin spacing
+                outside the fitting range are extrapolated and trigger a
+                ``UserWarning``.
 
         Returns:
             Interpolated baseline values at ``x``.
@@ -143,13 +156,7 @@ class Baseline:
 
         x = np.asarray(x)
 
-        if min(x) < min(self.x - self.dx / 1.8):
-            msg = f'Extrapolation may be imprecise: {min(x):f} < {min(self.x - self.dx / 1.8):f}'
-            warnings.warn(msg, UserWarning, stacklevel=2)
-
-        if max(x) > max(self.x + self.dx / 1.8):
-            msg = f'Extrapolation may be imprecise: {max(x):f} > {max(self.x + self.dx / 1.8):f}'
-            warnings.warn(msg, UserWarning, stacklevel=2)
+        self._warn_if_extrapolated(x)
 
         interp = CubicSpline(self.x, self.mo, extrapolate=True)
 
@@ -166,8 +173,9 @@ class Baseline:
         point is irrelevant.
 
         Args:
-            x: Query abscissae; values outside the fitting range are
-                extrapolated and trigger a ``UserWarning``.
+            x: Query abscissae; values more than one fitted-bin spacing
+                outside the fitting range are extrapolated and trigger a
+                ``UserWarning``.
 
         Returns:
             Antiderivative values at ``x``.
@@ -175,13 +183,7 @@ class Baseline:
 
         x = np.asarray(x)
 
-        if min(x) < min(self.x - self.dx / 1.8):
-            msg = f'Extrapolation may be imprecise: {min(x):f} < {min(self.x - self.dx / 1.8):f}'
-            warnings.warn(msg, UserWarning, stacklevel=2)
-
-        if max(x) > max(self.x + self.dx / 1.8):
-            msg = f'Extrapolation may be imprecise: {max(x):f} > {max(self.x + self.dx / 1.8):f}'
-            warnings.warn(msg, UserWarning, stacklevel=2)
+        self._warn_if_extrapolated(x)
 
         antider = CubicSpline(self.x, self.mo, extrapolate=True).antiderivative()
 

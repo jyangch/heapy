@@ -98,11 +98,24 @@ class Polynomial:
         else:
             raise ValueError('invalid method')
 
+    def _warn_if_extrapolated(self, x):
+        lower = min(self.x - self.dx)
+        upper = max(self.x + self.dx)
+
+        if min(x) < lower:
+            msg = f'Extrapolation may be imprecise: {min(x):f} < {lower:f}'
+            warnings.warn(msg, UserWarning, stacklevel=3)
+
+        if max(x) > upper:
+            msg = f'Extrapolation may be imprecise: {max(x):f} > {upper:f}'
+            warnings.warn(msg, UserWarning, stacklevel=3)
+
     def val(self, x):
         """Evaluate the fitted polynomial and its 1-sigma uncertainty at ``x``.
 
-        Emits a ``UserWarning`` when ``x`` falls outside the fitting
-        range. Requires a prior :meth:`fit` call.
+        Emits a ``UserWarning`` when ``x`` falls more than one
+        fitted-bin spacing outside the fitting range. Requires a prior
+        :meth:`fit` call.
 
         Args:
             x: Query abscissae.
@@ -117,13 +130,7 @@ class Polynomial:
 
         x = np.array(x)
 
-        if min(x) < min(self.x - self.dx / 1.8):
-            msg = f'Extrapolation may be imprecise: {min(x):f} < {min(self.x - self.dx / 1.8):f}'
-            warnings.warn(msg, UserWarning, stacklevel=2)
-
-        if max(x) > max(self.x + self.dx / 1.8):
-            msg = f'Extrapolation may be imprecise: {max(x):f} > {max(self.x + self.dx / 1.8):f}'
-            warnings.warn(msg, UserWarning, stacklevel=2)
+        self._warn_if_extrapolated(x)
 
         assert self.ls_res is not None, 'you should first perform fitting'
 
@@ -138,7 +145,9 @@ class Polynomial:
         via the linear map ``c_int[k] = c[k] / (deg + 1 - k)``. Intended
         as a ``bkg_integral`` callable for time-rescaling Bayesian blocks
         where only differences ``F(t1) - F(t0)`` enter, so the choice
-        of integration constant is irrelevant.
+        of integration constant is irrelevant. Emits a ``UserWarning``
+        when ``x`` falls more than one fitted-bin spacing outside the
+        fitting range.
 
         Args:
             x: Query abscissae.
@@ -152,13 +161,7 @@ class Polynomial:
 
         x = np.array(x)
 
-        if min(x) < min(self.x - self.dx / 1.8):
-            msg = f'Extrapolation may be imprecise: {min(x):f} < {min(self.x - self.dx / 1.8):f}'
-            warnings.warn(msg, UserWarning, stacklevel=2)
-
-        if max(x) > max(self.x + self.dx / 1.8):
-            msg = f'Extrapolation may be imprecise: {max(x):f} > {max(self.x + self.dx / 1.8):f}'
-            warnings.warn(msg, UserWarning, stacklevel=2)
+        self._warn_if_extrapolated(x)
 
         assert self.ls_res is not None, 'you should first perform fitting'
 
