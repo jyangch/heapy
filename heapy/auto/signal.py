@@ -67,7 +67,6 @@ class pgSignal:
             the composite path).
         bins: Bin edges (length ``N + 1``).
         cts, exp, time, rate: Histogram, exposure, bin centers, and rate.
-            ``exp`` is only set on the raw-events construction path.
         ignore: User-supplied list of ``[low, high]`` intervals (or
             ``None``). When set, it serves as an escape hatch that
             bypasses the auto-detected ``sort_res['ignore']`` in
@@ -323,6 +322,7 @@ class pgSignal:
         inst.lbins = obj_list[0].lbins
         inst.rbins = obj_list[0].rbins
         inst.binsize = obj_list[0].binsize
+        inst.exp = obj_list[0].exp
 
         inst.time = obj_list[0].time
         inst.cts = np.sum([obj.cts for obj in obj_list], axis=0)
