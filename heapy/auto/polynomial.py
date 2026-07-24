@@ -98,18 +98,6 @@ class Polynomial:
         else:
             raise ValueError('invalid method')
 
-    def _warn_if_extrapolated(self, x):
-        lower = min(self.x - self.dx)
-        upper = max(self.x + self.dx)
-
-        if min(x) < lower:
-            msg = f'Extrapolation may be imprecise: {min(x):f} < {lower:f}'
-            warnings.warn(msg, UserWarning, stacklevel=3)
-
-        if max(x) > upper:
-            msg = f'Extrapolation may be imprecise: {max(x):f} > {upper:f}'
-            warnings.warn(msg, UserWarning, stacklevel=3)
-
     def val(self, x):
         """Evaluate the fitted polynomial and its 1-sigma uncertainty at ``x``.
 
@@ -129,8 +117,6 @@ class Polynomial:
         """
 
         x = np.array(x)
-
-        self._warn_if_extrapolated(x)
 
         assert self.ls_res is not None, 'you should first perform fitting'
 
@@ -160,8 +146,6 @@ class Polynomial:
         """
 
         x = np.array(x)
-
-        self._warn_if_extrapolated(x)
 
         assert self.ls_res is not None, 'you should first perform fitting'
 

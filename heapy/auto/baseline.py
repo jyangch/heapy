@@ -6,8 +6,6 @@ The fitted baseline is stored on the instance and can be evaluated at
 arbitrary abscissae via cubic spline interpolation.
 """
 
-import warnings
-
 from astropy.stats import mad_std, sigma_clip
 import numpy as np
 import pybaselines
@@ -130,18 +128,6 @@ class Baseline:
 
         self.mo = mo
 
-    def _warn_if_extrapolated(self, x):
-        lower = min(self.x - self.dx)
-        upper = max(self.x + self.dx)
-
-        if min(x) < lower:
-            msg = f'Extrapolation may be imprecise: {min(x):f} < {lower:f}'
-            warnings.warn(msg, UserWarning, stacklevel=3)
-
-        if max(x) > upper:
-            msg = f'Extrapolation may be imprecise: {max(x):f} > {upper:f}'
-            warnings.warn(msg, UserWarning, stacklevel=3)
-
     def val(self, x):
         """Evaluate the fitted baseline at ``x`` via cubic spline interpolation.
 
@@ -155,8 +141,6 @@ class Baseline:
         """
 
         x = np.asarray(x)
-
-        self._warn_if_extrapolated(x)
 
         interp = CubicSpline(self.x, self.mo, extrapolate=True)
 
@@ -182,8 +166,6 @@ class Baseline:
         """
 
         x = np.asarray(x)
-
-        self._warn_if_extrapolated(x)
 
         antider = CubicSpline(self.x, self.mo, extrapolate=True).antiderivative()
 
