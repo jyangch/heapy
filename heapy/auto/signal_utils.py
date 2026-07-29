@@ -16,7 +16,6 @@ Bundles four groups of utilities consumed by :mod:`heapy.auto.signal`:
 """
 
 import os
-import warnings
 
 from astropy.stats import bayesian_blocks
 import matplotlib.pyplot as plt
@@ -298,9 +297,6 @@ def detect_pulses_by_snr(re_snr, edges, sigma, mp=True):
         pstop = pstop[1:]
 
     if not mp and len(pstart) > 0:
-        if len(pstart) > 1:
-            msg = 'multi-pulse will be combined into one'
-            warnings.warn(msg, UserWarning, stacklevel=2)
         pstart = [pstart[0]]
         pstop = [pstop[-1]]
 
