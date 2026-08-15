@@ -245,10 +245,7 @@ class MVT:
             **kwargs: Forwarded to
                 :func:`~heapy.temp.temp_utils.calculate_haar_mvt`
                 (``tau_bg_max``, ``nrepl``, ``bin_fac``, ``afactor``,
-                ``snr``, ``verbose``, ``weight``, ``drop_nonfinite``,
-                ``file``). ``drop_nonfinite`` defaults to ``True`` for
-                robust real-data analysis; pass ``False`` for exact
-                upstream-unfiltered behavior.
+                ``snr``, ``verbose``, ``weight``, ``file``).
 
         Returns:
             The result dict (also stored on ``self.mvt_res``).
@@ -277,7 +274,7 @@ class MVT:
 
         return self.mvt_res
 
-    def save(self, savepath, max_dt='auto'):
+    def save(self, savepath, max_dt=100.0):
         """Save the MVT result and a diagnostic plot to disk.
 
         Serialises ``self.mvt_res`` as a JSON file and writes a two-panel
@@ -290,10 +287,8 @@ class MVT:
             savepath: Directory path where output files are written;
                 created if it does not exist.
             max_dt: Optional scaleogram plotting limit; defaults to
-                ``'auto'``, which uses the first robustly dropped
-                non-finite/noise-spike scale when available. Pass
-                ``100.0`` for upstream's fixed demonstration extent, or
-                ``None`` to infer from the analysed time span.
+                upstream's fixed demonstration extent. Pass ``None`` to
+                infer from the analysed time span.
 
         Raises:
             RuntimeError: If :meth:`calculate` has not been called yet.

@@ -623,8 +623,8 @@ def calculate_haar_power_spectrum(data, error, weight, dt=1.0, osamp=32.0, nrepl
 
     with np.errstate(divide='ignore', invalid='ignore'):
         for k in range(nscales):
-            scl = scales[k]
-            scl2 = scl**2
+            scl = int(scales[k])
+            scl2 = float(scl) ** 2
             cfac = nmax / (nmax - 2.0 * scl + 1)
 
             wav2 = (
@@ -660,27 +660,6 @@ def calculate_haar_power_spectrum(data, error, weight, dt=1.0, osamp=32.0, nrepl
     return dt * scl1, dt * scl2, psp, psp0, dpsp
 
 
-def drop_local_noise_floor_spikes(tau, noise_power, factor=100.0, half_window=2):
-    """Mask finite scaleogram bins whose noise floor is a sharp local spike."""
-
-    tau = np.asarray(tau, dtype=float)
-    noise_power = np.asarray(noise_power, dtype=float)
-    keep = np.isfinite(tau) & np.isfinite(noise_power) & (noise_power > 0)
-    idx = np.where(keep)[0]
-    if idx.size < 2 * half_window + 1:
-        return keep
-
-    log_noise = np.log(noise_power[idx])
-    for pos, src_idx in enumerate(idx):
-        lo = max(0, pos - half_window)
-        hi = min(idx.size, pos + half_window + 1)
-        neigh = np.r_[log_noise[lo:pos], log_noise[pos + 1 : hi]]
-        if neigh.size >= half_window and log_noise[pos] - np.median(neigh) > np.log(factor):
-            keep[src_idx] = False
-
-    return keep
-
-
 def calculate_haar_mvt(
     rate,
     rate_err,
@@ -693,7 +672,6 @@ def calculate_haar_mvt(
     snr=3.0,
     verbose=False,
     weight=True,
-    drop_nonfinite=True,
     file='mvt',
 ):
     """Compute the Haar minimum variability timescale (MVT) of a light curve.
@@ -721,12 +699,6 @@ def calculate_haar_mvt(
             docstring for their exact roles.
         verbose: Print a one-line summary (``a factor``, or
             ``T_snr``/``T_beta``/``T_min``) as the original code does.
-        drop_nonfinite: When ``True``, drop scales where
-            ``power``/``noise_power``/``power_err`` are non-finite before
-            searching for the break, and also drop finite bins whose
-            noise floor is a sharp local numerical spike (on by default
-            for robust real-data analysis). Pass ``False`` to reproduce
-            upstream's unfiltered default behavior exactly.
         file: Label used in the ``verbose`` print statements.
 
     Returns:
@@ -772,21 +744,7 @@ def calculate_haar_mvt(
         osamp=bin_fac * 8,
     )
 
-    tau_all = 0.5 * (dta + dta1)
     g = pspec0 > 0
-    first_dropped_tau = np.nan
-    first_noise_spike_tau = np.nan
-    if drop_nonfinite:
-        finite_mask = np.isfinite(pspec) & np.isfinite(pspec0) & np.isfinite(dpspec)
-        spike_keep = drop_local_noise_floor_spikes(tau_all, pspec0)
-        dropped = g & ~(finite_mask & spike_keep)
-        noise_spikes = g & finite_mask & ~spike_keep
-        if dropped.any():
-            first_dropped_tau = float(tau_all[np.flatnonzero(dropped)[0]])
-        if noise_spikes.any():
-            first_noise_spike_tau = float(tau_all[np.flatnonzero(noise_spikes)[0]])
-        g &= finite_mask
-        g &= spike_keep
     dta = dta[g]
     dta1 = dta1[g]
     pspec = pspec[g]
@@ -989,9 +947,6 @@ def calculate_haar_mvt(
         'afactor': float(afactor),
         'snr': float(snr),
         'weight': bool(weight),
-        'drop_nonfinite': bool(drop_nonfinite),
-        'first_dropped_tau': float(first_dropped_tau),
-        'first_noise_spike_tau': float(first_noise_spike_tau),
     }
     if reason is not None:
         diag['reason'] = reason
@@ -1015,7 +970,7 @@ def set_diagnostic_axis(ax):
     ax.tick_params(which='minor', width=1.0, length=3)
 
 
-def plot_haar_scaleogram(ax, dt, time, mvt_res, max_dt='auto'):
+def plot_haar_scaleogram(ax, dt, time, mvt_res, max_dt=100.0):
     """Reproduce ``nrbutler/mvt``'s ``haar_power_mod`` scaleogram plot on ``ax``.
 
     Ports the ``doplot`` block of the upstream ``haar_power_mod`` function
@@ -1032,16 +987,12 @@ def plot_haar_scaleogram(ax, dt, time, mvt_res, max_dt='auto'):
         ax: Matplotlib Axes to draw on.
         dt: Bin width in seconds (upstream's ``min_dt``).
         time: Bin-center times of the analysed light curve; used when
-            ``max_dt`` is ``'auto'`` and no dropped scale is available,
-            or when ``max_dt`` is explicitly ``None``.
+            ``max_dt`` is ``None``.
         mvt_res: A result dict as returned by
             :meth:`~heapy.temp.mvt.MVT.calculate`.
-        max_dt: Optional scaleogram plotting limit. ``'auto'`` uses the
-            first scale dropped by the robust non-finite/noise-spike
-            filter when available, otherwise the analysed time span.
-            Pass a number (for example upstream's ``100.0``) for an
-            explicit fixed plotting range, or ``None`` to infer from the
-            analysed time span.
+        max_dt: Optional scaleogram plotting limit. The default
+            ``100.0`` matches upstream's demonstration extent; pass
+            ``None`` to infer from the analysed time span.
     """
 
     diag = mvt_res['diag']
@@ -1063,13 +1014,7 @@ def plot_haar_scaleogram(ax, dt, time, mvt_res, max_dt='auto'):
     ax.set_ylabel(r'Flux Variation $\sigma_{X,\Delta t}$')
 
     min_dt = dt
-    if max_dt == 'auto':
-        first_dropped_tau = float(diag.get('first_dropped_tau', np.nan))
-        if np.isfinite(first_dropped_tau) and first_dropped_tau > min_dt:
-            max_dt = first_dropped_tau
-        else:
-            max_dt = float(time[-1] - time[0]) if len(time) > 1 else dt
-    elif max_dt is None:
+    if max_dt is None:
         max_dt = float(time[-1] - time[0]) if len(time) > 1 else dt
     else:
         max_dt = float(max_dt)
@@ -1458,7 +1403,7 @@ class MvtPlotter:
         self.ax_top.plot(time, rate, color='k', lw=1.0)
         self.ax_top.set_xlim([time[0], time[-1]])
 
-    def plot_scaleogram(self, dt, time, mvt_res, max_dt='auto'):
+    def plot_scaleogram(self, dt, time, mvt_res, max_dt=100.0):
         """Draw the Haar scaleogram on the bottom panel; see :func:`plot_haar_scaleogram`.
 
         Args:
@@ -1467,8 +1412,7 @@ class MvtPlotter:
             mvt_res: A result dict as returned by
                 :meth:`~heapy.temp.mvt.MVT.calculate`.
             max_dt: Optional scaleogram plotting limit; defaults to
-                ``'auto'``. Pass ``100.0`` for upstream's fixed
-                demonstration extent.
+                upstream's fixed demonstration extent.
         """
 
         plot_haar_scaleogram(self.ax_bot, dt, time, mvt_res, max_dt=max_dt)
