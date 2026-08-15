@@ -388,7 +388,7 @@ class Lag:
 
         return cons + amp * (eta * lorentzian_part + (1 - eta) * gaussian_part)
 
-    def _mc_simulation(self, nmc, random_seed=450001):
+    def generate_mc_simulation(self, nmc, random_seed=450001):
         """Generate Monte Carlo realisations of the net count light curve.
 
         The sampling model is selected by ``self.xtype`` and ``self.ytype``:
@@ -489,7 +489,7 @@ class Lag:
         self.yncts = self.ycts - self.ybcts * self.ybackscale
         self.nsample = len(self.xcts)
 
-        self._mc_simulation(1000)
+        self.generate_mc_simulation(1000)
 
         if self.M > 1:
             self.xncts = box_smooth(self.xncts, self.M)

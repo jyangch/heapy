@@ -384,7 +384,7 @@ class pgSignal:
             return [[float(seq[0]), float(seq[1])]]
         return [[float(low), float(upp)] for low, upp in seq]
 
-    def _effective_ignore(self):
+    def get_effective_ignore(self):
         """Resolve which intervals to drop from background fits at the current state.
 
         Resolution policy:
@@ -499,7 +499,7 @@ class pgSignal:
 
         weight = np.ones_like(self.time) if weight is None else np.array(weight, dtype=float)
 
-        exclude = self._effective_ignore()
+        exclude = self.get_effective_ignore()
         if exclude:
             ignore_idx = indices_in_intervals(self.lbins, self.rbins, exclude)
             weight[ignore_idx] = 0
@@ -621,9 +621,9 @@ class pgSignal:
     def polyfit(self, deg=None):
         """Refit the background as a polynomial over non-signal bins.
 
-        Drops bins inside :meth:`_effective_ignore` and fits the
+        Drops bins inside :meth:`get_effective_ignore` and fits the
         remaining rates with :class:`~.polynomial.Polynomial`. The
-        resolution policy (see :meth:`_effective_ignore`) is:
+        resolution policy (see :meth:`get_effective_ignore`) is:
         user-supplied :attr:`ignore` is honoured as an escape hatch and
         bypasses the auto-derived ``sort_res['ignore']``; otherwise the
         auto-derived intervals are used. NaN-gap intervals
@@ -653,7 +653,7 @@ class pgSignal:
         if self.sort_res is None and self.ignore is None:
             self.sorting()
 
-        ignore = self._effective_ignore()
+        ignore = self.get_effective_ignore()
         ignore_idx = indices_in_intervals(self.lbins, self.rbins, ignore)
 
         notice_time = np.delete(self.time, ignore_idx)

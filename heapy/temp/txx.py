@@ -264,7 +264,7 @@ class Txx:
 
         return inst
 
-    def _mc_simulation(self, nmc, random_seed=450001):
+    def generate_mc_simulation(self, nmc, random_seed=450001):
         """Generate Monte Carlo realisations of the net count light curve.
 
         The sampling model is selected by ``self.type``:
@@ -319,7 +319,7 @@ class Txx:
 
         Optionally overrides the pulse interval(s) given at construction.
         Uncertainties are estimated via 1000 Monte Carlo realisations (see
-        :meth:`_mc_simulation`). Results are printed to stdout and stored
+        :meth:`generate_mc_simulation`). Results are printed to stdout and stored
         in ``self.txx_res``.
 
         Args:
@@ -372,7 +372,7 @@ class Txx:
         # without propagating NaN through the rest of the cumulative curve.
         self.ccts = np.nancumsum(self.ncts)
 
-        self._mc_simulation(1000)
+        self.generate_mc_simulation(1000)
 
         mc_csf, mc_csf1, mc_csf2 = [], [], []
         mc_txx, mc_txx1, mc_txx2 = [], [], []

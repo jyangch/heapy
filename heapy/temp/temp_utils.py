@@ -14,6 +14,8 @@ Bundles shared utilities consumed by :mod:`heapy.temp.txx`,
   Butler for reproducing Golkhou & Butler (2014) and Golkhou, Butler &
   Littlejohns (2015); do not edit these three functions' numerics
   without re-diffing against the upstream source.
+- The continuous-wavelet spectrum core (:func:`calculate_cwt_spectrum`,
+  :func:`estimate_cwt_tmv`), consumed by :mod:`heapy.temp.cwt`.
 - :func:`uniform_dt_from_bins`, a bin-edge validation helper shared by
   every Signal-to-MVT bridging path.
 - Monte Carlo sampling, box smoothing, and CCF batch calculation helpers
@@ -29,6 +31,7 @@ from astropy.stats import mad_std, sigma_clip
 from matplotlib.lines import Line2D
 import matplotlib.pyplot as plt
 import numpy as np
+import pycwt
 from scipy.fft import irfft, next_fast_len, rfft
 from scipy.interpolate import interp1d
 from scipy.optimize import minimize_scalar
@@ -1114,6 +1117,206 @@ def plot_haar_scaleogram(ax, dt, time, mvt_res, max_dt=100.0):
     )
 
 
+def build_cwt_mother(mother, param):
+    """Build a pycwt mother wavelet from a compact user-facing name.
+
+    Args:
+        mother: Mother wavelet name. Supported values are
+            ``'mexican_hat'``, ``'dog'``, ``'morlet'``, and ``'paul'``.
+        param: pycwt mother-wavelet parameter for ``dog``, ``morlet``,
+            or ``paul``. Ignored for ``'mexican_hat'``.
+
+    Returns:
+        Tuple ``(mother_name, mother_object)``.
+    """
+
+    mother_key = mother.lower().replace('-', '_').replace(' ', '_')
+    if mother_key in ('mexican_hat', 'mexicanhat', 'ricker'):
+        return 'mexican_hat', pycwt.DOG(2)
+    if mother_key == 'dog':
+        return 'dog', pycwt.DOG(param)
+    if mother_key == 'morlet':
+        return 'morlet', pycwt.Morlet(param)
+    if mother_key == 'paul':
+        return 'paul', pycwt.Paul(param)
+
+    raise ValueError('unknown mother wavelet; expected mexican_hat, dog, morlet, or paul')
+
+
+def calculate_cwt_spectrum(
+    data,
+    dt,
+    *,
+    mother='mexican_hat',
+    param=2,
+    s0=None,
+    dj=0.25,
+    max_time_scale=None,
+    correct_scale=True,
+    require_power_of_two=True,
+):
+    """Compute a continuous-wavelet global power spectrum for a light curve.
+
+    This follows the ``giacomov/mvts`` CWT path: standardize the input
+    series, use pycwt's continuous wavelet transform (Mexican Hat/DOG(2)
+    by default), average the wavelet power over time, and optionally use
+    the scale-corrected global spectrum as suggested by Liu et al. (2007).
+
+    Args:
+        data: One-dimensional light curve values.
+        dt: Uniform bin width in seconds.
+        mother: Mother wavelet name. Defaults to ``'mexican_hat'``.
+        param: pycwt mother-wavelet parameter for ``dog``, ``morlet``, or
+            ``paul``. Ignored for ``'mexican_hat'``, which is ``DOG(2)``.
+        s0: Smallest CWT scale. Defaults to ``2 * dt``.
+        dj: Scale spacing in powers of two. Defaults to ``0.25``.
+        max_time_scale: Optional maximum timescale used to truncate the
+            CWT scale grid.
+        correct_scale: When ``True``, expose ``spectrum_power`` as the
+            scale-corrected global wavelet spectrum.
+        require_power_of_two: Preserve the upstream ``mvts`` requirement
+            that the sample count is a power of two.
+
+    Returns:
+        Dict containing the CWT arrays and global spectrum diagnostics.
+
+    Raises:
+        ValueError: If the input is not finite one-dimensional data, has
+            zero variance, non-positive ``dt``, or violates the power-of-two
+            requirement.
+    """
+
+    data = np.asarray(data, dtype=float)
+    if data.ndim != 1:
+        raise ValueError('data must be one-dimensional')
+    if data.size < 4:
+        raise ValueError('at least four samples are required')
+    if not np.isfinite(data).all():
+        raise ValueError('data must be finite')
+    if require_power_of_two and (data.size <= 0 or (data.size & (data.size - 1)) != 0):
+        raise ValueError(f'sample size for CWT is {data.size}, which is not a power of 2')
+
+    dt = float(dt)
+    if not np.isfinite(dt) or dt <= 0:
+        raise ValueError('dt must be a positive finite scalar')
+
+    variance = float(np.var(data))
+    if variance <= 0 or not np.isfinite(variance):
+        raise ValueError('data variance must be positive')
+
+    mother_name, mother_obj = build_cwt_mother(mother, param)
+    s0 = 2.0 * dt if s0 is None else float(s0)
+    if s0 <= 0:
+        raise ValueError('s0 must be positive')
+
+    if max_time_scale is None:
+        J = int(np.floor(np.log2(data.size * dt / s0) / dj))
+    else:
+        max_time_scale = float(max_time_scale)
+        if max_time_scale <= s0:
+            raise ValueError('max_time_scale must be larger than s0')
+        J = int(np.floor(np.log2(max_time_scale / s0) / dj))
+
+    data_norm = (data - data.mean()) / np.sqrt(variance)
+    autocorrelation = float(np.corrcoef(data_norm[:-1], data_norm[1:])[0, 1])
+
+    wave, scales, freqs, coi, fft, fftfreqs = pycwt.cwt(data_norm, dt, dj, s0, J, mother_obj)
+    power = np.abs(wave) ** 2
+    period = scales * mother_obj.flambda()
+    global_ws = variance * (np.sum(power.conj().transpose(), axis=0) / data.size)
+
+    spectrum_power = (global_ws + autocorrelation) / scales if correct_scale else global_ws
+
+    return {
+        'mode': 'cwt',
+        'mother': mother_name,
+        'param': 2 if mother_name == 'mexican_hat' else param,
+        'dt': dt,
+        's0': s0,
+        'dj': dj,
+        'J': J,
+        'correct_scale': bool(correct_scale),
+        'autocorrelation': autocorrelation,
+        'period': period,
+        'scale': scales,
+        'global_ws': global_ws,
+        'spectrum_power': np.asarray(spectrum_power, dtype=float),
+        'power': power,
+        'wave': wave,
+        'freqs': freqs,
+        'coi': coi,
+        'fft': fft,
+        'fftfreqs': fftfreqs,
+    }
+
+
+def estimate_cwt_tmv(period, spectrum_power, bg_hi, *, min_consecutive=2):
+    """Pick the first significant CWT timescale above a null-spectrum envelope.
+
+    Args:
+        period: CWT timescale grid.
+        spectrum_power: Observed global spectrum on ``period``.
+        bg_hi: Upper null-spectrum envelope on ``period``.
+        min_consecutive: Number of adjacent timescale bins required above
+            ``bg_hi`` to accept a crossing.
+
+    Returns:
+        A dict with ``tmv``, ``is_upper_limit``, quality label, and masks.
+    """
+
+    period = np.asarray(period, dtype=float)
+    spectrum_power = np.asarray(spectrum_power, dtype=float)
+    bg_hi = np.asarray(bg_hi, dtype=float)
+    if period.shape != spectrum_power.shape or period.shape != bg_hi.shape:
+        raise ValueError('period, spectrum_power, and bg_hi must have matching shapes')
+
+    min_consecutive = int(min_consecutive)
+    if min_consecutive < 1:
+        raise ValueError('min_consecutive must be a positive integer')
+
+    finite = np.isfinite(period) & np.isfinite(spectrum_power) & np.isfinite(bg_hi)
+    excess = finite & (spectrum_power > bg_hi)
+
+    first_idx = None
+    for idx in range(0, len(excess) - min_consecutive + 1):
+        if excess[idx : idx + min_consecutive].all():
+            first_idx = idx
+            break
+
+    if first_idx is None:
+        return {
+            'tmv': np.nan,
+            'is_upper_limit': False,
+            'quality': 'not_detected',
+            'first_index': None,
+            'excess_mask': excess,
+        }
+
+    if first_idx == 0:
+        tmv = float(period[0])
+        is_upper_limit = True
+        quality = 'upper_limit'
+    else:
+        p0, p1 = period[first_idx - 1], period[first_idx]
+        y0 = np.log(spectrum_power[first_idx - 1]) - np.log(bg_hi[first_idx - 1])
+        y1 = np.log(spectrum_power[first_idx]) - np.log(bg_hi[first_idx])
+        if np.isfinite(y0) and np.isfinite(y1) and y1 != y0:
+            frac = np.clip(-y0 / (y1 - y0), 0.0, 1.0)
+            tmv = float(np.exp(np.log(p0) + frac * (np.log(p1) - np.log(p0))))
+        else:
+            tmv = float(p1)
+        is_upper_limit = False
+        quality = 'robust' if min_consecutive > 1 else 'marginal'
+
+    return {
+        'tmv': tmv,
+        'is_upper_limit': is_upper_limit,
+        'quality': quality,
+        'first_index': int(first_idx),
+        'excess_mask': excess,
+    }
+
+
 class TxxPlotter:
     """Composable two-panel diagnostic figure for Txx duration analysis.
 
@@ -1430,6 +1633,99 @@ class MvtPlotter:
             filename: Output file path; format inferred from extension.
             dpi: Resolution in dots per inch.
         """
+
+        self.fig.savefig(filename, bbox_inches='tight', pad_inches=0.1, dpi=dpi)
+        plt.close(self.fig)
+
+
+class CwtPlotter:
+    """Composable two-panel diagnostic figure for CWT spectrum analysis.
+
+    Top panel (:attr:`ax_top`): the background-subtracted light curve.
+    Bottom panel (:attr:`ax_bot`): the scale-corrected global CWT spectrum
+    with an optional Monte Carlo null-spectrum envelope and selected
+    ``t_mv`` marker. Compose by calling :meth:`plot_curve` and
+    :meth:`plot_spectrum`, then :meth:`save` or :meth:`show`.
+
+    Attributes:
+        fig: Underlying matplotlib Figure.
+        ax_top: Top-panel Axes (net-count light curve).
+        ax_bot: Bottom-panel Axes (CWT global spectrum).
+    """
+
+    def __init__(self, figsize=(6, 7)):
+        """Create an empty two-panel CWT diagnostic figure."""
+
+        self.fig = plt.figure(figsize=figsize)
+        gs = self.fig.add_gridspec(5, 1, hspace=0.6)
+        self.ax_top = self.fig.add_subplot(gs[0:2, 0])
+        self.ax_bot = self.fig.add_subplot(gs[2:5, 0])
+        set_diagnostic_axis(self.ax_top)
+        set_diagnostic_axis(self.ax_bot)
+        self.ax_top.set_xlabel('Time (s)')
+        self.ax_top.set_ylabel('Net counts')
+
+    def plot_curve(self, time, ncts):
+        """Draw the background-subtracted count light curve."""
+
+        self.ax_top.plot(time, ncts, color='k', lw=1.0)
+        self.ax_top.set_xlim([time[0], time[-1]])
+
+    def plot_spectrum(self, cwt_res, tmv_res=None):
+        """Draw the CWT global spectrum and optional null envelope.
+
+        Args:
+            cwt_res: Result dict from :class:`~heapy.temp.cwt.CWT`.
+            tmv_res: Optional result dict from
+                :meth:`~heapy.temp.cwt.CWT.estimate_tmv`.
+        """
+
+        spectrum = cwt_res['spectrum']
+        period = np.asarray(spectrum['period'], dtype=float)
+        power = np.asarray(spectrum['spectrum_power'], dtype=float)
+
+        self.ax_bot.plot(period, power, 'o', color='tab:blue', ms=3, label='Observed')
+
+        if tmv_res is not None:
+            diag = tmv_res['diag']
+            bg_median = np.asarray(diag['bg_median'], dtype=float)
+            bg_lo = np.asarray(diag['bg_lo'], dtype=float)
+            bg_hi = np.asarray(diag['bg_hi'], dtype=float)
+            self.ax_bot.fill_between(period, bg_lo, bg_hi, color='tab:blue', alpha=0.2)
+            self.ax_bot.plot(period, bg_median, color='k', ls='--', lw=1.0, label='Null median')
+
+            tmv = tmv_res['tmv']
+            if np.isfinite(tmv):
+                self.ax_bot.axvline(tmv, color='m', lw=1.0)
+                label = (
+                    r'$t_{\rm mv}<$' + rf'{tmv:.4g} s'
+                    if tmv_res['is_upper_limit']
+                    else r'$t_{\rm mv}=$' + rf'{tmv:.4g} s'
+                )
+                self.ax_bot.legend(
+                    [Line2D([], [], color='m', lw=1.0)],
+                    [label],
+                    loc='upper left',
+                    frameon=True,
+                )
+            else:
+                self.ax_bot.legend(frameon=False)
+        else:
+            self.ax_bot.legend(frameon=False)
+
+        self.ax_bot.set_xlabel(r'$\delta t$ (s)')
+        self.ax_bot.set_ylabel('Power')
+        self.ax_bot.set_xscale('log')
+        self.ax_bot.set_yscale('log')
+
+    def show(self):
+        """Display the figure interactively."""
+
+        plt.tight_layout()
+        plt.show()
+
+    def save(self, filename, dpi=300):
+        """Save the figure to ``filename`` and close it."""
 
         self.fig.savefig(filename, bbox_inches='tight', pad_inches=0.1, dpi=dpi)
         plt.close(self.fig)
