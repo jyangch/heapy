@@ -55,7 +55,12 @@ import numpy as np
 
 from ..auto.signal import ggSignal, pgSignal, ppSignal
 from ..util.tools import format_message, json_dump, plt_rc_context
-from .temp_utils import MvtPlotter, calculate_haar_mvt, uniform_dt_from_bins
+from .temp_utils import (
+    MvtPlotter,
+    calculate_haar_mvt,
+    resolve_analysis_window,
+    resolve_time_grid,
+)
 
 
 class MVT:
@@ -79,16 +84,16 @@ class MVT:
             before :meth:`calculate` is called.
     """
 
-    def __init__(self, rate, rate_err, dt, time=None):
+    def __init__(self, rate, rate_err, bins=None, dt=None, time=None):
         """Initialize MVT with a uniformly sampled, background-subtracted light curve.
 
         Args:
             rate: 1-D array of per-bin count rate, background-subtracted.
             rate_err: 1-sigma error on ``rate``; same shape as ``rate``.
-            dt: Bin width in seconds; must be a positive finite scalar.
-            time: Bin-center times for diagnostic plotting; defaults to
-                ``dt * (arange(len(rate)) + 0.5)`` (bins starting at
-                ``t=0``) when ``None``.
+            bins: Optional bin edges. A scalar is treated as legacy
+                positional ``dt`` for compatibility.
+            dt: Optional bin width in seconds.
+            time: Optional bin-center times for diagnostic plotting.
 
         Raises:
             ValueError: If ``rate``/``rate_err`` are not one-dimensional,
@@ -107,6 +112,10 @@ class MVT:
         if self.rate.size < 4:
             raise ValueError('at least four bins are required')
 
+        self.dt, self.time, self.bins = resolve_time_grid(
+            self.rate.size, bins=bins, dt=dt, time=time
+        )
+
         n_bad = int(np.count_nonzero(~np.isfinite(self.rate) | ~np.isfinite(self.rate_err)))
         if n_bad > 0:
             raise ValueError(
@@ -115,16 +124,6 @@ class MVT:
                 'support -- trim the light curve to a contiguous, gap-free '
                 'window before constructing MVT.'
             )
-
-        self.dt = float(dt)
-        if not np.isfinite(self.dt) or self.dt <= 0:
-            raise ValueError('dt must be a positive finite scalar')
-
-        self.time = (
-            self.dt * (np.arange(self.rate.size) + 0.5)
-            if time is None
-            else np.asarray(time, dtype=float)
-        )
 
         self.mvt_res = None
 
@@ -152,7 +151,10 @@ class MVT:
         if not hasattr(signal, 'net'):
             raise RuntimeError('signal has no background fit yet; run polyfit()/loop() first')
 
-        return cls(signal.net, signal.net_err, uniform_dt_from_bins(signal.bins), time=signal.time)
+        inst = cls.__new__(cls)
+        MVT.__init__(inst, signal.net, signal.net_err, bins=signal.bins)
+
+        return inst
 
     @classmethod
     def from_ppsignal(cls, signal):
@@ -172,7 +174,10 @@ class MVT:
         if not isinstance(signal, ppSignal):
             raise TypeError('expected signal to be a ppSignal instance')
 
-        return cls(signal.net, signal.net_err, uniform_dt_from_bins(signal.bins), time=signal.time)
+        inst = cls.__new__(cls)
+        MVT.__init__(inst, signal.net, signal.net_err, bins=signal.bins)
+
+        return inst
 
     @classmethod
     def from_ggsignal(cls, signal):
@@ -193,12 +198,17 @@ class MVT:
         if not isinstance(signal, ggSignal):
             raise TypeError('expected signal to be a ggSignal instance')
 
-        return cls(signal.net, signal.net_err, uniform_dt_from_bins(signal.bins), time=signal.time)
+        inst = cls.__new__(cls)
+        MVT.__init__(inst, signal.net, signal.net_err, bins=signal.bins)
 
-    def calculate(self, **kwargs):
+        return inst
+
+    def calculate(self, twin=None, **kwargs):
         """Compute the Haar MVT for this light curve.
 
         Args:
+            twin: Optional ``[t1, t2]`` analysis window. ``None`` uses the
+                full light curve.
             **kwargs: Forwarded to
                 :func:`~heapy.temp.temp_utils.calculate_haar_mvt`
                 (``tau_bg_max``, ``nrepl``, ``bin_fac``, ``afactor``,
@@ -208,8 +218,12 @@ class MVT:
             The result dict (also stored on ``self.mvt_res``).
         """
 
+        self.analysis_index, analysis_window = resolve_analysis_window(self.time, twin)
+        rate = self.rate[self.analysis_index]
+        rate_err = self.rate_err[self.analysis_index]
+
         mvt, mvt_err_lo, mvt_err_hi, is_upper_limit, diag = calculate_haar_mvt(
-            self.rate, self.rate_err, self.dt, **kwargs
+            rate, rate_err, self.dt, **kwargs
         )
 
         self.mvt_res = {
@@ -218,6 +232,7 @@ class MVT:
             'mvt_err_lo': mvt_err_lo,
             'mvt_err_hi': mvt_err_hi,
             'is_upper_limit': is_upper_limit,
+            'analysis_window': analysis_window,
             'diag': diag,
         }
 
@@ -262,7 +277,10 @@ class MVT:
         with plt_rc_context():
             fig = MvtPlotter()
             fig.plot_curve(self.time, self.rate)
-            fig.plot_scaleogram(self.dt, self.time, self.mvt_res, max_dt=max_dt)
+            fig.plot_analysis_window(self.mvt_res['analysis_window'])
+            fig.plot_scaleogram(
+                self.dt, self.time[self.analysis_index], self.mvt_res, max_dt=max_dt
+            )
             fig.save(os.path.join(savepath, 'mvt.pdf'))
 
 
@@ -328,13 +346,13 @@ class pgMVT(MVT):
         if not hasattr(sig, 'net'):
             sig.loop(p0=p0, sigma=sigma, deg=deg)
 
-        MVT.__init__(self, sig.net, sig.net_err, uniform_dt_from_bins(sig.bins), time=sig.time)
+        MVT.__init__(self, sig.net, sig.net_err, bins=sig.bins)
 
-    def calculate(self, deg=None, **kw):
+    def calculate(self, **kw):
         """Run the background fit (if needed), then compute the Haar MVT; see ``MVT.calculate``."""
 
         if not hasattr(self, 'rate'):
-            self.find_background(deg=deg)
+            self.find_background()
 
         return super().calculate(**kw)
 
@@ -363,8 +381,7 @@ class ppMVT(MVT):
             self,
             self._signal.net,
             self._signal.net_err,
-            uniform_dt_from_bins(self._signal.bins),
-            time=self._signal.time,
+            bins=self._signal.bins,
         )
 
     @classmethod
@@ -379,8 +396,7 @@ class ppMVT(MVT):
             inst,
             inst._signal.net,
             inst._signal.net_err,
-            uniform_dt_from_bins(inst._signal.bins),
-            time=inst._signal.time,
+            bins=inst._signal.bins,
         )
 
         return inst
@@ -399,25 +415,27 @@ class ggMVT(MVT):
         rather than silently corrupting the result.
     """
 
-    def __init__(self, ncts, ncts_err, bins, exp=None):
+    def __init__(self, ncts, ncts_err, bins=None, exp=None, dt=None, time=None):
         """Initialize ggMVT with pre-background-subtracted count data.
 
         Args:
             ncts: Array of net (background-subtracted) counts per bin.
             ncts_err: Array of uncertainties on ``ncts``.
-            bins: Bin edges or bin width used to build the light curve.
+            bins: Optional bin edges. A scalar is treated as legacy
+                positional ``dt`` for compatibility.
             exp: Exposure correction array, or ``None`` for uniform exposure.
+            dt: Optional bin width in seconds.
+            time: Optional bin-center times.
 
         Raises:
             ValueError: If the resulting net rate has any gap (``NaN``)
                 bins, or non-uniform bin widths.
         """
-
+        _dt, _time, bins = resolve_time_grid(len(ncts), bins=bins, dt=dt, time=time)
         self._signal = ggSignal(ncts, ncts_err, bins, exp=exp)
         MVT.__init__(
             self,
             self._signal.net,
             self._signal.net_err,
-            uniform_dt_from_bins(self._signal.bins),
-            time=self._signal.time,
+            bins=self._signal.bins,
         )

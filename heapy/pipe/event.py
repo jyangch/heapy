@@ -1266,7 +1266,7 @@ class Event:
         bs = pgSignal(self.spec_ts, bins, ignore=self.bs_ignore)
         bs.loop(p0=self.bs_p0, sigma=self.bs_sigma, deg=self.bs_deg)
 
-        ignore = bs._effective_ignore()
+        ignore = bs.get_effective_ignore()
         brate, _ = bs.poly.val(interp_time)
 
         brate_sum = np.zeros_like(brate)

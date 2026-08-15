@@ -33,10 +33,11 @@ from ..auto.signal import ggSignal, pgSignal, ppSignal
 from ..util.tools import format_message, json_dump, plt_rc_context
 from .temp_utils import (
     LagPlotter,
-    box_smooth,
     box_smooth_batch,
     calculate_ccf_batch,
     generate_mc_sample,
+    resolve_analysis_window,
+    resolve_time_grid,
     validate_input,
 )
 
@@ -61,7 +62,7 @@ class Lag:
         self,
         xcts,
         ycts,
-        dt,
+        bins=None,
         xcts_err=None,
         ycts_err=None,
         xbcts=None,
@@ -73,6 +74,8 @@ class Lag:
         xtype='pg',
         ytype='pg',
         M=1,
+        dt=None,
+        time=None,
     ):
         """Initialize the Lag estimator with two light curves.
 
@@ -82,7 +85,8 @@ class Lag:
             ycts: 1-D array of fine-bin source counts for the comparison
                 (low-energy) light curve; must have the same length as
                 ``xcts``.
-            dt: Fine-bin width in seconds; must be positive.
+            bins: Optional bin edges. A scalar is treated as legacy
+                positional ``dt`` for compatibility.
             xcts_err: Count errors for ``xcts``; required when ``xtype``
                 contains ``'g'``.
             ycts_err: Count errors for ``ycts``; required when ``ytype``
@@ -108,6 +112,9 @@ class Lag:
             M: Box-smoothing factor; the effective analysis bin width is
                 :math:`M \\times dt`.  ``M = 1`` gives the classic CCF;
                 ``M > 1`` enables MCCF.
+            dt: Optional fine-bin width in seconds.
+            time: Optional per-bin time grid. ``None`` uses
+                bin centers derived from ``bins`` or ``dt``.
 
         Raises:
             ValueError: If ``xcts`` or ``ycts`` is not one-dimensional,
@@ -127,13 +134,13 @@ class Lag:
         if self.xcts.size == 0:
             raise ValueError('xcts and ycts cannot be empty')
 
-        self.dt = float(dt)
-        if self.dt <= 0:
-            raise ValueError('dt must be positive')
-
         self.M = int(M)
         if self.M < 1:
             raise ValueError('M must be a positive integer')
+
+        self.dt, self.time, self.bins = resolve_time_grid(
+            self.xcts.size, bins=bins, dt=dt, time=time
+        )
 
         self.xtype = xtype
         self.ytype = ytype
@@ -161,7 +168,7 @@ class Lag:
 
     @staticmethod
     def _from_signal(signal):
-        """Extract ``(type, cts, cts_err, bcts, bcts_err, backscale, dt)`` from a Signal instance.
+        """Extract arrays and metadata from a Signal instance.
 
         Args:
             signal: A ``pgSignal``, ``ppSignal``, or ``ggSignal`` instance.
@@ -169,8 +176,9 @@ class Lag:
                 already run (``bcts``/``bcts_err`` populated).
 
         Returns:
-            A 7-tuple ``(type, cts, cts_err, bcts, bcts_err, backscale, dt)``
-            ready to feed into ``Lag.__init__`` (prefixed with ``x``/``y``).
+            An 8-tuple ``(type, cts, cts_err, bcts, bcts_err, backscale,
+            dt, time)`` ready to feed into ``Lag.__init__`` (prefixed
+            with ``x``/``y``).
 
         Raises:
             TypeError: If ``signal`` is not a recognised Signal instance.
@@ -215,7 +223,7 @@ class Lag:
         if not np.allclose(binsize, binsize[0]):
             raise ValueError('signal bins must be uniform (constant width) for Lag')
 
-        return dtype, cts, cts_err, bcts, bcts_err, backscale, float(binsize[0])
+        return dtype, cts, cts_err, bcts, bcts_err, backscale, float(binsize[0]), signal.time
 
     @classmethod
     def from_signals(cls, x_signal, y_signal, M=1):
@@ -247,16 +255,21 @@ class Lag:
                 signals don't share the same bin width.
         """
 
-        xtype, xcts, xcts_err, xbcts, xbcts_err, xbackscale, x_dt = cls._from_signal(x_signal)
-        ytype, ycts, ycts_err, ybcts, ybcts_err, ybackscale, y_dt = cls._from_signal(y_signal)
+        xtype, xcts, xcts_err, xbcts, xbcts_err, xbackscale, x_dt, x_time = cls._from_signal(
+            x_signal
+        )
+        ytype, ycts, ycts_err, ybcts, ybcts_err, ybackscale, y_dt, y_time = cls._from_signal(
+            y_signal
+        )
 
         if not np.isclose(x_dt, y_dt):
             raise ValueError('x_signal and y_signal must share the same bin width (dt)')
+        if not np.allclose(x_time, y_time):
+            raise ValueError('x_signal and y_signal must share the same time grid')
 
         return cls(
             xcts,
             ycts,
-            x_dt,
             xcts_err=xcts_err,
             ycts_err=ycts_err,
             xbcts=xbcts,
@@ -268,6 +281,8 @@ class Lag:
             xtype=xtype,
             ytype=ytype,
             M=M,
+            dt=x_dt,
+            time=x_time,
         )
 
     @property
@@ -438,6 +453,7 @@ class Lag:
 
     def calculate(
         self,
+        twin=None,
         method=None,
         width=None,
         threshold=None,
@@ -454,6 +470,8 @@ class Lag:
         in ``self.lag`` and ``self.lag_res``.
 
         Args:
+            twin: Optional ``[t1, t2]`` analysis window. ``None`` uses the
+                full light curve.
             method: Peak-location method.  One of ``'argmax'``,
                 ``'polyfit'``, ``'spline'``, ``'gp'``, ``'gaussian'``,
                 ``'asymmetric_gaussian'``, ``'double_gaussian'``,
@@ -485,22 +503,20 @@ class Lag:
         if method is None:
             method = 'argmax' if self.M > 1 else 'gp'
 
-        self.xncts = self.xcts - self.xbcts * self.xbackscale
-        self.yncts = self.ycts - self.ybcts * self.ybackscale
-        self.nsample = len(self.xcts)
+        self.analysis_index, analysis_window = resolve_analysis_window(self.time, twin)
 
         self.generate_mc_simulation(1000)
+        mc_xncts = self.mc_xncts[:, self.analysis_index]
+        mc_yncts = self.mc_yncts[:, self.analysis_index]
 
         if self.M > 1:
-            self.xncts = box_smooth(self.xncts, self.M)
-            self.yncts = box_smooth(self.yncts, self.M)
-            self.mc_xncts = box_smooth_batch(self.mc_xncts, self.M)
-            self.mc_yncts = box_smooth_batch(self.mc_yncts, self.M)
-            self.nsample = len(self.xncts)
+            mc_xncts = box_smooth_batch(mc_xncts, self.M)
+            mc_yncts = box_smooth_batch(mc_yncts, self.M)
 
+        self.nsample = mc_xncts.shape[1]
         self.taus = self.dt * np.arange(-self.nsample + 1, self.nsample, 1)
 
-        self.mc_ccfs = calculate_ccf_batch(self.mc_xncts, self.mc_yncts)
+        self.mc_ccfs = calculate_ccf_batch(mc_xncts, mc_yncts)
         self.ccfs = self.mc_ccfs[0]
 
         pidx = np.argmax(self.ccfs)
@@ -651,6 +667,7 @@ class Lag:
             'point_estimate': point_estimate,
             'M': self.M,
             'dt': self.dt,
+            'analysis_window': analysis_window,
             'taus': self.taus,
             'ccfs': self.ccfs,
             'itp_taus': self.itp_taus,
@@ -685,9 +702,9 @@ class Lag:
         json_dump(self.lag_res, savepath + '/lag_res.json')
 
         with plt_rc_context():
-            time = self.dt_analysis * np.arange(self.nsample)
             fig = LagPlotter()
-            fig.plot_curves(time, self.xncts, self.yncts)
+            fig.plot_curves(self.time, self.xncts, self.yncts)
+            fig.plot_analysis_window(self.lag_res['analysis_window'])
             fig.plot_ccf(
                 self.taus,
                 self.mc_ccfs[0],

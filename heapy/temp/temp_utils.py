@@ -16,8 +16,8 @@ Bundles shared utilities consumed by :mod:`heapy.temp.txx`,
   without re-diffing against the upstream source.
 - The continuous-wavelet spectrum core (:func:`calculate_cwt_spectrum`,
   :func:`estimate_cwt_tmv`), consumed by :mod:`heapy.temp.cwt`.
-- :func:`uniform_dt_from_bins`, a bin-edge validation helper shared by
-  every Signal-to-MVT bridging path.
+- :func:`resolve_time_grid`, a bin-edge/time-grid validation helper shared
+  by the temporal analysis classes.
 - Monte Carlo sampling, box smoothing, and CCF batch calculation helpers
   shared by the temporal analysis classes.
 - :class:`TxxPlotter`, a composable two-panel diagnostic figure that
@@ -416,9 +416,137 @@ def uniform_dt_from_bins(bins):
     widths = np.diff(bins)
     dt = float(np.median(widths))
     if not np.allclose(widths, dt, rtol=1e-7, atol=max(1e-12, abs(dt) * 1e-9)):
-        raise ValueError('the Haar MVT core requires uniform bins')
+        raise ValueError('temporal analysis requires uniform bins')
 
     return dt
+
+
+def resolve_time_grid(ngrid, bins=None, dt=None, time=None):
+    """Resolve compatible ``bins``/``dt``/``time`` inputs into one time grid.
+
+    Args:
+        ngrid: Number of time samples.
+        bins: Optional bin edges of length ``ngrid + 1``. A scalar is
+            treated as a legacy positional ``dt`` value.
+        dt: Optional uniform bin width.
+        time: Optional bin-center grid of length ``ngrid``.
+
+    Returns:
+        Tuple ``(dt, time, bins)``.
+
+    Raises:
+        ValueError: If inputs are missing, inconsistent, or non-uniform.
+    """
+
+    ngrid = int(ngrid)
+    if ngrid < 1:
+        raise ValueError('ngrid must be positive')
+
+    if bins is not None and np.ndim(bins) == 0:
+        if dt is not None:
+            raise ValueError('provide either scalar bins legacy dt or dt, not both')
+        dt = float(bins)
+        bins = None
+
+    if bins is not None:
+        bins = np.asarray(bins, dtype=float)
+        if bins.ndim != 1 or bins.size != ngrid + 1:
+            raise ValueError('expected size(bins) = ngrid + 1')
+        if not np.isfinite(bins).all():
+            raise ValueError('bins must be finite')
+        grid_dt = uniform_dt_from_bins(bins)
+        grid_time = (bins[:-1] + bins[1:]) / 2
+        if dt is not None and not np.isclose(float(dt), grid_dt):
+            raise ValueError('dt is inconsistent with bins')
+        if time is not None:
+            time = np.asarray(time, dtype=float)
+            if time.ndim != 1 or time.size != ngrid:
+                raise ValueError('expected size(time) = ngrid')
+            if not np.allclose(time, grid_time):
+                raise ValueError('time is inconsistent with bins')
+        return grid_dt, grid_time, bins
+
+    if time is not None:
+        time = np.asarray(time, dtype=float)
+        if time.ndim != 1 or time.size != ngrid:
+            raise ValueError('expected size(time) = ngrid')
+        if not np.isfinite(time).all():
+            raise ValueError('time must be finite')
+        if dt is None:
+            if ngrid < 2:
+                raise ValueError('dt is required when deriving a one-bin time grid')
+            grid_dt = float(np.median(np.diff(time)))
+        else:
+            grid_dt = float(dt)
+        if not np.isfinite(grid_dt) or grid_dt <= 0:
+            raise ValueError('dt must be a positive finite scalar')
+        if ngrid > 1 and not np.allclose(
+            np.diff(time), grid_dt, rtol=1e-7, atol=max(1e-12, abs(grid_dt) * 1e-9)
+        ):
+            raise ValueError('time grid must be uniform')
+        bins = np.concatenate([[time[0] - grid_dt / 2], time + grid_dt / 2])
+        return grid_dt, time, bins
+
+    if dt is None:
+        raise ValueError('one of bins, dt, or time must be provided')
+    grid_dt = float(dt)
+    if not np.isfinite(grid_dt) or grid_dt <= 0:
+        raise ValueError('dt must be a positive finite scalar')
+    bins = np.arange(ngrid + 1, dtype=float) * grid_dt
+    time = grid_dt * (np.arange(ngrid, dtype=float) + 0.5)
+
+    return grid_dt, time, bins
+
+
+def resolve_analysis_window(time, twin=None):
+    """Resolve an optional analysis time window against a per-bin time grid.
+
+    Args:
+        time: Per-bin time grid.
+        twin: Optional ``[t1, t2]`` analysis window. ``None`` selects the
+            full grid.
+
+    Returns:
+        Tuple ``(index, window)`` where ``index`` is an integer index
+        array selecting bins whose centers fall within ``twin`` and
+        ``window`` records the requested window, realised bounds, and
+        number of selected bins.
+
+    Raises:
+        ValueError: If ``time`` is invalid, ``twin`` is malformed, or the
+            requested window selects no bins.
+    """
+
+    time = np.asarray(time, dtype=float)
+    if time.ndim != 1 or time.size == 0:
+        raise ValueError('time must be a non-empty one-dimensional array')
+    if not np.isfinite(time).all():
+        raise ValueError('time must be finite')
+
+    if twin is None:
+        index = np.arange(time.size)
+        requested = None
+    else:
+        if len(twin) != 2:
+            raise ValueError('twin must be a [t1, t2] pair')
+        t1, t2 = [float(t) for t in twin]
+        if not np.isfinite(t1) or not np.isfinite(t2):
+            raise ValueError('twin bounds must be finite')
+        if t1 >= t2:
+            raise ValueError('twin must satisfy t1 < t2')
+        index = np.where((time >= t1) & (time <= t2))[0]
+        requested = [t1, t2]
+
+    if index.size == 0:
+        raise ValueError('twin selects no bins')
+
+    window = {
+        'twin': requested,
+        't1': float(time[index[0]]),
+        't2': float(time[index[-1]]),
+        'nbin': int(index.size),
+    }
+    return index, window
 
 
 def haar_denoise(data, err=None, thresh_fac=1.0, estimate_noise=False, soft=False):
@@ -1544,6 +1672,14 @@ class LagPlotter:
         if itp_taus is not None:
             self.ax_bot.plot(itp_taus, itp_ccfs, c='r', lw=0.5, alpha=1.0)
 
+    def plot_analysis_window(self, analysis_window):
+        """Mark the light-curve interval used for the lag calculation."""
+
+        if analysis_window['twin'] is not None:
+            self.ax_top.axvspan(
+                analysis_window['t1'], analysis_window['t2'], color='0.85', alpha=0.5, lw=0
+            )
+
     def show(self):
         """Display the figure interactively."""
 
@@ -1620,6 +1756,14 @@ class MvtPlotter:
 
         plot_haar_scaleogram(self.ax_bot, dt, time, mvt_res, max_dt=max_dt)
 
+    def plot_analysis_window(self, analysis_window):
+        """Mark the light-curve interval used for the MVT calculation."""
+
+        if analysis_window['twin'] is not None:
+            self.ax_top.axvspan(
+                analysis_window['t1'], analysis_window['t2'], color='0.85', alpha=0.5, lw=0
+            )
+
     def show(self):
         """Display the figure interactively."""
 
@@ -1671,45 +1815,40 @@ class CwtPlotter:
         self.ax_top.plot(time, ncts, color='k', lw=1.0)
         self.ax_top.set_xlim([time[0], time[-1]])
 
-    def plot_spectrum(self, cwt_res, tmv_res=None):
-        """Draw the CWT global spectrum and optional null envelope.
+    def plot_spectrum(self, tmv_res):
+        """Draw the CWT global spectrum and null envelope.
 
         Args:
-            cwt_res: Result dict from :class:`~heapy.temp.cwt.CWT`.
-            tmv_res: Optional result dict from
-                :meth:`~heapy.temp.cwt.CWT.estimate_tmv`.
+            tmv_res: Result dict from :meth:`~heapy.temp.cwt.CWT.calculate`.
         """
 
-        spectrum = cwt_res['spectrum']
+        spectrum = tmv_res['spectrum']
         period = np.asarray(spectrum['period'], dtype=float)
         power = np.asarray(spectrum['spectrum_power'], dtype=float)
 
         self.ax_bot.plot(period, power, 'o', color='tab:blue', ms=3, label='Observed')
 
-        if tmv_res is not None:
-            diag = tmv_res['diag']
-            bg_median = np.asarray(diag['bg_median'], dtype=float)
-            bg_lo = np.asarray(diag['bg_lo'], dtype=float)
-            bg_hi = np.asarray(diag['bg_hi'], dtype=float)
-            self.ax_bot.fill_between(period, bg_lo, bg_hi, color='tab:blue', alpha=0.2)
-            self.ax_bot.plot(period, bg_median, color='k', ls='--', lw=1.0, label='Null median')
+        diag = tmv_res['diag']
+        bg_median = np.asarray(diag['bg_median'], dtype=float)
+        bg_lower = np.asarray(diag['bg_lower'], dtype=float)
+        bg_upper = np.asarray(diag['bg_upper'], dtype=float)
+        self.ax_bot.fill_between(period, bg_lower, bg_upper, color='tab:blue', alpha=0.2)
+        self.ax_bot.plot(period, bg_median, color='k', ls='--', lw=1.0, label='Null median')
 
-            tmv = tmv_res['tmv']
-            if np.isfinite(tmv):
-                self.ax_bot.axvline(tmv, color='m', lw=1.0)
-                label = (
-                    r'$t_{\rm mv}<$' + rf'{tmv:.4g} s'
-                    if tmv_res['is_upper_limit']
-                    else r'$t_{\rm mv}=$' + rf'{tmv:.4g} s'
-                )
-                self.ax_bot.legend(
-                    [Line2D([], [], color='m', lw=1.0)],
-                    [label],
-                    loc='upper left',
-                    frameon=True,
-                )
-            else:
-                self.ax_bot.legend(frameon=False)
+        tmv = tmv_res['tmv']
+        if np.isfinite(tmv):
+            self.ax_bot.axvline(tmv, color='m', lw=1.0)
+            label = (
+                r'$t_{\rm mv}<$' + rf'{tmv:.4g} s'
+                if tmv_res['is_upper_limit']
+                else r'$t_{\rm mv}=$' + rf'{tmv:.4g} s'
+            )
+            self.ax_bot.legend(
+                [Line2D([], [], color='m', lw=1.0)],
+                [label],
+                loc='upper left',
+                frameon=True,
+            )
         else:
             self.ax_bot.legend(frameon=False)
 
@@ -1717,6 +1856,14 @@ class CwtPlotter:
         self.ax_bot.set_ylabel('Power')
         self.ax_bot.set_xscale('log')
         self.ax_bot.set_yscale('log')
+
+    def plot_analysis_window(self, analysis_window):
+        """Mark the light-curve interval used for the CWT calculation."""
+
+        if analysis_window['twin'] is not None:
+            self.ax_top.axvspan(
+                analysis_window['t1'], analysis_window['t2'], color='0.85', alpha=0.5, lw=0
+            )
 
     def show(self):
         """Display the figure interactively."""

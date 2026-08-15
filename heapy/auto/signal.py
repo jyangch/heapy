@@ -70,7 +70,7 @@ class pgSignal:
         ignore: User-supplied list of ``[low, high]`` intervals (or
             ``None``). When set, it serves as an escape hatch that
             bypasses the auto-detected ``sort_res['ignore']`` in
-            :meth:`_effective_ignore`. NaN-gap intervals from
+            :meth:`get_effective_ignore`. NaN-gap intervals from
             :meth:`frombin` live on :attr:`gap_int` and are always
             folded in regardless of this attribute.
         bl: :class:`~.baseline.Baseline` instance from :meth:`basefit`
@@ -170,7 +170,7 @@ class pgSignal:
         carry ``NaN`` at those positions and propagate naturally
         through subtraction, multiplication, and plotting), no events
         are synthesized for them, and the merged gap intervals are
-        recorded on :attr:`gap_int`. :meth:`_effective_ignore` always
+        recorded on :attr:`gap_int`. :meth:`get_effective_ignore` always
         folds the gap intervals into the exclusion set used by
         :meth:`basefit` and :meth:`polyfit` independently of
         user-supplied :attr:`ignore`. Gap-bin SNR comes out as ``NaN``
@@ -476,7 +476,7 @@ class pgSignal:
         """Fit a smooth baseline via ``drpls`` to seed the first background.
 
         Runs :meth:`bblock` first when block results are missing. Zero
-        weight is applied to bins inside :meth:`_effective_ignore`
+        weight is applied to bins inside :meth:`get_effective_ignore`
         (i.e. user-supplied :attr:`ignore` unioned with
         :attr:`gap_int`; :attr:`sort_res` is ``None`` at this stage so
         it does not contribute), and bins with zero counts are excluded
