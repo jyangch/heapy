@@ -58,49 +58,6 @@ from ..util.tools import format_message, json_dump, plt_rc_context
 from .temp_utils import MvtPlotter, calculate_haar_mvt, uniform_dt_from_bins
 
 
-def _run_haar(ncts, ncts_err, bins, **kw):
-    """Compatibility wrapper for older validation scripts.
-
-    The Haar core expects rate/error/dt.  Older heapy diagnostics pass
-    per-bin net counts and count errors with bin edges; for uniform bins
-    this conversion is lossless up to the common scale factor.
-
-    Args:
-        ncts: Per-bin net (background-subtracted) counts.
-        ncts_err: 1-sigma error on ``ncts``.
-        bins: Bin edges (length ``len(ncts) + 1``); must be uniform.
-        **kw: Forwarded to
-            :func:`~heapy.temp.temp_utils.calculate_haar_mvt`.
-
-    Returns:
-        A result dict; see :meth:`MVT.calculate`.
-
-    Raises:
-        ValueError: If ``bins`` are not uniform, or ``ncts``/``ncts_err``
-            don't match the bin count.
-    """
-
-    bins = np.asarray(bins, dtype=float)
-    dt = uniform_dt_from_bins(bins)
-    widths = np.diff(bins)
-    ncts = np.asarray(ncts, dtype='float64')
-    ncts_err = np.asarray(ncts_err, dtype='float64')
-    if ncts.shape != widths.shape or ncts_err.shape != widths.shape:
-        raise ValueError('ncts and ncts_err must match the bin count')
-    rate = ncts / widths
-    rate_err = ncts_err / widths
-
-    mvt, mvt_err_lo, mvt_err_hi, is_upper_limit, diag = calculate_haar_mvt(rate, rate_err, dt, **kw)
-    return {
-        'method': 'haar',
-        'mvt': mvt,
-        'mvt_err_lo': mvt_err_lo,
-        'mvt_err_hi': mvt_err_hi,
-        'is_upper_limit': is_upper_limit,
-        'diag': diag,
-    }
-
-
 class MVT:
     """Compute the Haar minimum variability timescale and its diagnostics.
 
