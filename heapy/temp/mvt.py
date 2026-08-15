@@ -218,9 +218,9 @@ class MVT:
             The result dict (also stored on ``self.mvt_res``).
         """
 
-        self.analysis_index, analysis_window = resolve_analysis_window(self.time, twin)
-        rate = self.rate[self.analysis_index]
-        rate_err = self.rate_err[self.analysis_index]
+        analysis_index, analysis_window = resolve_analysis_window(self.time, twin)
+        rate = self.rate[analysis_index]
+        rate_err = self.rate_err[analysis_index]
 
         mvt, mvt_err_lo, mvt_err_hi, is_upper_limit, diag = calculate_haar_mvt(
             rate, rate_err, self.dt, **kwargs
@@ -259,8 +259,7 @@ class MVT:
             savepath: Directory path where output files are written;
                 created if it does not exist.
             max_dt: Optional scaleogram plotting limit; defaults to
-                upstream's fixed demonstration extent. Pass ``None`` to
-                infer from the analysed time span.
+                upstream's fixed demonstration extent.
 
         Raises:
             RuntimeError: If :meth:`calculate` has not been called yet.
@@ -278,9 +277,7 @@ class MVT:
             fig = MvtPlotter()
             fig.plot_curve(self.time, self.rate)
             fig.plot_analysis_window(self.mvt_res['analysis_window'])
-            fig.plot_scaleogram(
-                self.dt, self.time[self.analysis_index], self.mvt_res, max_dt=max_dt
-            )
+            fig.plot_scaleogram(self.dt, self.mvt_res, max_dt=max_dt)
             fig.save(os.path.join(savepath, 'mvt.pdf'))
 
 
@@ -415,23 +412,16 @@ class ggMVT(MVT):
         rather than silently corrupting the result.
     """
 
-    def __init__(self, ncts, ncts_err, bins=None, exp=None, dt=None, time=None):
+    def __init__(self, ncts, ncts_err, bins, exp=None):
         """Initialize ggMVT with pre-background-subtracted count data.
 
         Args:
             ncts: Array of net (background-subtracted) counts per bin.
             ncts_err: Array of uncertainties on ``ncts``.
-            bins: Optional bin edges. A scalar is treated as legacy
-                positional ``dt`` for compatibility.
+            bins: Bin edges (length ``N + 1``).
             exp: Exposure correction array, or ``None`` for uniform exposure.
-            dt: Optional bin width in seconds.
-            time: Optional bin-center times.
-
-        Raises:
-            ValueError: If the resulting net rate has any gap (``NaN``)
-                bins, or non-uniform bin widths.
         """
-        _dt, _time, bins = resolve_time_grid(len(ncts), bins=bins, dt=dt, time=time)
+
         self._signal = ggSignal(ncts, ncts_err, bins, exp=exp)
         MVT.__init__(
             self,

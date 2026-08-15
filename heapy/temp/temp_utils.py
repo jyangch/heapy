@@ -1101,7 +1101,7 @@ def set_diagnostic_axis(ax):
     ax.tick_params(which='minor', width=1.0, length=3)
 
 
-def plot_haar_scaleogram(ax, dt, time, mvt_res, max_dt=100.0):
+def plot_haar_scaleogram(ax, dt, mvt_res, max_dt=100.0):
     """Reproduce ``nrbutler/mvt``'s ``haar_power_mod`` scaleogram plot on ``ax``.
 
     Ports the ``doplot`` block of the upstream ``haar_power_mod`` function
@@ -1117,13 +1117,10 @@ def plot_haar_scaleogram(ax, dt, time, mvt_res, max_dt=100.0):
     Args:
         ax: Matplotlib Axes to draw on.
         dt: Bin width in seconds (upstream's ``min_dt``).
-        time: Bin-center times of the analysed light curve; used when
-            ``max_dt`` is ``None``.
         mvt_res: A result dict as returned by
             :meth:`~heapy.temp.mvt.MVT.calculate`.
         max_dt: Optional scaleogram plotting limit. The default
-            ``100.0`` matches upstream's demonstration extent; pass
-            ``None`` to infer from the analysed time span.
+            ``100.0`` matches upstream's demonstration extent.
     """
 
     diag = mvt_res['diag']
@@ -1145,10 +1142,7 @@ def plot_haar_scaleogram(ax, dt, time, mvt_res, max_dt=100.0):
     ax.set_ylabel(r'Flux Variation $\sigma_{X,\Delta t}$')
 
     min_dt = dt
-    if max_dt is None:
-        max_dt = float(time[-1] - time[0]) if len(time) > 1 else dt
-    else:
-        max_dt = float(max_dt)
+    max_dt = float(max_dt)
 
     in_window = tau <= max_dt
     g_plot = g & in_window
@@ -1742,19 +1736,18 @@ class MvtPlotter:
         self.ax_top.plot(time, rate, color='k', lw=1.0)
         self.ax_top.set_xlim([time[0], time[-1]])
 
-    def plot_scaleogram(self, dt, time, mvt_res, max_dt=100.0):
+    def plot_scaleogram(self, dt, mvt_res, max_dt=100.0):
         """Draw the Haar scaleogram on the bottom panel; see :func:`plot_haar_scaleogram`.
 
         Args:
             dt: Bin width in seconds.
-            time: Bin-center times of the analysed light curve.
             mvt_res: A result dict as returned by
                 :meth:`~heapy.temp.mvt.MVT.calculate`.
             max_dt: Optional scaleogram plotting limit; defaults to
                 upstream's fixed demonstration extent.
         """
 
-        plot_haar_scaleogram(self.ax_bot, dt, time, mvt_res, max_dt=max_dt)
+        plot_haar_scaleogram(self.ax_bot, dt, mvt_res, max_dt=max_dt)
 
     def plot_analysis_window(self, analysis_window):
         """Mark the light-curve interval used for the MVT calculation."""

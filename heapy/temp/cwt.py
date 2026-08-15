@@ -217,9 +217,8 @@ class CWT:
 
         spectrum = None
         null_spectrum_power = []
-        spectrum_kwargs = dict(kwargs)
         for i, ncts_i in enumerate(mc_ncts):
-            spectrum_i = calculate_cwt_spectrum(ncts_i, self.dt, **spectrum_kwargs)
+            spectrum_i = calculate_cwt_spectrum(ncts_i, self.dt, **kwargs)
             if i == 0:
                 spectrum = spectrum_i
             else:
@@ -399,10 +398,16 @@ class ppCWT(CWT):
 class ggCWT(CWT):
     """Compute CWT spectra for a Gaussian net-count light curve."""
 
-    def __init__(self, ncts, ncts_err, bins=None, exp=None, dt=None, time=None):
-        """Initialize ggCWT with pre-background-subtracted counts."""
+    def __init__(self, ncts, ncts_err, bins, exp=None):
+        """Initialize ggCWT with pre-background-subtracted count data.
 
-        bins = resolve_time_grid(len(ncts), bins=bins, dt=dt, time=time)[2]
+        Args:
+            ncts: Array of net (background-subtracted) counts per bin.
+            ncts_err: Array of uncertainties on ``ncts``.
+            bins: Bin edges (length ``N + 1``).
+            exp: Exposure correction array, or ``None`` for uniform exposure.
+        """
+
         self._signal = ggSignal(ncts, ncts_err, bins, exp=exp)
         CWT.__init__(
             self,

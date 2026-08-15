@@ -167,7 +167,7 @@ class Lag:
         }
 
     @staticmethod
-    def _from_signal(signal):
+    def get_signal_data(signal):
         """Extract arrays and metadata from a Signal instance.
 
         Args:
@@ -255,10 +255,10 @@ class Lag:
                 signals don't share the same bin width.
         """
 
-        xtype, xcts, xcts_err, xbcts, xbcts_err, xbackscale, x_dt, x_time = cls._from_signal(
+        xtype, xcts, xcts_err, xbcts, xbcts_err, xbackscale, x_dt, x_time = cls.get_signal_data(
             x_signal
         )
-        ytype, ycts, ycts_err, ybcts, ybcts_err, ybackscale, y_dt, y_time = cls._from_signal(
+        ytype, ycts, ycts_err, ybcts, ybcts_err, ybackscale, y_dt, y_time = cls.get_signal_data(
             y_signal
         )
 
@@ -503,11 +503,11 @@ class Lag:
         if method is None:
             method = 'argmax' if self.M > 1 else 'gp'
 
-        self.analysis_index, analysis_window = resolve_analysis_window(self.time, twin)
+        analysis_index, analysis_window = resolve_analysis_window(self.time, twin)
 
         self.generate_mc_simulation(1000)
-        mc_xncts = self.mc_xncts[:, self.analysis_index]
-        mc_yncts = self.mc_yncts[:, self.analysis_index]
+        mc_xncts = self.mc_xncts[:, analysis_index]
+        mc_yncts = self.mc_yncts[:, analysis_index]
 
         if self.M > 1:
             mc_xncts = box_smooth_batch(mc_xncts, self.M)
