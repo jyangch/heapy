@@ -1671,7 +1671,7 @@ class LagPlotter:
 
         if analysis_window['twin'] is not None:
             self.ax_top.axvspan(
-                analysis_window['t1'], analysis_window['t2'], color='0.85', alpha=0.5, lw=0
+                analysis_window['t1'], analysis_window['t2'], color='cyan', alpha=0.2, lw=0
             )
 
     def show(self):
@@ -1754,7 +1754,7 @@ class MvtPlotter:
 
         if analysis_window['twin'] is not None:
             self.ax_top.axvspan(
-                analysis_window['t1'], analysis_window['t2'], color='0.85', alpha=0.5, lw=0
+                analysis_window['t1'], analysis_window['t2'], color='cyan', alpha=0.2, lw=0
             )
 
     def show(self):
@@ -1855,7 +1855,7 @@ class CwtPlotter:
 
         if analysis_window['twin'] is not None:
             self.ax_top.axvspan(
-                analysis_window['t1'], analysis_window['t2'], color='0.85', alpha=0.5, lw=0
+                analysis_window['t1'], analysis_window['t2'], color='cyan', alpha=0.2, lw=0
             )
 
     def show(self):
