@@ -114,12 +114,16 @@ class pgSignal:
                 normalized to a single-element list.
 
         Raises:
-            TypeError: If ``exp`` and ``bins`` have mismatched sizes or any
-                exposure exceeds its bin width.
+            TypeError: If ``bins`` is not one-dimensional bin edges, or if
+                ``exp`` and ``bins`` have mismatched sizes, or any exposure
+                exceeds its bin width.
         """
 
         self.ts = np.array(ts).astype(float)
         self.bins = np.array(bins).astype(float)
+
+        if self.bins.ndim != 1 or self.bins.size < 2:
+            raise TypeError('expected bins to be one-dimensional bin edges')
 
         cts, _ = np.histogram(self.ts, bins=self.bins)
         self.cts = np.array(cts).astype(int)
@@ -208,7 +212,7 @@ class pgSignal:
         cts = np.asarray(cts, dtype=float)
         bins = np.asarray(bins, dtype=float)
 
-        if bins.size != (cts.size + 1):
+        if bins.ndim != 1 or bins.size != (cts.size + 1):
             raise TypeError('expected size(bins) = size(cts)+1')
 
         nan_mask = np.isnan(cts)
@@ -960,14 +964,18 @@ class ppSignal:
             exp: Per-bin exposure times; defaults to bin widths.
 
         Raises:
-            TypeError: If ``exp`` and ``bins`` have mismatched sizes or any
-                exposure exceeds its bin width.
+            TypeError: If ``bins`` is not one-dimensional bin edges, or if
+                ``exp`` and ``bins`` have mismatched sizes, or any exposure
+                exceeds its bin width.
         """
 
         self.ts = np.array(ts).astype(float)
         self.bts = np.array(bts).astype(float)
         self.bins = np.array(bins).astype(float)
         self.backscale = backscale
+
+        if self.bins.ndim != 1 or self.bins.size < 2:
+            raise TypeError('expected bins to be one-dimensional bin edges')
 
         cts, _ = np.histogram(self.ts, bins=self.bins)
         self.cts = np.array(cts).astype(int)
@@ -1060,7 +1068,7 @@ class ppSignal:
         bcts = np.asarray(bcts, dtype=float)
         bins = np.asarray(bins, dtype=float)
 
-        if bins.size != (cts.size + 1):
+        if bins.ndim != 1 or bins.size != (cts.size + 1):
             raise TypeError('expected size(bins) = size(cts)+1')
 
         nan_mask = np.isnan(cts) | np.isnan(bcts)
@@ -1364,13 +1372,17 @@ class ggSignal:
                 ``None``.
 
         Raises:
-            TypeError: If ``exp`` and ``bins`` have mismatched sizes or any
+            TypeError: If ``bins`` is not one element longer than ``ncts``,
+                or if ``exp`` and ``bins`` have mismatched sizes, or any
                 exposure exceeds its bin width.
         """
 
         self.ncts = np.asarray(ncts, dtype=float)
         self.ncts_err = np.asarray(ncts_err, dtype=float)
         self.bins = np.array(bins).astype(float)
+
+        if self.bins.ndim != 1 or self.bins.size != self.ncts.size + 1:
+            raise TypeError('expected size(bins) = size(ncts)+1')
 
         self.lbins = self.bins[:-1]
         self.rbins = self.bins[1:]
