@@ -1380,7 +1380,7 @@ def estimate_cwt_tmv(period, spectrum_power, bg_hi, *, min_consecutive=2):
         spectrum_power: Observed global spectrum on ``period``.
         bg_hi: Upper null-spectrum envelope on ``period``.
         min_consecutive: Number of adjacent timescale bins required above
-            ``bg_hi`` to accept a crossing.
+            ``bg_hi`` to accept the rightmost significant excess run.
 
     Returns:
         A dict with ``tmv``, ``is_upper_limit``, quality label, and masks.
@@ -1400,9 +1400,11 @@ def estimate_cwt_tmv(period, spectrum_power, bg_hi, *, min_consecutive=2):
     excess = finite & (spectrum_power > bg_hi)
 
     first_idx = None
-    for idx in range(0, len(excess) - min_consecutive + 1):
+    for idx in range(len(excess) - min_consecutive, -1, -1):
         if excess[idx : idx + min_consecutive].all():
             first_idx = idx
+            while first_idx > 0 and excess[first_idx - 1]:
+                first_idx -= 1
             break
 
     if first_idx is None:
@@ -1839,7 +1841,7 @@ class CwtPlotter:
             self.ax_bot.legend(
                 [Line2D([], [], color='m', lw=1.0)],
                 [label],
-                loc='upper left',
+                loc='lower left',
                 frameon=True,
             )
         else:
