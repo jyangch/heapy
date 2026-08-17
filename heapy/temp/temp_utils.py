@@ -394,6 +394,14 @@ def calculate_ccf_batch(mc_xncts, mc_yncts):
     return all_ccfs
 
 
+def is_uniform_spacing(widths, dt):
+    """Return whether ``widths`` match ``dt`` to within a fraction of a bin."""
+
+    dt = float(dt)
+    atol = max(1e-12, abs(dt) * 1e-2)
+    return np.allclose(np.asarray(widths, dtype=float), dt, rtol=1e-4, atol=atol)
+
+
 def uniform_dt_from_bins(bins):
     """Derive a scalar bin width from bin edges, requiring uniform spacing.
 
@@ -406,7 +414,7 @@ def uniform_dt_from_bins(bins):
     Raises:
         ValueError: If ``bins`` is not a one-dimensional array of at
             least two edges, or if the bin widths are not uniform to
-            within a relative tolerance of ``1e-7``.
+            within 1% of the median width.
     """
 
     bins = np.asarray(bins, dtype=float)
@@ -415,7 +423,7 @@ def uniform_dt_from_bins(bins):
 
     widths = np.diff(bins)
     dt = float(np.median(widths))
-    if not np.allclose(widths, dt, rtol=1e-7, atol=max(1e-12, abs(dt) * 1e-9)):
+    if not is_uniform_spacing(widths, dt):
         raise ValueError('temporal analysis requires uniform bins')
 
     return dt
@@ -480,9 +488,7 @@ def resolve_time_grid(ngrid, bins=None, dt=None, time=None):
             grid_dt = float(dt)
         if not np.isfinite(grid_dt) or grid_dt <= 0:
             raise ValueError('dt must be a positive finite scalar')
-        if ngrid > 1 and not np.allclose(
-            np.diff(time), grid_dt, rtol=1e-7, atol=max(1e-12, abs(grid_dt) * 1e-9)
-        ):
+        if ngrid > 1 and not is_uniform_spacing(np.diff(time), grid_dt):
             raise ValueError('time grid must be uniform')
         bins = np.concatenate([[time[0] - grid_dt / 2], time + grid_dt / 2])
         return grid_dt, time, bins
