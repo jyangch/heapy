@@ -293,7 +293,8 @@ class Polynomial:
         lhs = np.vander(x, order)
 
         # evaluate the model values at given x
-        mo = coeff @ lhs.T
+        # mo = coeff @ lhs.T
+        mo = np.polyval(coeff, x)
         # or
         # mo = np.zeros_like(x)
         # for ci in coeff:

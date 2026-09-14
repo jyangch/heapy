@@ -636,31 +636,36 @@ def split_bool_mask(mask, times, selection_value=False):
     return segs
 
 
-def scale_of_one(seq, seq_min=None):
-    """Min-max normalise a sequence to the range [0, 1].
+def scale_of_one(*seqs, seq_min=0):
+    """Min-max normalise one or more sequences to the range [0, 1].
+
+    All sequences share a common scale: the global maximum across inputs,
+    and either ``seq_min`` or the global minimum when ``seq_min`` is
+    ``None``.  NaN values are ignored when computing extrema.
 
     Args:
-        seq: Array-like sequence to normalise.
-        seq_min: Minimum value used as the lower bound of the
-            normalisation range.  When ``None``, the minimum of ``seq``
-            is used.  Default is ``None``.
+        *seqs: One or more array-like sequences to normalise.
+        seq_min: Lower bound of the normalisation range.  When ``None``,
+            the minimum across all sequences is used.  Default is ``0``.
 
     Returns:
-        A ``np.ndarray`` with values scaled to ``[0, 1]``.  Returns an
-        all-zero array of the same shape when the effective range is zero.
+        If a single sequence is passed, a ``np.ndarray`` scaled to
+        ``[0, 1]``.  If multiple sequences are passed, a list of such
+        arrays.  Returns all-zero arrays of the same shapes when the
+        effective range is zero.
     """
 
-    seq = np.asanyarray(seq)
-
-    s_max = seq.max()
-    s_min = seq.min() if seq_min is None else seq_min
-
+    arrays = [np.asanyarray(seq) for seq in seqs]
+    s_max = max(np.nanmax(a) for a in arrays)
+    s_min = min(np.nanmin(a) for a in arrays) if seq_min is None else seq_min
     s_range = s_max - s_min
 
     if s_range == 0:
-        return np.zeros_like(seq, dtype=float)
+        scaled = [np.zeros_like(a, dtype=float) for a in arrays]
+    else:
+        scaled = [(a - s_min) / s_range for a in arrays]
 
-    return (seq - s_min) / s_range
+    return scaled[0] if len(scaled) == 1 else scaled
 
 
 def format_err_latex(value, low, upp, precision=2):
