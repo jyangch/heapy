@@ -17,9 +17,11 @@ import ftplib
 from html.parser import HTMLParser
 from http.client import HTTPException
 import os
+import re
 import tempfile
+from urllib.error import HTTPError
 from urllib.parse import quote, unquote, urljoin, urlparse
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 import warnings
 
 from tqdm import tqdm
@@ -124,11 +126,13 @@ class FileFinder:
         Each remote protocol lists and downloads its own files. HTTPS can
         operate without an FTP URL. Failed listings, missing matches, or
         failed downloads fall back to FTP when configured; successful HTTPS
-        downloads are retained. Each transfer is retried once.
+        downloads are retained. Each transfer is retried at most once; HTTPS
+        retries resume validated partial downloads when the server supports it.
 
         Listings are cached per protocol and URL for this finder. A cached
-        listing is refreshed once when matches are missing or downloads fail,
-        allowing newly added or replaced files to be found.
+        listing is refreshed once when matches are missing or the server reports
+        that a listed file is no longer available, allowing newly added or
+        replaced files to be found.
 
         Args:
             feature: Pattern supporting ``*`` as a wildcard.
@@ -160,19 +164,21 @@ class FileFinder:
                 self._https_listing_cache,
                 self._get_files_from_https,
                 self._download_file_from_https,
+                False,
             ),
             (
                 self.ftp_url,
                 self._ftp_listing_cache,
                 self._get_files_from_ftp,
                 self._download_file_from_ftp,
+                True,
             ),
         ]
 
         downloaded_files = {}
         found_remote_match = False
 
-        for url, cache, get_files, download_file in sources:
+        for url, cache, get_files, download_file, retry_download in sources:
             if url is None:
                 continue
 
@@ -198,21 +204,21 @@ class FileFinder:
                             pbar.set_description(f'Downloading {name}')
                             local_file = os.path.join(self.local_dir, name)
                             success = download_file(remote_file, local_file)
-                            if not success:
+                            if not success and retry_download:
                                 print(f'Retrying download {name}')
                                 success = download_file(remote_file, local_file)
                             if success:
                                 downloaded_files[name] = local_file
                             else:
                                 warnings.warn(
-                                    f'Failed to download {name} via {url.scheme.upper()} after retry.',
+                                    f'Failed to download {name} via {url.scheme.upper()}.',
                                     UserWarning,
                                     stacklevel=2,
                                 )
 
                     if all(os.path.basename(file) in downloaded_files for file in matching_files):
                         return sorted(downloaded_files.values())
-                    if listing_attempt or not cached_listing:
+                    if listing_attempt or not cached_listing or url in cache:
                         break
                     matching_files = self._match_files(get_files(refresh=True), feature)
             except ConnectionError as e:
@@ -311,7 +317,7 @@ class FileFinder:
         return self.ftp_files
 
     def _download_file_from_https(self, https_file_path, local_file_path):
-        """Publish a complete HTTPS download atomically, returning success or failure."""
+        """Download atomically, resuming one retry only with a strong matching ETag."""
 
         url = self.https_url._replace(
             path=self.https_url.path.rstrip('/') + '/' + quote(os.path.basename(https_file_path)),
@@ -319,73 +325,119 @@ class FileFinder:
             query='',
             fragment='',
         ).geturl()
-
         temporary_path = None
-
+        success = False
+        size = 0
+        expected_size = None
+        validator = None
         try:
-            with urlopen(url, timeout=30) as response:
-                expected_size = response.headers.get('Content-Length')
-                expected_size = int(expected_size) if expected_size is not None else None
-                with tempfile.NamedTemporaryFile(
+            with (
+                tempfile.NamedTemporaryFile(
                     dir=os.path.dirname(local_file_path), suffix='.part', delete=False
-                ) as local_file:
-                    temporary_path = local_file.name
-                    size = 0
-                    with tqdm(
-                        total=expected_size,
-                        unit='B',
-                        unit_scale=True,
-                        desc=os.path.basename(local_file_path),
-                        leave=False,
-                    ) as pbar:
-                        while True:
-                            block = response.read(64 * 1024)
-                            if not block:
+                ) as local_file,
+                tqdm(
+                    unit='B', unit_scale=True, desc=os.path.basename(local_file_path), leave=False
+                ) as pbar,
+            ):
+                temporary_path = local_file.name
+                for attempt in range(2):
+                    offset = size if validator else 0
+                    headers = {'Accept-Encoding': 'identity'}
+                    if offset:
+                        headers.update({'Range': f'bytes={offset}-', 'If-Range': validator})
+                    try:
+                        with urlopen(Request(url, headers=headers), timeout=30) as response:
+                            if response.status == 200:
+                                local_file.seek(0)
+                                local_file.truncate()
+                                size = 0
+                                length = response.headers.get('Content-Length')
+                                expected_size = int(length) if length is not None else None
+                                etag = response.headers.get('ETag')
+                                validator = etag if etag and not etag.startswith('W/') else None
+                                pbar.reset(total=expected_size)
+                            elif response.status == 206:
+                                match = re.fullmatch(
+                                    r'bytes (\d+)-(\d+)/(\d+)',
+                                    response.headers.get('Content-Range', ''),
+                                )
+                                if not offset or match is None:
+                                    raise ValueError('Unexpected partial HTTPS response')
+                                start, end, total = map(int, match.groups())
+                                if (
+                                    start != offset
+                                    or not start <= end < total
+                                    or end != total - 1
+                                    or (expected_size is not None and total != expected_size)
+                                    or response.headers.get('ETag') != validator
+                                ):
+                                    raise ValueError('HTTPS resume range or ETag does not match')
+                                length = response.headers.get('Content-Length')
+                                if length is not None and int(length) != end - start + 1:
+                                    raise ValueError('HTTPS range length does not match')
+                                expected_size = total
+                                pbar.total = total
+                            else:
+                                raise OSError(f'Unexpected HTTPS status: {response.status}')
+
+                            while True:
+                                block = response.read1(64 * 1024)
+                                if not block:
+                                    break
+                                local_file.write(block)
+                                size += len(block)
+                                pbar.update(len(block))
+                            if size < 100 or (expected_size is not None and size != expected_size):
+                                raise OSError(
+                                    f'Incomplete download: {size} bytes, expected {expected_size}'
+                                )
+                        success = True
+                        break
+                    except (OSError, HTTPException, ValueError) as e:
+                        warnings.warn(f'HTTPS download error: {e!s}', UserWarning, stacklevel=2)
+                        if isinstance(e, HTTPError):
+                            if e.code in (404, 410):
+                                self._https_listing_cache.pop(self.https_url, None)
+                            if 400 <= e.code < 500 and e.code not in (408, 429):
                                 break
-                            local_file.write(block)
-                            size += len(block)
-                            pbar.update(len(block))
-                if size < 100 or (expected_size is not None and size != expected_size):
-                    raise OSError(f'Incomplete download: {size} bytes, expected {expected_size}')
-            os.replace(temporary_path, local_file_path)
-            return True
-        except (OSError, HTTPException, ValueError) as e:
-            warnings.warn(
-                f'HTTPS download error: {e!s}',
-                UserWarning,
-                stacklevel=2,
-            )
+                        if attempt == 0:
+                            action = (
+                                f'Resuming from {size} bytes' if size and validator else 'Retrying'
+                            )
+                            print(f'{action}: {os.path.basename(local_file_path)}')
+            if success:
+                os.replace(temporary_path, local_file_path)
+            return success
+        except OSError as e:
+            warnings.warn(f'HTTPS download error: {e!s}', UserWarning, stacklevel=2)
             return False
         finally:
             if temporary_path is not None and os.path.exists(temporary_path):
                 os.remove(temporary_path)
 
     def _download_file_from_ftp(self, ftp_file_path, local_file_path):
-        """Download an FTP file; exhausted connection retries raise ConnectionError."""
+        """Download atomically; exhausted connection retries raise ConnectionError."""
 
         self._ensure_ftp_connection()
+        temporary_path = None
         try:
-            with open(local_file_path, 'wb') as local_file:
+            with tempfile.NamedTemporaryFile(
+                dir=os.path.dirname(local_file_path), suffix='.part', delete=False
+            ) as local_file:
+                temporary_path = local_file.name
                 self.ftp_connection.retrbinary(f'RETR {ftp_file_path}', local_file.write)
+            if os.path.getsize(temporary_path) < 100:
+                raise OSError(f'Downloaded file may be corrupted: {local_file_path}')
+            os.replace(temporary_path, local_file_path)
+            return True
         except ftplib.all_errors as e:
+            if isinstance(e, ftplib.error_perm) and str(e).startswith('550'):
+                self._ftp_listing_cache.pop(self.ftp_url, None)
             warnings.warn(f'FTP download error: {e!s}', UserWarning, stacklevel=2)
-            if os.path.exists(local_file_path) and os.path.getsize(local_file_path) < 100:
-                warnings.warn(
-                    f'Downloaded file may be corrupted: {local_file_path}',
-                    UserWarning,
-                    stacklevel=2,
-                )
-                os.remove(local_file_path)
             return False
-
-        if os.path.exists(local_file_path) and os.path.getsize(local_file_path) < 100:
-            warnings.warn(
-                f'Downloaded file may be corrupted: {local_file_path}', UserWarning, stacklevel=2
-            )
-            os.remove(local_file_path)
-            return False
-
-        return True
+        finally:
+            if temporary_path is not None and os.path.exists(temporary_path):
+                os.remove(temporary_path)
 
     def _ensure_ftp_connection(self, max_retries=5, timeout=30):
         """Open or refresh the FTP_TLS connection, retrying transient errors.
