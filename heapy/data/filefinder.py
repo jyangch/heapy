@@ -1,9 +1,10 @@
-"""Locate and download data files from local directories or FTP servers.
+"""Locate data files locally, over HTTPS, or on FTP servers.
 
 Provides ``FileFinder``, a utility class that first searches a local
 directory for files matching a glob-like feature string and, when no local
-match is found, falls back to an FTP source.  An FTP_TLS connection is
-reused across multiple calls and reconnected automatically on failure.
+match is found, tries HTTPS directory listings and downloads before FTP.
+Each protocol caches its own directory listings. An FTP_TLS connection is
+opened only when needed, reused, and reconnected automatically on failure.
 
 Example:
     from heapy.data.filefinder import FileFinder
@@ -11,47 +12,64 @@ Example:
     files = ff.find('glg_tte_n0_bn*_v00.fit')
 """
 
+from contextlib import suppress
 import ftplib
+from html.parser import HTMLParser
+from http.client import HTTPException
 import os
-from urllib.parse import urlparse
+import tempfile
+from urllib.parse import quote, unquote, urljoin, urlparse
+from urllib.request import urlopen
 import warnings
 
 from tqdm import tqdm
 
 
 class FileFinder:
-    """Find data files locally or download them from an FTP server.
+    """Find data files locally or download them over HTTPS or FTP.
 
     Searches the configured local directory first.  If no match is found and
-    an FTP URL is set, it queries the FTP server and downloads matching files
-    into the local directory before returning their local paths.  The FTP
-    connection is kept alive between calls and reconnected as needed.
+    a remote URL is set, queries that server and downloads matching files
+    into the local directory. HTTPS is preferred, with FTP as an optional
+    fallback. Either protocol can also be used independently.
 
     Attributes:
         local_files: List of local file paths found during the last
             ``find`` call, or ``None`` if ``find`` has not been called.
         ftp_files: List of FTP file paths found during the last ``find``
             call, or ``None`` if the FTP branch was not reached.
+        https_files: List of file paths from the HTTPS directory index, or
+            ``None`` if the HTTPS branch was not reached.
         ftp_connection: Active ``ftplib.FTP_TLS`` connection, or ``None``
             when disconnected.
     """
 
-    def __init__(self, local_dir, ftp_url=None):
-        """Initialize FileFinder with a local directory and optional FTP URL.
+    def __init__(self, local_dir, ftp_url=None, https_url=None):
+        """Initialize FileFinder with a local directory and optional remote URLs.
 
         Args:
             local_dir: Path to the local directory used as the primary
                 search location and download destination.
             ftp_url: Full FTP URL (e.g. ``'ftp://host/remote/path'``), or
                 ``None`` to disable FTP fallback.
+            https_url: Optional HTTPS directory with an HTML file index.
+                HTTPS lists and downloads files without needing ``ftp_url``.
+                When both are set, FTP is the fallback source. Update both
+                URLs when changing directories, or set ``https_url=None``
+                for FTP-only retrieval.
         """
 
         self._local_dir = os.path.abspath(local_dir)
         self._ftp_url = urlparse(ftp_url) if ftp_url else None
+        self._https_url = urlparse(https_url) if https_url else None
 
         self.local_files = None
         self.ftp_files = None
+        self.https_files = None
         self.ftp_connection = None
+
+        self._ftp_listing_cache = {}
+        self._https_listing_cache = {}
 
     @property
     def local_dir(self):
@@ -83,76 +101,132 @@ class FileFinder:
             self.ftp_connection.quit()
             self.ftp_connection = None
 
+    @property
+    def https_url(self):
+        """Parsed HTTPS URL (``urllib.parse.ParseResult``) or ``None``."""
+
+        return self._https_url
+
+    @https_url.setter
+    def https_url(self, new_https_url):
+
+        self._https_url = urlparse(new_https_url) if new_https_url else None
+
     def __del__(self):
+        """Close the persistent FTP connection; HTTPS responses close after each transfer."""
 
         if self.ftp_connection:
             self.ftp_connection.quit()
 
     def find(self, feature):
-        """Return local paths of files matching ``feature``.
+        """Find local files, then try HTTPS and finally FTP.
 
-        Searches the local directory first.  When no local match is found
-        and an FTP URL has been configured, queries the FTP server and
-        downloads matching files before returning their local paths.
+        Each remote protocol lists and downloads its own files. HTTPS can
+        operate without an FTP URL. Failed listings, missing matches, or
+        failed downloads fall back to FTP when configured; successful HTTPS
+        downloads are retained. Each transfer is retried once.
+
+        Listings are cached per protocol and URL for this finder. A cached
+        listing is refreshed once when matches are missing or downloads fail,
+        allowing newly added or replaced files to be found.
 
         Args:
-            feature: Glob-like pattern string supporting ``*`` as a wildcard
-                (e.g. ``'glg_tte_n0_*_v00.fit'``).
+            feature: Pattern supporting ``*`` as a wildcard.
 
         Returns:
-            A list of absolute local file paths that match ``feature``, or
-            ``None`` when no match is found anywhere.
+            Absolute paths of successfully downloaded or matching local files,
+            sorted by filename (including zero-padded GBM version numbers).
+            Returns ``None`` (with a warning) when no remote or local file
+            matches, or an empty list when every matching download fails.
 
-        Note:
-            A ``UserWarning`` is emitted when no match is found after
-            searching both local storage and the FTP server.  Failed
-            downloads are retried once; files that remain corrupt (< 100
-            bytes) after the retry are removed and a warning is issued.
+        Raises:
+            ConnectionError: FTP connection retries are exhausted and no files
+                have been downloaded in this call. If some downloads completed,
+                stop retrying and return those paths with a warning instead.
         """
+
+        self.https_files = None
+        self.ftp_files = None
 
         self.local_files = self._get_files_from_local()
         matching_local_files = self._match_files(self.local_files, feature)
 
         if matching_local_files:
-            return matching_local_files
+            return sorted(matching_local_files)
 
-        if self.ftp_url:
-            self.ftp_files = self._get_files_from_ftp()
-            matching_ftp_files = self._match_files(self.ftp_files, feature)
+        sources = [
+            (
+                self.https_url,
+                self._https_listing_cache,
+                self._get_files_from_https,
+                self._download_file_from_https,
+            ),
+            (
+                self.ftp_url,
+                self._ftp_listing_cache,
+                self._get_files_from_ftp,
+                self._download_file_from_ftp,
+            ),
+        ]
 
-            if matching_ftp_files:
-                downloaded_files_in_local = []
+        downloaded_files = {}
+        found_remote_match = False
 
-                pbar = tqdm(matching_ftp_files)
+        for url, cache, get_files, download_file in sources:
+            if url is None:
+                continue
 
-                for ftp_file_to_download in pbar:
-                    pbar.set_description(f'Downloading {os.path.basename(ftp_file_to_download)}')
+            try:
+                cached_listing = url in cache
+                matching_files = self._match_files(get_files(), feature)
+                if not matching_files and cached_listing:
+                    matching_files = self._match_files(get_files(refresh=True), feature)
+                    cached_listing = False
 
-                    local_file_to_write = os.path.join(
-                        self.local_dir, os.path.basename(ftp_file_to_download)
-                    )
+                attempted_files = set()
+                for listing_attempt in range(2):
+                    if not matching_files:
+                        break
 
-                    success = self._download_file_from_ftp(
-                        ftp_file_to_download, local_file_to_write
-                    )
+                    found_remote_match = True
+                    with tqdm(matching_files) as pbar:
+                        for remote_file in pbar:
+                            name = os.path.basename(remote_file)
+                            if name in downloaded_files or remote_file in attempted_files:
+                                continue
+                            attempted_files.add(remote_file)
+                            pbar.set_description(f'Downloading {name}')
+                            local_file = os.path.join(self.local_dir, name)
+                            success = download_file(remote_file, local_file)
+                            if not success:
+                                print(f'Retrying download {name}')
+                                success = download_file(remote_file, local_file)
+                            if success:
+                                downloaded_files[name] = local_file
+                            else:
+                                warnings.warn(
+                                    f'Failed to download {name} via {url.scheme.upper()} after retry.',
+                                    UserWarning,
+                                    stacklevel=2,
+                                )
 
-                    if not success:
-                        print(f'Retrying download {os.path.basename(ftp_file_to_download)}')
-                        success = self._download_file_from_ftp(
-                            ftp_file_to_download, local_file_to_write
-                        )
+                    if all(os.path.basename(file) in downloaded_files for file in matching_files):
+                        return sorted(downloaded_files.values())
+                    if listing_attempt or not cached_listing:
+                        break
+                    matching_files = self._match_files(get_files(refresh=True), feature)
+            except ConnectionError as e:
+                if not downloaded_files:
+                    raise
+                warnings.warn(
+                    f'FTP connection unavailable; returning completed downloads: {e!s}',
+                    UserWarning,
+                    stacklevel=2,
+                )
+                break
 
-                    if success:
-                        downloaded_files_in_local.append(local_file_to_write)
-                    else:
-                        warnings.warn(
-                            f'Failed to download {os.path.basename(ftp_file_to_download)} after retry.',
-                            UserWarning,
-                            stacklevel=2,
-                        )
-
-                return downloaded_files_in_local
-
+        if found_remote_match:
+            return sorted(downloaded_files.values())
         warnings.warn(f'No files found matching the feature: {feature}', UserWarning, stacklevel=2)
         return None
 
@@ -170,22 +244,126 @@ class FileFinder:
             if os.path.isfile(os.path.join(self.local_dir, f))
         ]
 
-    def _get_files_from_ftp(self):
+    def _get_files_from_https(self, refresh=False):
+        """Read same-directory file links from an HTTPS HTML index and cache them."""
 
-        self._ensure_ftp_connection()
+        if not refresh and self.https_url in self._https_listing_cache:
+            self.https_files = self._https_listing_cache[self.https_url]
+            return self.https_files
 
-        ftp_path = self.ftp_url.path
+        self.https_files = []
+        directory = self.https_url._replace(
+            path=self.https_url.path.rstrip('/') + '/', params='', query='', fragment=''
+        )
+
+        links = []
+
+        def collect_links(tag, attrs):
+            if tag == 'a':
+                links.extend(value for name, value in attrs if name == 'href' and value)
 
         try:
-            return self.ftp_connection.nlst(ftp_path)
-        except ftplib.all_errors as e:
-            warnings.warn(f'FTP error: {e!s}', UserWarning, stacklevel=2)
+            with urlopen(directory.geturl(), timeout=30) as response:
+                parser = HTMLParser()
+                parser.handle_starttag = collect_links
+                parser.feed(response.read().decode('utf-8'))
+            for href in links:
+                link = urlparse(urljoin(directory.geturl(), href))
+                if (link.scheme, link.netloc) != (directory.scheme, directory.netloc):
+                    continue
+                if link.query or link.fragment or link.params or link.path.endswith('/'):
+                    continue
+                if os.path.dirname(link.path) != (directory.path.rstrip('/') or '/'):
+                    continue
+                name = unquote(os.path.basename(link.path))
+                if (
+                    not name
+                    or name in ('.', '..')
+                    or any(char in name for char in ('/', '\\', '\x00'))
+                ):
+                    continue
+                file = os.path.join(unquote(directory.path), name)
+                if file not in self.https_files:
+                    self.https_files.append(file)
+        except (OSError, HTTPException, ValueError) as e:
+            warnings.warn(f'HTTPS directory error: {e!s}', UserWarning, stacklevel=2)
             return []
 
+        self._https_listing_cache[self.https_url] = self.https_files
+        return self.https_files
+
+    def _get_files_from_ftp(self, refresh=False):
+        """Read an FTP directory listing, reusing this finder's cache by default."""
+
+        if not refresh and self.ftp_url in self._ftp_listing_cache:
+            self.ftp_files = self._ftp_listing_cache[self.ftp_url]
+            return self.ftp_files
+
+        self.ftp_files = []
+        self._ensure_ftp_connection()
+        try:
+            self.ftp_files = self.ftp_connection.nlst(self.ftp_url.path)
+        except ftplib.all_errors as e:
+            warnings.warn(f'FTP directory error: {e!s}', UserWarning, stacklevel=2)
+            return []
+
+        self._ftp_listing_cache[self.ftp_url] = self.ftp_files
+        return self.ftp_files
+
+    def _download_file_from_https(self, https_file_path, local_file_path):
+        """Publish a complete HTTPS download atomically, returning success or failure."""
+
+        url = self.https_url._replace(
+            path=self.https_url.path.rstrip('/') + '/' + quote(os.path.basename(https_file_path)),
+            params='',
+            query='',
+            fragment='',
+        ).geturl()
+
+        temporary_path = None
+
+        try:
+            with urlopen(url, timeout=30) as response:
+                expected_size = response.headers.get('Content-Length')
+                expected_size = int(expected_size) if expected_size is not None else None
+                with tempfile.NamedTemporaryFile(
+                    dir=os.path.dirname(local_file_path), suffix='.part', delete=False
+                ) as local_file:
+                    temporary_path = local_file.name
+                    size = 0
+                    with tqdm(
+                        total=expected_size,
+                        unit='B',
+                        unit_scale=True,
+                        desc=os.path.basename(local_file_path),
+                        leave=False,
+                    ) as pbar:
+                        while True:
+                            block = response.read(64 * 1024)
+                            if not block:
+                                break
+                            local_file.write(block)
+                            size += len(block)
+                            pbar.update(len(block))
+                if size < 100 or (expected_size is not None and size != expected_size):
+                    raise OSError(f'Incomplete download: {size} bytes, expected {expected_size}')
+            os.replace(temporary_path, local_file_path)
+            return True
+        except (OSError, HTTPException, ValueError) as e:
+            warnings.warn(
+                f'HTTPS download error: {e!s}',
+                UserWarning,
+                stacklevel=2,
+            )
+            return False
+        finally:
+            if temporary_path is not None and os.path.exists(temporary_path):
+                os.remove(temporary_path)
+
     def _download_file_from_ftp(self, ftp_file_path, local_file_path):
+        """Download an FTP file; exhausted connection retries raise ConnectionError."""
 
         self._ensure_ftp_connection()
-
         try:
             with open(local_file_path, 'wb') as local_file:
                 self.ftp_connection.retrbinary(f'RETR {ftp_file_path}', local_file.write)
@@ -217,6 +395,7 @@ class FileFinder:
         :class:`ConnectionError` so the caller fails fast instead of
         blowing the stack.
         """
+
         ftp_host = self.ftp_url.hostname
         ftp_user = self.ftp_url.username or 'anonymous'
         ftp_pass = self.ftp_url.password or ''
@@ -225,11 +404,8 @@ class FileFinder:
             if self.ftp_connection is not None and self._is_ftp_connection_alive():
                 return
             if self.ftp_connection is not None:
-                # Stale connection; drop and reopen.
-                try:
+                with suppress(Exception):
                     self.ftp_connection.close()
-                except Exception:  # pragma: no cover -- best effort
-                    pass
                 self.ftp_connection = None
                 print('FTP connection lost, reconnecting...')
 
@@ -248,11 +424,11 @@ class FileFinder:
                 )
 
         raise ConnectionError(
-            f'Could not establish FTP_TLS connection to {ftp_host} after '
-            f'{max_retries} attempts'
+            f'Could not establish FTP_TLS connection to {ftp_host} after {max_retries} attempts'
         )
 
     def _is_ftp_connection_alive(self):
+        """Check if the FTP connection is alive."""
 
         try:
             self.ftp_connection.voidcmd('NOOP')
@@ -261,6 +437,7 @@ class FileFinder:
             return False
 
     def _match_files(self, files_in_dir, feature):
+        """Match files against a feature pattern."""
 
         if not files_in_dir:
             return []

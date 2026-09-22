@@ -49,8 +49,8 @@ class gbmRetrieve(Retrieve):
     """Retrieve Fermi GBM data files for a burst or a UTC time window.
 
     Wraps ``FileFinder`` to locate TTE, HEALPix, and position-history
-    files from a local cache or the Fermi FTP server at
-    ``ftp://129.164.179.23``.
+    files from a local cache or the HEASARC archive. Both HTTPS and FTP
+    URLs are configured; ``FileFinder`` tries HTTPS before falling back to FTP.
     """
 
     def __init__(self, rtv_res):
@@ -67,8 +67,8 @@ class gbmRetrieve(Retrieve):
         """Retrieve GBM burst data files for all 14 detectors.
 
         Locates TTE event files and the all-sky HEALPix localisation file
-        for the given burst ID.  Files are downloaded from the Fermi FTP
-        server into the local cache when not already present.
+        for the given burst ID. Files are downloaded from HEASARC over HTTPS,
+        with FTP fallback, when not already present in the local cache.
 
         Args:
             burstid: GBM burst identifier string (e.g. ``'bn180703949'``).
@@ -87,7 +87,8 @@ class gbmRetrieve(Retrieve):
         if datapath is None:
             datapath = '/Users/junyang/Data/fermi/data/gbm/bursts'
 
-        dataurl = 'ftp://129.164.179.23/fermi/data/gbm/bursts'
+        ftp_dataurl = 'ftp://129.164.179.23/fermi/data/gbm/bursts'
+        https_dataurl = 'https://heasarc.gsfc.nasa.gov/FTP/fermi/data/gbm/bursts'
 
         year = '20' + burstid[2:4]
 
@@ -95,9 +96,10 @@ class gbmRetrieve(Retrieve):
         if not os.path.isdir(local_dir):
             os.makedirs(local_dir)
 
-        ftp_url = dataurl + '/' + year + '/' + burstid + '/current'
+        ftp_url = ftp_dataurl + '/' + year + '/' + burstid + '/current'
+        https_url = https_dataurl + '/' + year + '/' + burstid + '/current'
 
-        ff = FileFinder(local_dir=local_dir, ftp_url=ftp_url)
+        ff = FileFinder(local_dir=local_dir, ftp_url=ftp_url, https_url=https_url)
 
         dets = ['n0', 'n1', 'n2', 'n3', 'n4', 'n5', 'n6', 'n7', 'n8', 'n9', 'na', 'nb', 'b0', 'b1']
         tte_dict = {}
@@ -127,7 +129,8 @@ class gbmRetrieve(Retrieve):
 
         Determines the hourly and daily date ranges spanned by
         ``[utc + t1, utc + t2]``, then locates TTE and position-history
-        files for each relevant hour and day.
+        files for each relevant hour and day. HTTPS is preferred, with FTP
+        fallback handled by ``FileFinder``.
 
         Args:
             utc: Reference UTC time as an ISO-T string or an
@@ -154,9 +157,10 @@ class gbmRetrieve(Retrieve):
         if datapath is None:
             datapath = '/Users/junyang/Data/fermi/data/gbm/daily'
 
-        dataurl = 'ftp://129.164.179.23/fermi/data/gbm/daily'
+        ftp_dataurl = 'ftp://129.164.179.23/fermi/data/gbm/daily'
+        https_dataurl = 'https://heasarc.gsfc.nasa.gov/FTP/fermi/data/gbm/daily'
 
-        ff = FileFinder(local_dir=datapath, ftp_url=dataurl)
+        ff = FileFinder(local_dir=datapath, ftp_url=ftp_dataurl, https_url=https_dataurl)
 
         if not isinstance(utc, Time):
             utc = Time(utc, format='isot', scale='utc')
@@ -194,10 +198,12 @@ class gbmRetrieve(Retrieve):
                 if not os.path.isdir(local_dir):
                     os.makedirs(local_dir)
 
-                ftp_url = dataurl + '/' + year + '/' + month + '/' + day + '/current'
+                ftp_url = ftp_dataurl + '/' + year + '/' + month + '/' + day + '/current'
+                https_url = https_dataurl + '/' + year + '/' + month + '/' + day + '/current'
 
                 ff.local_dir = local_dir
                 ff.ftp_url = ftp_url
+                ff.https_url = https_url
 
                 for det in dets:
                     tte_feature = (
@@ -216,10 +222,12 @@ class gbmRetrieve(Retrieve):
                 if not os.path.isdir(local_dir):
                     os.makedirs(local_dir)
 
-                ftp_url = dataurl + '/' + year + '/' + month + '/' + day + '/current'
+                ftp_url = ftp_dataurl + '/' + year + '/' + month + '/' + day + '/current'
+                https_url = https_dataurl + '/' + year + '/' + month + '/' + day + '/current'
 
                 ff.local_dir = local_dir
                 ff.ftp_url = ftp_url
+                ff.https_url = https_url
 
                 poshist_feature = 'glg_poshist_all_' + year[-2:] + month + day + '_v*fit'
                 poshist_file = ff.find(poshist_feature)
