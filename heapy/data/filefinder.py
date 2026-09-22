@@ -126,8 +126,9 @@ class FileFinder:
         Each remote protocol lists and downloads its own files. HTTPS can
         operate without an FTP URL. Failed listings, missing matches, or
         failed downloads fall back to FTP when configured; successful HTTPS
-        downloads are retained. Each transfer is retried at most once; HTTPS
-        retries resume validated partial downloads when the server supports it.
+        downloads are retained. FTP retries once. HTTPS makes at most five
+        attempts, resuming validated partial downloads when supported, and
+        stops after two consecutive failures without resumable progress.
 
         Listings are cached per protocol and URL for this finder. A cached
         listing is refreshed once when matches are missing or the server reports
@@ -317,7 +318,7 @@ class FileFinder:
         return self.ftp_files
 
     def _download_file_from_https(self, https_file_path, local_file_path):
-        """Download atomically, resuming one retry only with a strong matching ETag."""
+        """Download atomically with bounded retries and strong ETag-validated resume."""
 
         url = self.https_url._replace(
             path=self.https_url.path.rstrip('/') + '/' + quote(os.path.basename(https_file_path)),
@@ -330,6 +331,8 @@ class FileFinder:
         size = 0
         expected_size = None
         validator = None
+        max_attempts = 5
+        stalled_attempts = 0
         try:
             with (
                 tempfile.NamedTemporaryFile(
@@ -340,7 +343,7 @@ class FileFinder:
                 ) as pbar,
             ):
                 temporary_path = local_file.name
-                for attempt in range(2):
+                for attempt in range(max_attempts):
                     offset = size if validator else 0
                     headers = {'Accept-Encoding': 'identity'}
                     if offset:
@@ -394,17 +397,27 @@ class FileFinder:
                         success = True
                         break
                     except (OSError, HTTPException, ValueError) as e:
-                        warnings.warn(f'HTTPS download error: {e!s}', UserWarning, stacklevel=2)
+                        warnings.warn(
+                            f'HTTPS download error for {os.path.basename(local_file_path)} '
+                            f'(attempt {attempt + 1}/{max_attempts}, {size} bytes): {e!s}',
+                            UserWarning,
+                            stacklevel=2,
+                        )
+                        if isinstance(e, ValueError):
+                            break
                         if isinstance(e, HTTPError):
                             if e.code in (404, 410):
                                 self._https_listing_cache.pop(self.https_url, None)
                             if 400 <= e.code < 500 and e.code not in (408, 429):
                                 break
-                        if attempt == 0:
-                            action = (
-                                f'Resuming from {size} bytes' if size and validator else 'Retrying'
-                            )
-                            print(f'{action}: {os.path.basename(local_file_path)}')
+                        if validator and size > offset:
+                            stalled_attempts = 0
+                        else:
+                            stalled_attempts += 1
+                        if stalled_attempts >= 2 or attempt + 1 == max_attempts:
+                            break
+                        action = f'Resuming from {size} bytes' if size and validator else 'Retrying'
+                        print(f'{action}: {os.path.basename(local_file_path)}')
             if success:
                 os.replace(temporary_path, local_file_path)
             return success
