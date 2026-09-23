@@ -18,6 +18,7 @@ from html.parser import HTMLParser
 from http.client import HTTPException
 import os
 import re
+import sys
 import tempfile
 from urllib.error import HTTPError
 from urllib.parse import quote, unquote, urljoin, urlparse
@@ -206,16 +207,17 @@ class FileFinder:
                             local_file = os.path.join(self.local_dir, name)
                             success = download_file(remote_file, local_file)
                             if not success and retry_download:
-                                print(f'Retrying download {name}')
+                                tqdm.write(f'Retrying download {name}', file=sys.stderr)
                                 success = download_file(remote_file, local_file)
                             if success:
                                 downloaded_files[name] = local_file
                             else:
-                                warnings.warn(
-                                    f'Failed to download {name} via {url.scheme.upper()}.',
-                                    UserWarning,
-                                    stacklevel=2,
-                                )
+                                with tqdm.external_write_mode(file=sys.stderr):
+                                    warnings.warn(
+                                        f'Failed to download {name} via {url.scheme.upper()}.',
+                                        UserWarning,
+                                        stacklevel=2,
+                                    )
 
                     if all(os.path.basename(file) in downloaded_files for file in matching_files):
                         return sorted(downloaded_files.values())
@@ -397,12 +399,13 @@ class FileFinder:
                         success = True
                         break
                     except (OSError, HTTPException, ValueError) as e:
-                        warnings.warn(
-                            f'HTTPS download error for {os.path.basename(local_file_path)} '
-                            f'(attempt {attempt + 1}/{max_attempts}, {size} bytes): {e!s}',
-                            UserWarning,
-                            stacklevel=2,
-                        )
+                        with tqdm.external_write_mode(file=sys.stderr):
+                            warnings.warn(
+                                f'HTTPS download error for {os.path.basename(local_file_path)} '
+                                f'(attempt {attempt + 1}/{max_attempts}, {size} bytes): {e!s}',
+                                UserWarning,
+                                stacklevel=2,
+                            )
                         if isinstance(e, ValueError):
                             break
                         if isinstance(e, HTTPError):
@@ -417,12 +420,15 @@ class FileFinder:
                         if stalled_attempts >= 2 or attempt + 1 == max_attempts:
                             break
                         action = f'Resuming from {size} bytes' if size and validator else 'Retrying'
-                        print(f'{action}: {os.path.basename(local_file_path)}')
+                        tqdm.write(
+                            f'{action}: {os.path.basename(local_file_path)}', file=sys.stderr
+                        )
             if success:
                 os.replace(temporary_path, local_file_path)
             return success
         except OSError as e:
-            warnings.warn(f'HTTPS download error: {e!s}', UserWarning, stacklevel=2)
+            with tqdm.external_write_mode(file=sys.stderr):
+                warnings.warn(f'HTTPS download error: {e!s}', UserWarning, stacklevel=2)
             return False
         finally:
             if temporary_path is not None and os.path.exists(temporary_path):
@@ -446,7 +452,8 @@ class FileFinder:
         except ftplib.all_errors as e:
             if isinstance(e, ftplib.error_perm) and str(e).startswith('550'):
                 self._ftp_listing_cache.pop(self.ftp_url, None)
-            warnings.warn(f'FTP download error: {e!s}', UserWarning, stacklevel=2)
+            with tqdm.external_write_mode(file=sys.stderr):
+                warnings.warn(f'FTP download error: {e!s}', UserWarning, stacklevel=2)
             return False
         finally:
             if temporary_path is not None and os.path.exists(temporary_path):
@@ -472,13 +479,13 @@ class FileFinder:
                 with suppress(Exception):
                     self.ftp_connection.close()
                 self.ftp_connection = None
-                print('FTP connection lost, reconnecting...')
+                tqdm.write('FTP connection lost, reconnecting...', file=sys.stderr)
 
             try:
                 self.ftp_connection = ftplib.FTP_TLS(ftp_host, timeout=timeout)
                 self.ftp_connection.login(user=ftp_user, passwd=ftp_pass)
                 self.ftp_connection.prot_p()
-                print(f'Connected to FTP: {ftp_host}')
+                tqdm.write(f'Connected to FTP: {ftp_host}', file=sys.stderr)
                 return
             except ftplib.all_errors as e:
                 self.ftp_connection = None
