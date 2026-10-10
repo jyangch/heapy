@@ -1,0 +1,28 @@
+cff-version: 1.2.0
+message: >-
+  If you use HEAPY in your research, please cite this software in your
+  reference list and state the version used in your methods section.
+type: software
+version: "0.2.3"
+date-released: "2026-10-10"
+title: "HEAPY: A Python toolkit for data reduction, temporal analysis, and spectral extraction of X-ray and gamma-ray transients"
+authors:
+  - family-names: Yang
+    given-names: Jun
+    orcid: "https://orcid.org/0000-0002-5485-5042"
+repository-code: "https://github.com/jyangch/heapy"
+url: "https://github.com/jyangch/heapy"
+abstract: >-
+  HEAPY is a Python toolkit for data reduction, temporal analysis, and
+  spectral extraction of X-ray and gamma-ray transients. It provides mission archive data retrieval,
+  event reduction, light-curve extraction, background fitting, signal
+  detection, OGIP spectral products, duration and spectral-lag measurements,
+  and localization tools for high-energy astrophysics research.
+license: GPL-3.0-only
+keywords:
+  - astronomy
+  - high-energy astrophysics
+  - gamma-ray bursts
+  - X-ray transients
+  - temporal analysis
+  - spectral analysis

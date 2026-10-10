@@ -1,7 +1,7 @@
 <h1 align="center">HEAPY</h1>
 
 <p align="center">
-  <strong>A unified toolkit for timing and spectral analysis of X-ray and gamma-ray transient data.</strong>
+  <strong>A Python toolkit for data reduction, temporal analysis, and spectral extraction of X-ray and gamma-ray transients.</strong>
 </p>
 
 <p align="center">
@@ -12,8 +12,8 @@
 
 ---
 
-`Heapy` is a Python toolkit for timing and spectral analysis of X-ray and
-gamma-ray transient data. It pulls event and response data from mission
+`Heapy` is a Python toolkit for data reduction, temporal analysis, and
+spectral extraction of X-ray and gamma-ray transients. It pulls event and response data from mission
 archives, reduces time-tagged-event (TTE) and image data into light curves
 and OGIP spectra, separates burst signals from fitted backgrounds, and
 measures durations, spectral lags, and source localizations — across
@@ -87,6 +87,36 @@ pip3 install ./gbm_drm_gen
 
 Browse the [examples](https://github.com/jyangch/heapy/tree/main/examples)
 for typical workflows end to end.
+
+
+## Citation
+
+If you use `HEAPY` in your research, please include a software citation in
+your reference list and state the version used in your methods section.
+Citation metadata are available in [CITATION.cff](CITATION.cff).
+
+Until a DOI-backed release is available, the repository can be cited as:
+
+> Yang, J. HEAPY: A Python toolkit for data reduction, temporal analysis, and
+> spectral extraction of X-ray and gamma-ray transients [Computer software].
+> https://github.com/jyangch/heapy
+
+```bibtex
+@software{heapy,
+  author = {Yang, Jun},
+  title = {{HEAPY}: A Python toolkit for data reduction, temporal analysis, and
+           spectral extraction of X-ray and gamma-ray transients},
+  url = {https://github.com/jyangch/heapy}
+}
+```
+
+For example, adapt the following sentence to the analysis performed:
+
+> We processed the Fermi/GBM event data and measured burst durations using
+> HEAPY version X.Y.Z (Yang; see the software reference).
+
+Replace `X.Y.Z` with the version actually used. Please also cite the
+original method papers and mission tools relevant to your analysis.
 
 
 ## License
