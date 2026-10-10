@@ -1,7 +1,7 @@
 <h1 align="center">HEAPY</h1>
 
 <p align="center">
-  <strong>A unified toolkit for timing and spectral analysis of X-ray and gamma-ray transient data.</strong>
+  <strong>A Python toolkit for data reduction, timing analysis, and spectral extraction of X-ray and gamma-ray transients.</strong>
 </p>
 
 <p align="center">
@@ -12,8 +12,8 @@
 
 ---
 
-`Heapy` is a Python toolkit for timing and spectral analysis of X-ray and
-gamma-ray transient data. It pulls event and response data from mission
+`Heapy` is a Python toolkit for data reduction, timing analysis, and
+spectral extraction of X-ray and gamma-ray transients. It pulls event and response data from mission
 archives, reduces time-tagged-event (TTE) and image data into light curves
 and OGIP spectra, separates burst signals from fitted backgrounds, and
 measures durations, spectral lags, and source localizations — across
@@ -97,15 +97,15 @@ Citation metadata are available in [CITATION.cff](CITATION.cff).
 
 Until a DOI-backed release is available, the repository can be cited as:
 
-> Yang, J. HEAPY: A unified toolkit for timing and spectral analysis of
-> X-ray and gamma-ray transient data [Computer software].
+> Yang, J. HEAPY: A Python toolkit for data reduction, timing analysis, and
+> spectral extraction of X-ray and gamma-ray transients [Computer software].
 > https://github.com/jyangch/heapy
 
 ```bibtex
 @software{heapy,
   author = {Yang, Jun},
-  title = {{HEAPY}: A unified toolkit for timing and spectral analysis of
-           X-ray and gamma-ray transient data},
+  title = {{HEAPY}: A Python toolkit for data reduction, timing analysis, and
+           spectral extraction of X-ray and gamma-ray transients},
   url = {https://github.com/jyangch/heapy}
 }
 ```
