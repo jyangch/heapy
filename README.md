@@ -6,6 +6,7 @@
 
 <p align="center">
   <a href="https://pypi.org/project/heapyx/"><img alt="PyPI" src="https://img.shields.io/pypi/v/heapyx?color=4F46E5&labelColor=1f2937&logo=pypi&logoColor=white"></a>
+  <a href="https://doi.org/10.5281/zenodo.23283842"><img alt="DOI" src="https://zenodo.org/badge/DOI/10.5281/zenodo.23283842.svg"></a>
   <a href="https://github.com/jyangch/heapy/tree/main/examples"><img alt="Examples" src="https://img.shields.io/badge/docs-examples-06B6D4?labelColor=1f2937"></a>
   <a href="https://www.gnu.org/licenses/gpl-3.0"><img alt="License GPL-3.0" src="https://img.shields.io/badge/license-GPL--3.0-9CA3AF?labelColor=1f2937"></a>
 </p>
@@ -95,18 +96,22 @@ If you use `HEAPY` in your research, please include a software citation in
 your reference list and state the version used in your methods section.
 Citation metadata are available in [CITATION.cff](CITATION.cff).
 
-Until a DOI-backed release is available, the repository can be cited as:
+HEAPY version `0.2.3` is archived on Zenodo and can be cited as:
 
-> Yang, J. HEAPY: A Python toolkit for data reduction, temporal analysis, and
-> spectral extraction of X-ray and gamma-ray transients [Computer software].
-> https://github.com/jyangch/heapy
+> Yang, J. (2026). HEAPY: A Python toolkit for data reduction, temporal analysis, and
+> spectral extraction of X-ray and gamma-ray transients (v0.2.3) [Computer software].
+> Zenodo. https://doi.org/10.5281/zenodo.23283842
 
 ```bibtex
 @software{heapy,
   author = {Yang, Jun},
   title = {{HEAPY}: A Python toolkit for data reduction, temporal analysis, and
            spectral extraction of X-ray and gamma-ray transients},
-  url = {https://github.com/jyangch/heapy}
+  year = {2026},
+  version = {v0.2.3},
+  publisher = {Zenodo},
+  doi = {10.5281/zenodo.23283842},
+  url = {https://doi.org/10.5281/zenodo.23283842}
 }
 ```
 

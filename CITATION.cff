@@ -4,6 +4,7 @@ message: >-
   reference list and state the version used in your methods section.
 type: software
 version: "0.2.3"
+doi: "10.5281/zenodo.23283842"
 date-released: "2026-10-10"
 title: "HEAPY: A Python toolkit for data reduction, temporal analysis, and spectral extraction of X-ray and gamma-ray transients"
 authors:
