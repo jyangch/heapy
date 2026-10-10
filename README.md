@@ -89,6 +89,36 @@ Browse the [examples](https://github.com/jyangch/heapy/tree/main/examples)
 for typical workflows end to end.
 
 
+## Citation
+
+If you use `HEAPY` in your research, please include a software citation in
+your reference list and state the version used in your methods section.
+Citation metadata are available in [CITATION.cff](CITATION.cff).
+
+Until a DOI-backed release is available, the repository can be cited as:
+
+> Yang, J. HEAPY: A unified toolkit for timing and spectral analysis of
+> X-ray and gamma-ray transient data [Computer software].
+> https://github.com/jyangch/heapy
+
+```bibtex
+@software{heapy,
+  author = {Yang, Jun},
+  title = {{HEAPY}: A unified toolkit for timing and spectral analysis of
+           X-ray and gamma-ray transient data},
+  url = {https://github.com/jyangch/heapy}
+}
+```
+
+For example, adapt the following sentence to the analysis performed:
+
+> We processed the Fermi/GBM event data and measured burst durations using
+> HEAPY version X.Y.Z (Yang; see the software reference).
+
+Replace `X.Y.Z` with the version actually used. Please also cite the
+original method papers and mission tools relevant to your analysis.
+
+
 ## License
 
 `Heapy` is distributed under the
