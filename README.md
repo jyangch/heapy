@@ -49,7 +49,7 @@ reduction and response generation.
 
 ## Installation
 
-`Heapy` is available on PyPI:
+`Heapy` requires Python 3.10 or later and is available on PyPI:
 
 ```bash
 pip install heapyx

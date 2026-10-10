@@ -22,7 +22,6 @@ from astropy.io import fits
 from astropy.time import Time
 from astropy.units import UnitsWarning
 from astropy.utils.metadata import MergeConflictWarning
-from gbm_drm_gen.drmgen_tte import DRMGenTTE
 import numpy as np
 import plotly.express as px
 import plotly.graph_objs as go
@@ -1789,6 +1788,16 @@ class gbmTTE(Event):
         """
 
         assert self.posfile is not None, 'posfile is not set, cannot extract response'
+
+        try:
+            from gbm_drm_gen.drmgen_tte import DRMGenTTE
+        except ModuleNotFoundError as exc:
+            if exc.name != 'gbm_drm_gen':
+                raise
+            raise ImportError(
+                'GBM response generation requires gbm_drm_gen; '
+                'see the optional Fermi GBM response generator installation in README.md.'
+            ) from exc
 
         savepath = os.path.abspath(savepath)
 

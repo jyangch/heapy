@@ -3,11 +3,11 @@ from pathlib import Path
 from setuptools import find_packages, setup
 
 _info_ = {}
-with open('heapy/__info__.py') as f:
-    exec(f.read(), _info_)
+root = Path(__file__).resolve().parent
+exec((root / 'heapy' / '__info__.py').read_text(encoding='utf-8'), _info_)
 
 
-readme_path = Path(__file__).parent / 'README.md'
+readme_path = root / 'README.md'
 long_description = readme_path.read_text(encoding='utf-8')
 
 
@@ -28,7 +28,7 @@ setup(
         'Operating System :: MacOS',
         'Topic :: Scientific/Engineering :: Astronomy',
     ],
-    python_requires='>=3.8',
+    python_requires='>=3.10',
     install_requires=[
         'numpy>=1.20.4',
         'pandas>=1.4.2',
@@ -39,9 +39,12 @@ setup(
         'plotly>=5.22.0',
         'kaleido>=0.2.1',
         'pybaselines>=1.1.0',
-        'pycwt>=0.3',
+        'pycwt>=0.3.0a22',
+        'scikit-learn>=1.0',
+        'healpy>=1.16',
+        'cartopy>=0.21',
     ],
-    packages=find_packages(exclude=['examples*']),
+    packages=find_packages(exclude=['examples*', 'tests*']),
     include_package_data=True,
     package_data={
         'heapy': [
