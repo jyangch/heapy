@@ -110,15 +110,6 @@ Until a DOI-backed release is available, the repository can be cited as:
 }
 ```
 
-For example, adapt the following sentence to the analysis performed:
-
-> We processed the Fermi/GBM event data and measured burst durations using
-> HEAPY version X.Y.Z (Yang; see the software reference).
-
-Replace `X.Y.Z` with the version actually used. Please also cite the
-original method papers and mission tools relevant to your analysis.
-
-
 ## License
 
 `Heapy` is distributed under the
