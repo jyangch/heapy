@@ -94,7 +94,8 @@ for typical workflows end to end.
 
 If you use `HEAPY` in your research, please include a software citation in
 your reference list and state the version used in your methods section.
-Citation metadata are available in [CITATION.cff](CITATION.cff).
+Citation metadata are available in [CITATION.cff](CITATION.cff), with a
+downloadable BibTeX entry in [CITATION.bib](CITATION.bib).
 
 HEAPY version `0.2.3` is archived on Zenodo and can be cited as:
 
