@@ -7,7 +7,7 @@ Bundles four groups of utilities consumed by :mod:`heapy.auto.signal`:
   :func:`intervals_equal`).
 - Bayesian-blocks driver :func:`time_rescaling_bblock` that wraps
   ``astropy.stats.bayesian_blocks`` with optional non-stationary
-  background correction (Scargle 2013, Appendix B).
+  background correction via time rescaling.
 - One-bin SNR estimators (:func:`pg_snr`, :func:`pp_snr`,
   :func:`gauss_snr`) wrapping :mod:`heapy.util.significance`.
 - :class:`SignalPlotter`, the composable two-panel diagnostic figure
@@ -56,11 +56,11 @@ def time_rescaling_bblock(t, cts=None, bkg_integral=None, p0=0.05):
 
     When ``bkg_integral`` is supplied, transforms the time axis via
     ``tau(t) = integral_0^t B(s) ds`` so the inhomogeneous Poisson
-    process becomes homogeneous (Scargle 2013, Appendix B), runs
-    ``events`` mode Bayesian blocks in ``tau``-space, then maps the
-    resulting edges back to the original time axis through cubic
-    interpolation on the ``(tau, t)`` pairs. Without ``bkg_integral``,
-    delegates to ``astropy.stats.bayesian_blocks`` unchanged.
+    process becomes a homogeneous one with rate 1, runs ``events``
+    mode Bayesian blocks (Scargle et al. 2013) in ``tau``-space, then
+    maps the resulting edges back to the original time axis by
+    Voronoi-midpoint lookup. Without ``bkg_integral``, delegates to
+    ``astropy.stats.bayesian_blocks`` unchanged.
 
     Args:
         t: Photon arrival times (``cts=None``, unbinned branch) or
