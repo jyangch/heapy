@@ -118,6 +118,7 @@ class Txx:
         if len(pulse) > 0 and not isinstance(pulse[0], (list, tuple, np.ndarray)):
             pulse = [pulse]
         self.pulse = [list(p) for p in pulse]
+        self.detected_pulse = [list(p) for p in pulse]
 
         self.backscale = backscale
 
@@ -325,10 +326,10 @@ class Txx:
         Args:
             xx: Cumulative count fraction defining the duration, e.g. ``0.9``
                 for T90 or ``0.5`` for T50.
-            pulse: Override pulse interval(s). Either a single ``[pstart,
-                pstop]`` pair or a list of such pairs (``[]`` clears the
-                pulse to "none detected"); ``None`` keeps the existing
-                ``self.pulse``.
+            pulse: Override pulse interval(s) for this call only. Either a
+                single ``[pstart, pstop]`` pair or a list of such pairs
+                (``[]`` clears the pulse to "none detected"); ``None`` uses
+                the detected pulse (``self.detected_pulse``).
             lbkg: Length of the background window to the left of the first
                 pulse, in the same time units as the light curve. ``None``
                 extends to the beginning of the data.
@@ -343,14 +344,14 @@ class Txx:
 
         if getattr(self, 'pulse', None) is None:
             self.find_pulse()
-        detected_pulse = [list(p) for p in self.pulse]
+        detected_pulse = [list(p) for p in self.detected_pulse]
 
         user_pulse = None
         if pulse is not None:
             if len(pulse) > 0 and not isinstance(pulse[0], (list, tuple, np.ndarray)):
                 pulse = [pulse]
             user_pulse = [list(p) for p in pulse]
-            self.pulse = user_pulse
+        self.pulse = detected_pulse if user_pulse is None else user_pulse
 
         self.pstart = np.sort([p[0] for p in self.pulse])
         self.pstop = np.sort([p[1] for p in self.pulse])

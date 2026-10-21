@@ -870,8 +870,8 @@ class batPipe:
                 estimate (e.g. ``0.9`` gives T90).
             pulse: Manual override for the pulse interval(s). Either a single
                 ``[pstart, pstop]`` pair or a list of such pairs (``[]`` clears
-                the pulse to "none detected"); ``None`` keeps the existing
-                ``self.pulse``.
+                the pulse to "none detected"); ``None`` uses the pulse detected
+                by ``find_pulse``.
             lbkg: Left background interval as ``[t1, t2]`` in seconds relative
                 to ``timezero``.  Auto-selected when ``None``.
             rbkg: Right background interval as ``[t1, t2]`` in seconds relative

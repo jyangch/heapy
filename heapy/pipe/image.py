@@ -1077,8 +1077,8 @@ class Image:
             xx: Fraction of total counts to enclose; e.g. 0.9 for T90.
             pulse: Manual override for the pulse interval(s). Either a single
                 ``[pstart, pstop]`` pair or a list of such pairs (``[]`` clears
-                the pulse to "none detected"); ``None`` keeps the existing
-                ``self.pulse``.
+                the pulse to "none detected"); ``None`` uses the pulse detected
+                by ``find_pulse``.
             lbkg: Left background window ``[t1, t2]``, or ``None``.
             rbkg: Right background window ``[t1, t2]``, or ``None``.
             savepath: Directory where duration results are written.
