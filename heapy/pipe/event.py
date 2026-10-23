@@ -1225,11 +1225,12 @@ class Event:
 
             pha_hdu = self._to_pha_fits(
                 phaii[i],
-                np.sqrt(phaii[i]),
+                None,
                 exps[i],
                 self.timezero + left,
                 self.timezero + right,
                 file_name,
+                poisson=True,
             )
 
             if os.path.isfile(savepath + f'/{file_name}'):
@@ -1426,7 +1427,7 @@ class Event:
         self.extract_src_phaii(savepath=savepath)
         self.extract_bkg_phaii(savepath=savepath, poisson_binsize=poisson_binsize, show=show)
 
-    def _to_pha_fits(self, pha, pha_err, exp, tstart, tstop, file_name):
+    def _to_pha_fits(self, pha, pha_err, exp, tstart, tstop, file_name, poisson=False):
 
         hdr = fits.Header()
         hdr['HDUCLASS'] = ('ogip', 'Format conforms to OGIP/GSFC conventions')
@@ -1437,24 +1438,31 @@ class Event:
         hdr['DATE'] = (Time.now().isot, 'file generated date')
         primary_hdu = fits.PrimaryHDU(header=hdr)
 
+        # source is raw integer Poisson counts (POISSERR=True); background carries a
+        # fitted Gaussian STAT_ERR column (POISSERR=False)
         channel_field = fits.Column(name='CHANNEL', array=self.channel, format='I')
         counts_field = fits.Column(name='COUNTS', array=pha, format='E', unit='count')
-        stat_err_field = fits.Column(name='STAT_ERR', array=pha_err, format='E', unit='count')
-        spectrum_hdu = fits.BinTableHDU.from_columns([channel_field, counts_field, stat_err_field])
+        fields = [channel_field, counts_field]
+        if not poisson:
+            stat_err_field = fits.Column(name='STAT_ERR', array=pha_err, format='E', unit='count')
+            fields.append(stat_err_field)
+        spectrum_hdu = fits.BinTableHDU.from_columns(fields)
 
         spectrum_hdu.header['TTYPE1'] = ('CHANNEL', 'label for field 1')
         spectrum_hdu.header['TFORM1'] = ('I', 'data format of field: 2-byte INTEGER')
         spectrum_hdu.header['TTYPE2'] = ('COUNTS', 'label for field 2')
         spectrum_hdu.header['TFORM2'] = ('E', 'data format of field: 32-bit SINGLE FLOAT')
         spectrum_hdu.header['TUNIT2'] = ('count', 'physical unit of field')
-        spectrum_hdu.header['TTYPE3'] = ('STAT_ERR', 'label for field 3')
-        spectrum_hdu.header['TFORM3'] = ('E', 'data format of field: 32-bit SINGLE FLOAT')
-        spectrum_hdu.header['TUNIT3'] = ('count', 'physical unit of field')
+        if not poisson:
+            spectrum_hdu.header['TTYPE3'] = ('STAT_ERR', 'label for field 3')
+            spectrum_hdu.header['TFORM3'] = ('E', 'data format of field: 32-bit SINGLE FLOAT')
+            spectrum_hdu.header['TUNIT3'] = ('count', 'physical unit of field')
         spectrum_hdu.header['EXTNAME'] = ('SPECTRUM', 'name of this binary table extension')
         spectrum_hdu.header['TLMIN1'] = (np.min(self.channel), 'Lowest legal channel number')
         spectrum_hdu.header['TLMAX1'] = (np.max(self.channel), 'Highest legal channel number')
-        spectrum_hdu.header['POISSERR'] = (False, 'Poissonian errors to be assumed')
-        spectrum_hdu.header['STAT_ERR'] = (0, 'no statisical error specified')
+        spectrum_hdu.header['POISSERR'] = (poisson, 'Poissonian errors to be assumed')
+        if not poisson:
+            spectrum_hdu.header['STAT_ERR'] = (0, 'no statisical error specified')
         spectrum_hdu.header['SYS_ERR'] = (0, 'no systematic error specified')
         spectrum_hdu.header['QUALITY'] = (0, 'no data quality information specified')
         spectrum_hdu.header['GROUPING'] = (0, 'no grouping data has been specified')
