@@ -59,3 +59,9 @@ tests/
 # Claude Code / Gemini Antigravity local state
 .claude/
 .gemini_worktree
+
+# AI agent collaboration files
+/AGENTS.md
+/AGENT_LOG.md
+/CLAUDE.md
+/read_peer_chat.py
