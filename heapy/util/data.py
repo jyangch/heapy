@@ -596,6 +596,111 @@ def find_peak(dt, mode='unbinned', ts=None, edges=None, counts=None):
     raise ValueError(f"unsupported mode: {mode!r}; expected 'unbinned' or 'binned'")
 
 
+def simulate_peak_ratio(dt, ref_dt, edges, counts, bkg_counts=None, counts_err=None):
+    """Bootstrap the ratio of the peak rates on two window widths of a binned light curve.
+
+    The peak rate on a width is the largest rolling sum of net counts over
+    ``round(width / binsize)`` bins divided by the width, as :func:`find_peak`
+    in ``'binned'`` mode, and the ratio is the peak rate on ``dt`` over that
+    on ``ref_dt``. Taking the largest window of a noisy light curve biases a
+    peak rate upwards, more so for a short window with few counts, and so
+    biases the ratio. The light curve is resampled 1000 times (seed 450001)
+    with the observed counts as the expectation: Poisson total counts minus
+    the fixed background when ``bkg_counts`` is given, or Gaussian net
+    counts with ``counts_err`` (e.g. mask-weighted BAT light curves). Bins
+    with NaN counts (data gaps) are taken as empty.
+
+    Args:
+        dt: Window width of the numerator peak rate, in seconds.
+        ref_dt: Window width of the denominator peak rate, in seconds.
+        edges: Equal-width bin edges (length ``N+1``).
+        counts: Total counts per bin with ``bkg_counts``, or net counts per
+            bin with ``counts_err``.
+        bkg_counts: Background counts per bin (Poisson resampling).
+        counts_err: 1-sigma errors of the net counts per bin (Gaussian
+            resampling).
+
+    Returns:
+        A tuple ``(ratio, bias, spread)``: the ratio of the observed light
+        curve; the median log10 ratio of the resampled curves minus
+        log10 ``ratio``, in dex; and half the 16th-84th percentile range of
+        the resampled log10 ratios, in dex. ``ratio * 10 ** -bias`` is the
+        bias-corrected ratio.
+
+    Raises:
+        ValueError: If not exactly one of ``bkg_counts`` and ``counts_err``
+            is given, the ``edges``/``counts`` lengths are inconsistent, the
+            edges are not equal width, or a window is shorter than one bin
+            or longer than the light curve.
+    """
+
+    if (bkg_counts is None) == (counts_err is None):
+        raise ValueError('expected exactly one of bkg_counts and counts_err')
+
+    bin_edges = np.asarray(edges, dtype=float)
+    bin_counts = np.array(counts, dtype=float)
+    if bin_edges.size != bin_counts.size + 1:
+        raise ValueError(
+            f'edges (length {bin_edges.size}) must have one more element than '
+            f'counts (length {bin_counts.size})'
+        )
+
+    bin_widths = np.diff(bin_edges)
+    bin_width = float(bin_widths[0])
+    if not np.allclose(bin_widths, bin_width):
+        raise ValueError('expected equal-width edges')
+
+    bins_per_window = [round(width / bin_width) for width in (dt, ref_dt)]
+    if min(bins_per_window) < 1 or max(bins_per_window) > bin_counts.size:
+        raise ValueError(
+            f'windows of {bins_per_window} bins do not fit {bin_counts.size} bins of {bin_width}s'
+        )
+
+    # data gaps carry neither source nor background counts
+    gap = ~np.isfinite(bin_counts)
+    bin_counts[gap] = 0.0
+    if bkg_counts is not None:
+        bin_bkg = np.array(bkg_counts, dtype=float)
+        bin_bkg[gap] = 0.0
+        net_counts = bin_counts - bin_bkg
+    else:
+        bin_err = np.nan_to_num(np.asarray(counts_err, dtype=float))
+        net_counts = bin_counts
+
+    def calculate_ratio(net):
+        """Peak-rate ratio of each row of net counts per bin."""
+
+        cumulative_net = np.cumsum(net, axis=-1)
+        cumulative_net = np.concatenate(
+            (np.zeros((*cumulative_net.shape[:-1], 1)), cumulative_net), axis=-1
+        )
+        peak_rates = [
+            (cumulative_net[..., nbin:] - cumulative_net[..., :-nbin]).max(axis=-1) / width
+            for nbin, width in zip(bins_per_window, (dt, ref_dt), strict=True)
+        ]
+
+        return peak_rates[0] / peak_rates[1]
+
+    ratio = float(calculate_ratio(net_counts))
+
+    # resample in 10 chunks of 100 curves to bound the memory of long, finely binned light curves
+    rng = np.random.default_rng(450001)
+    log_ratios = []
+    for _ in range(10):
+        size = (100, bin_counts.size)
+        if bkg_counts is not None:
+            sample = rng.poisson(lam=bin_counts, size=size) - bin_bkg
+        else:
+            sample = rng.normal(loc=bin_counts, scale=bin_err, size=size)
+        log_ratios.append(np.log10(calculate_ratio(sample)))
+
+    log_ratios = np.concatenate(log_ratios)
+    bias = float(np.median(log_ratios) - np.log10(ratio))
+    spread = float(0.5 * np.diff(np.percentile(log_ratios, [16, 84]))[0])
+
+    return ratio, bias, spread
+
+
 def split_bool_mask(mask, times, selection_value=False):
     """Convert a boolean mask into time intervals where the mask equals a value.
 
